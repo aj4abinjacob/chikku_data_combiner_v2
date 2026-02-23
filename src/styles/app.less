@@ -1,0 +1,206 @@
+@import "~@blueprintjs/core/lib/css/blueprint.css";
+@import "~@blueprintjs/icons/lib/css/blueprint-icons.css";
+@import "~@blueprintjs/popover2/lib/css/blueprint-popover2.css";
+
+:root {
+  --sidebar-width: 280px;
+  --toolbar-height: 40px;
+  --statusbar-height: 28px;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #f5f8fa; // BlueprintJS light-gray-5
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+}
+
+// ── Toolbar ──
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  height: var(--toolbar-height);
+  background: #fff;
+  border-bottom: 1px solid #d8e1e8;
+  flex-shrink: 0;
+}
+
+// ── Main layout: sidebar + data grid ──
+.main-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+// ── Sidebar ──
+.sidebar {
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  background: #fff;
+  border-right: 1px solid #d8e1e8;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+
+  .sidebar-section {
+    padding: 8px 12px;
+    border-bottom: 1px solid #e1e8ed;
+
+    h4 {
+      margin: 0 0 8px;
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #5c7080;
+      letter-spacing: 0.5px;
+    }
+  }
+
+  .table-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 13px;
+
+    .table-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .row-count {
+      color: #5c7080;
+      font-size: 11px;
+      flex-shrink: 0;
+      margin-left: 8px;
+    }
+  }
+
+  .column-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+    font-size: 13px;
+
+    .column-type {
+      color: #5c7080;
+      font-size: 11px;
+    }
+  }
+}
+
+// ── Data grid area ──
+.data-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.data-grid-container {
+  flex: 1;
+  overflow: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-family: "SF Mono", "Menlo", "Monaco", monospace;
+
+  th {
+    position: sticky;
+    top: 0;
+    background: #f5f8fa;
+    border-bottom: 2px solid #d8e1e8;
+    padding: 6px 12px;
+    text-align: left;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+
+    &:hover {
+      background: #ebf1f5;
+    }
+
+    .sort-indicator {
+      margin-left: 4px;
+      color: #5c7080;
+    }
+  }
+
+  td {
+    padding: 4px 12px;
+    border-bottom: 1px solid #e1e8ed;
+    white-space: nowrap;
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  tr:hover td {
+    background: #f5f8fa;
+  }
+}
+
+// ── Status bar ──
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  height: var(--statusbar-height);
+  background: #fff;
+  border-top: 1px solid #d8e1e8;
+  font-size: 12px;
+  color: #5c7080;
+  flex-shrink: 0;
+}
+
+// ── Pagination ──
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+// ── Welcome screen ──
+.welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #5c7080;
+  gap: 16px;
+
+  h2 {
+    margin: 0;
+    color: #394b59;
+  }
+
+  p {
+    margin: 0;
+  }
+}
+
+// ── Column operations dialog ──
+.column-op-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 400px;
+}
