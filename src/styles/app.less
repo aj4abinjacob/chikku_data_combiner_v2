@@ -239,6 +239,88 @@ html, body, #root {
   }
 }
 
+// ── Filter panel ──
+.filter-panel {
+  flex-shrink: 0;
+  max-height: 220px;
+  background: #fff;
+  border-top: 1px solid #d8e1e8;
+  display: flex;
+  flex-direction: column;
+}
+
+.filter-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: #f5f8fa;
+  border-bottom: 1px solid #e1e8ed;
+}
+
+.filter-panel-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #5c7080;
+  letter-spacing: 0.5px;
+}
+
+.filter-panel-header-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.filter-panel-body {
+  overflow-y: auto;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  .filter-col-select {
+    width: 160px;
+    flex-shrink: 0;
+  }
+
+  .filter-op-select {
+    width: 120px;
+    flex-shrink: 0;
+  }
+
+  .filter-value-input {
+    flex: 1;
+    min-width: 80px;
+  }
+}
+
+.filter-panel-footer {
+  padding: 4px 10px 6px;
+  border-top: 1px solid #e1e8ed;
+  display: flex;
+  justify-content: flex-end;
+}
+
+// ── Sidebar actions gap ──
+.sidebar .sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 // ── Column operations dialog ──
 .column-op-form {
   display: flex;

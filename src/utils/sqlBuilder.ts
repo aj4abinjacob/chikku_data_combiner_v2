@@ -46,6 +46,23 @@ function buildFilterClause(filter: FilterCondition): string {
   // Escape single quotes in value
   const val = filter.value.replace(/'/g, "''");
 
+  if (filter.operator === "CONTAINS") {
+    // Case-insensitive contains — escape LIKE wildcards in user input
+    const escaped = val.replace(/%/g, "\\%").replace(/_/g, "\\_");
+    return `${col} ILIKE '%${escaped}%'`;
+  }
+
+  if (filter.operator === "IN") {
+    // Comma-separated list of values
+    const items = filter.value
+      .split(",")
+      .map((v) => v.trim().replace(/'/g, "''"))
+      .filter((v) => v.length > 0)
+      .map((v) => `'${v}'`);
+    if (items.length === 0) return "1=0";
+    return `${col} IN (${items.join(", ")})`;
+  }
+
   if (filter.operator === "LIKE" || filter.operator === "NOT LIKE") {
     return `${col} ${filter.operator} '${val}'`;
   }

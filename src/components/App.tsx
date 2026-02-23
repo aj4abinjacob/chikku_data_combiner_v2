@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@blueprintjs/core";
-import { LoadedTable, ViewState, ColumnInfo } from "../types";
+import { LoadedTable, ViewState, ColumnInfo, FilterCondition } from "../types";
 import { Sidebar } from "./Sidebar";
 import { DataGrid } from "./DataGrid";
+import { FilterPanel } from "./FilterPanel";
 import { StatusBar } from "./StatusBar";
 import { buildSelectQuery, buildCombineQuery, buildCountQuery } from "../utils/sqlBuilder";
 
@@ -20,6 +21,7 @@ export function App(): React.ReactElement {
   const [tables, setTables] = useState<LoadedTable[]>([]);
   const [activeTable, setActiveTable] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [schema, setSchema] = useState<ColumnInfo[]>([]);
   const [rows, setRows] = useState<any[]>([]);
   const [totalRows, setTotalRows] = useState(0);
@@ -63,7 +65,8 @@ export function App(): React.ReactElement {
       if (newTables.length > 0) {
         setActiveTable(newTables[0].tableName);
         // Reset view state so columns get auto-populated on next render
-        setViewState((prev) => ({ ...prev, visibleColumns: [], offset: 0 }));
+        setViewState((prev) => ({ ...prev, visibleColumns: [], filters: [], offset: 0 }));
+        setFilterPanelOpen(false);
       }
     },
     [] // stable — uses refs for latest state
@@ -146,7 +149,7 @@ export function App(): React.ReactElement {
         return [...without, combinedTable];
       });
       setActiveTable("combined");
-      setViewState((prev) => ({ ...prev, visibleColumns: [], offset: 0 }));
+      setViewState((prev) => ({ ...prev, visibleColumns: [], filters: [], offset: 0 }));
     } catch (err) {
       console.error("Combine error:", err);
     }
@@ -183,6 +186,11 @@ export function App(): React.ReactElement {
     setViewState((prev) => ({ ...prev, offset: newOffset }));
   }, []);
 
+  // Filters
+  const handleFiltersChange = useCallback((filters: FilterCondition[]) => {
+    setViewState((prev) => ({ ...prev, filters, offset: 0 }));
+  }, []);
+
   // Column operation: run SQL to add/replace column
   const handleColumnOperation = useCallback(
     async (sql: string) => {
@@ -211,12 +219,14 @@ export function App(): React.ReactElement {
             visibleColumns={viewState.visibleColumns}
             onSelectTable={(name) => {
               setActiveTable(name);
-              setViewState((prev) => ({ ...prev, visibleColumns: [], offset: 0 }));
+              setViewState((prev) => ({ ...prev, visibleColumns: [], filters: [], offset: 0 }));
             }}
             onToggleColumn={toggleColumn}
             onColumnOperation={handleColumnOperation}
             onCombine={handleCombine}
             onHide={() => setSidebarVisible(false)}
+            filterPanelOpen={filterPanelOpen}
+            onToggleFilterPanel={() => setFilterPanelOpen((v) => !v)}
           />
         ) : (
           <div className="sidebar-collapsed">
@@ -231,13 +241,22 @@ export function App(): React.ReactElement {
         )}
         <div className="data-area">
           {hasData ? (
-            <DataGrid
-              rows={rows}
-              columns={viewState.visibleColumns}
-              sortColumn={viewState.sortColumn}
-              sortDirection={viewState.sortDirection}
-              onSort={handleSort}
-            />
+            <>
+              <DataGrid
+                rows={rows}
+                columns={viewState.visibleColumns}
+                sortColumn={viewState.sortColumn}
+                sortDirection={viewState.sortDirection}
+                onSort={handleSort}
+              />
+              {filterPanelOpen && (
+                <FilterPanel
+                  columns={schema}
+                  activeFilters={viewState.filters}
+                  onApplyFilters={handleFiltersChange}
+                />
+              )}
+            </>
           ) : (
             <div className="welcome">
               <h2>Chikku Data Combiner</h2>

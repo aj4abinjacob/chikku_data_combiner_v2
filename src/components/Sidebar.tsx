@@ -37,11 +37,13 @@ interface SidebarProps {
   activeTable: string | null;
   schema: ColumnInfo[];
   visibleColumns: string[];
+  filterPanelOpen: boolean;
   onSelectTable: (tableName: string) => void;
   onToggleColumn: (colName: string) => void;
   onColumnOperation: (sql: string) => void;
   onCombine: () => void;
   onHide: () => void;
+  onToggleFilterPanel: () => void;
 }
 
 export function Sidebar({
@@ -49,11 +51,13 @@ export function Sidebar({
   activeTable,
   schema,
   visibleColumns,
+  filterPanelOpen,
   onSelectTable,
   onToggleColumn,
   onColumnOperation,
   onCombine,
   onHide,
+  onToggleFilterPanel,
 }: SidebarProps): React.ReactElement {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [opType, setOpType] = useState<OpType>("extract_number");
@@ -191,9 +195,17 @@ export function Sidebar({
         </div>
       )}
 
-      {/* Column operation button */}
+      {/* Column operation + filter buttons */}
       {activeTable && schema.length > 0 && (
         <div className="sidebar-section sidebar-actions">
+          <Button
+            icon="filter"
+            text="Filters"
+            onClick={onToggleFilterPanel}
+            active={filterPanelOpen}
+            small
+            fill
+          />
           <Button
             icon="column-layout"
             text="Column Operation"
