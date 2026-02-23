@@ -47,9 +47,8 @@ function buildFilterClause(filter: FilterCondition): string {
   const val = filter.value.replace(/'/g, "''");
 
   if (filter.operator === "CONTAINS") {
-    // Case-insensitive contains — escape LIKE wildcards in user input
-    const escaped = val.replace(/%/g, "\\%").replace(/_/g, "\\_");
-    return `${col} ILIKE '%${escaped}%'`;
+    // Case-insensitive regex match — supports plain text and regex patterns
+    return `regexp_matches(CAST(${col} AS VARCHAR), '${val}', 'i')`;
   }
 
   if (filter.operator === "IN") {

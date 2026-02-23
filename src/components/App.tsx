@@ -253,6 +253,7 @@ export function App(): React.ReactElement {
                 <FilterPanel
                   columns={schema}
                   activeFilters={viewState.filters}
+                  activeTable={activeTable}
                   onApplyFilters={handleFiltersChange}
                 />
               )}
