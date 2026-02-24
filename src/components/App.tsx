@@ -29,6 +29,7 @@ export function App(): React.ReactElement {
   const [totalRows, setTotalRows] = useState(0);
   const [viewState, setViewState] = useState<ViewState>({
     visibleColumns: [],
+    columnOrder: [],
     filters: [],
     sortColumn: null,
     sortDirection: "ASC",
@@ -67,7 +68,7 @@ export function App(): React.ReactElement {
       if (newTables.length > 0) {
         setActiveTable(newTables[0].tableName);
         // Reset view state so columns get auto-populated on next render
-        setViewState((prev) => ({ ...prev, visibleColumns: [], filters: [], offset: 0 }));
+        setViewState((prev) => ({ ...prev, visibleColumns: [], columnOrder: [], filters: [], offset: 0 }));
         setFilterPanelOpen(false);
       }
     },
@@ -105,7 +106,7 @@ export function App(): React.ReactElement {
         // If no visible columns set, show all and update state
         if (viewState.visibleColumns.length === 0) {
           const allCols = desc.map((c: ColumnInfo) => c.column_name);
-          setViewState((prev) => ({ ...prev, visibleColumns: allCols }));
+          setViewState((prev) => ({ ...prev, visibleColumns: allCols, columnOrder: allCols }));
           // Don't query yet — the state update will re-trigger this effect
           return;
         }
@@ -155,7 +156,7 @@ export function App(): React.ReactElement {
         return [...without, combinedTable];
       });
       setActiveTable("combined");
-      setViewState((prev) => ({ ...prev, visibleColumns: [], filters: [], offset: 0 }));
+      setViewState((prev) => ({ ...prev, visibleColumns: [], columnOrder: [], filters: [], offset: 0 }));
       setCombineDialogOpen(false);
     } catch (err) {
       console.error("Combine error:", err);
@@ -170,6 +171,18 @@ export function App(): React.ReactElement {
           ? prev.visibleColumns.filter((c) => c !== colName)
           : [...prev.visibleColumns, colName];
         return { ...prev, visibleColumns: visible, offset: 0 };
+      });
+    },
+    []
+  );
+
+  // Column reorder from sidebar drag
+  const reorderColumns = useCallback(
+    (newOrder: string[]) => {
+      setViewState((prev) => {
+        const visibleSet = new Set(prev.visibleColumns);
+        const newVisible = newOrder.filter((col) => visibleSet.has(col));
+        return { ...prev, columnOrder: newOrder, visibleColumns: newVisible, offset: 0 };
       });
     },
     []
@@ -205,7 +218,7 @@ export function App(): React.ReactElement {
       try {
         await window.api.exec(sql);
         // Refresh schema and data
-        setViewState((prev) => ({ ...prev, visibleColumns: [] }));
+        setViewState((prev) => ({ ...prev, visibleColumns: [], columnOrder: [] }));
       } catch (err) {
         console.error("Column operation error:", err);
       }
@@ -224,11 +237,13 @@ export function App(): React.ReactElement {
             activeTable={activeTable}
             schema={schema}
             visibleColumns={viewState.visibleColumns}
+            columnOrder={viewState.columnOrder}
             onSelectTable={(name) => {
               setActiveTable(name);
-              setViewState((prev) => ({ ...prev, visibleColumns: [], filters: [], offset: 0 }));
+              setViewState((prev) => ({ ...prev, visibleColumns: [], columnOrder: [], filters: [], offset: 0 }));
             }}
             onToggleColumn={toggleColumn}
+            onReorderColumns={reorderColumns}
             onColumnOperation={handleColumnOperation}
             onCombine={handleCombineOpen}
             onHide={() => setSidebarVisible(false)}

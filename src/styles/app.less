@@ -106,12 +106,54 @@ html, body, #root {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 2px 0;
+    padding: 5px 8px;
+    margin-bottom: 3px;
     font-size: 13px;
+    cursor: default;
+    position: relative;
+    background: #fff;
+    border: 1px solid #d8e1e8;
+    border-radius: 4px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    transition: box-shadow 0.15s, border-color 0.15s;
+
+    &:hover {
+      border-color: #bfccd6;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .drag-handle {
+      cursor: grab;
+      opacity: 0.35;
+      flex-shrink: 0;
+
+      &:active {
+        cursor: grabbing;
+      }
+    }
+
+    &:hover .drag-handle {
+      opacity: 0.8;
+    }
+
+    &.dragging {
+      opacity: 0.4;
+    }
+
+    &.drag-over-top {
+      border-top: 2px solid #137cbd;
+      padding-top: 4px;
+    }
+
+    &.drag-over-bottom {
+      border-bottom: 2px solid #137cbd;
+      padding-bottom: 4px;
+    }
 
     .column-type {
       color: #5c7080;
       font-size: 11px;
+      margin-left: auto;
     }
   }
 

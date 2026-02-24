@@ -43,6 +43,7 @@ export interface ColumnMapping {
 
 export interface ViewState {
   visibleColumns: string[];
+  columnOrder: string[];
   filters: FilterCondition[];
   sortColumn: string | null;
   sortDirection: "ASC" | "DESC";

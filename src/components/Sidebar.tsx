@@ -37,9 +37,11 @@ interface SidebarProps {
   activeTable: string | null;
   schema: ColumnInfo[];
   visibleColumns: string[];
+  columnOrder: string[];
   filterPanelOpen: boolean;
   onSelectTable: (tableName: string) => void;
   onToggleColumn: (colName: string) => void;
+  onReorderColumns: (newOrder: string[]) => void;
   onColumnOperation: (sql: string) => void;
   onCombine: () => void;
   onHide: () => void;
@@ -51,9 +53,11 @@ export function Sidebar({
   activeTable,
   schema,
   visibleColumns,
+  columnOrder,
   filterPanelOpen,
   onSelectTable,
   onToggleColumn,
+  onReorderColumns,
   onColumnOperation,
   onCombine,
   onHide,
@@ -65,6 +69,71 @@ export function Sidebar({
   const [targetCol, setTargetCol] = useState("");
   const [param1, setParam1] = useState("");
   const [param2, setParam2] = useState("");
+
+  // Drag-and-drop state
+  const dragIndexRef = React.useRef<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ index: number; position: "top" | "bottom" } | null>(null);
+
+  // Build a lookup map from schema for column types
+  const colTypeMap = React.useMemo(() => {
+    const map = new Map<string, string>();
+    schema.forEach((col) => map.set(col.column_name, col.column_type));
+    return map;
+  }, [schema]);
+
+  // Use columnOrder if available, otherwise fall back to schema order
+  const orderedColumns = columnOrder.length > 0
+    ? columnOrder.map((name) => schema.find((c) => c.column_name === name)).filter(Boolean) as ColumnInfo[]
+    : schema;
+
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    dragIndexRef.current = index;
+    e.dataTransfer.effectAllowed = "move";
+    // Make the drag image slightly transparent
+    const target = e.currentTarget as HTMLElement;
+    target.classList.add("dragging");
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragIndexRef.current === null || dragIndexRef.current === index) {
+      setDropTarget(null);
+      return;
+    }
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    const position = e.clientY < midY ? "top" : "bottom";
+    setDropTarget({ index, position });
+  };
+
+  const handleDragLeave = () => {
+    setDropTarget(null);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const fromIndex = dragIndexRef.current;
+    if (fromIndex === null || !dropTarget) return;
+
+    const newOrder = [...orderedColumns.map((c) => c.column_name)];
+    const [moved] = newOrder.splice(fromIndex, 1);
+    let toIndex = dropTarget.index;
+    // Adjust index after removal
+    if (fromIndex < toIndex) toIndex--;
+    if (dropTarget.position === "bottom") toIndex++;
+    newOrder.splice(toIndex, 0, moved);
+
+    onReorderColumns(newOrder);
+    dragIndexRef.current = null;
+    setDropTarget(null);
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    (e.currentTarget as HTMLElement).classList.remove("dragging");
+    dragIndexRef.current = null;
+    setDropTarget(null);
+  };
 
   const resetForm = () => {
     setSourceCol("");
@@ -181,15 +250,33 @@ export function Sidebar({
       {schema.length > 0 && (
         <div className="sidebar-section">
           <h4>Columns</h4>
-          {schema.map((col) => (
-            <div key={col.column_name} className="column-item">
+          {orderedColumns.map((col, index) => (
+            <div
+              key={col.column_name}
+              className={`column-item${
+                dropTarget?.index === index
+                  ? ` drag-over-${dropTarget.position}`
+                  : ""
+              }`}
+              draggable
+              onDragStart={(e) => handleDragStart(e, index)}
+              onDragOver={(e) => handleDragOver(e, index)}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onDragEnd={handleDragEnd}
+            >
+              <Icon
+                icon="drag-handle-vertical"
+                size={12}
+                className="drag-handle"
+              />
               <Checkbox
                 checked={visibleColumns.includes(col.column_name)}
                 onChange={() => onToggleColumn(col.column_name)}
                 style={{ marginBottom: 0 }}
               />
               <span>{col.column_name}</span>
-              <span className="column-type">{col.column_type}</span>
+              <span className="column-type">{colTypeMap.get(col.column_name)}</span>
             </div>
           ))}
         </div>
