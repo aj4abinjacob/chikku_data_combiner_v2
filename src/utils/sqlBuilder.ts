@@ -56,6 +56,22 @@ function buildFilterClause(filter: FilterCondition): string {
     return `${col} IN (${items.join(", ")})`;
   }
 
+  if (filter.operator === "STARTS WITH") {
+    return `CAST(${col} AS VARCHAR) LIKE '${val}%'`;
+  }
+
+  if (filter.operator === "NOT STARTS WITH") {
+    return `CAST(${col} AS VARCHAR) NOT LIKE '${val}%'`;
+  }
+
+  if (filter.operator === "ENDS WITH") {
+    return `CAST(${col} AS VARCHAR) LIKE '%${val}'`;
+  }
+
+  if (filter.operator === "NOT ENDS WITH") {
+    return `CAST(${col} AS VARCHAR) NOT LIKE '%${val}'`;
+  }
+
   if (filter.operator === "LIKE" || filter.operator === "NOT LIKE") {
     return `${col} ${filter.operator} '${val}'`;
   }
