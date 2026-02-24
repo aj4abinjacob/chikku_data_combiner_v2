@@ -423,7 +423,6 @@ export function FilterPanel({
                         ? "text or regex"
                         : "value"
                     }
-                    small
                     onKeyDown={(e) => {
                       if (e.key === "Enter") applyFilters();
                     }}
