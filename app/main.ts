@@ -3,11 +3,17 @@ import path from "path";
 import log from "electron-log";
 import { Database } from "duckdb";
 
-let mainWindow: BrowserWindow | null = null;
-let db: Database;
+// Per-window DuckDB instances, keyed by webContents.id
+const dbMap = new Map<number, Database>();
+
+function getDb(event: Electron.IpcMainInvokeEvent): Database {
+  const db = dbMap.get(event.sender.id);
+  if (!db) throw new Error("No database for this window");
+  return db;
+}
 
 function createWindow(): void {
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 800,
@@ -20,20 +26,26 @@ function createWindow(): void {
     },
   });
 
-  mainWindow.loadFile(path.join(__dirname, "index.html"));
+  // Create a fresh in-memory DuckDB for this window
+  const db = new Database(":memory:");
+  dbMap.set(win.webContents.id, db);
+  log.info(`DuckDB initialized for window ${win.webContents.id}`);
+
+  win.loadFile(path.join(__dirname, "index.html"));
 
   if (process.env.NODE_ENV === "development") {
-    mainWindow.webContents.openDevTools();
+    win.webContents.openDevTools();
   }
 
-  mainWindow.on("closed", () => {
-    mainWindow = null;
+  win.on("closed", () => {
+    const oldDb = dbMap.get(win.webContents.id);
+    if (oldDb) {
+      oldDb.close(() => {
+        log.info(`DuckDB closed for window ${win.webContents.id}`);
+      });
+      dbMap.delete(win.webContents.id);
+    }
   });
-}
-
-function initDatabase(): void {
-  db = new Database(":memory:");
-  log.info("DuckDB initialized (in-memory)");
 }
 
 function buildMenu(): void {
@@ -55,7 +67,10 @@ function buildMenu(): void {
         {
           label: "Export Combined CSV...",
           accelerator: "CmdOrCtrl+E",
-          click: () => mainWindow?.webContents.send("export-csv"),
+          click: () => {
+            const win = BrowserWindow.getFocusedWindow();
+            if (win) win.webContents.send("export-csv");
+          },
         },
         { type: "separator" },
         { role: "quit" },
@@ -111,24 +126,26 @@ function buildMenu(): void {
 }
 
 async function handleOpenCSV(): Promise<void> {
-  if (!mainWindow) return;
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const win = BrowserWindow.getFocusedWindow();
+  if (!win) return;
+  const result = await dialog.showOpenDialog(win, {
     properties: ["openFile", "multiSelections"],
     filters: [{ name: "CSV Files", extensions: ["csv", "tsv"] }],
   });
   if (!result.canceled && result.filePaths.length > 0) {
-    mainWindow.webContents.send("open-files", result.filePaths);
+    win.webContents.send("open-files", result.filePaths);
   }
 }
 
 async function handleAddCSV(): Promise<void> {
-  if (!mainWindow) return;
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const win = BrowserWindow.getFocusedWindow();
+  if (!win) return;
+  const result = await dialog.showOpenDialog(win, {
     properties: ["openFile", "multiSelections"],
     filters: [{ name: "CSV Files", extensions: ["csv", "tsv"] }],
   });
   if (!result.canceled && result.filePaths.length > 0) {
-    mainWindow.webContents.send("add-files", result.filePaths);
+    win.webContents.send("add-files", result.filePaths);
   }
 }
 
@@ -137,7 +154,8 @@ async function handleAddCSV(): Promise<void> {
 // Load a CSV file into DuckDB and return schema + preview rows
 ipcMain.handle(
   "db:load-csv",
-  async (_event, filePath: string, tableName: string) => {
+  async (event, filePath: string, tableName: string) => {
+    const db = getDb(event);
     return new Promise((resolve, reject) => {
       const safeTable = tableName.replace(/[^a-zA-Z0-9_]/g, "_");
       db.run(
@@ -170,7 +188,8 @@ ipcMain.handle(
 );
 
 // Run a SQL query and return results
-ipcMain.handle("db:query", async (_event, sql: string) => {
+ipcMain.handle("db:query", async (event, sql: string) => {
+  const db = getDb(event);
   return new Promise((resolve, reject) => {
     db.all(sql, (err: Error | null, rows: any[]) => {
       if (err) return reject(err.message);
@@ -180,7 +199,8 @@ ipcMain.handle("db:query", async (_event, sql: string) => {
 });
 
 // Run a SQL statement (no results expected)
-ipcMain.handle("db:exec", async (_event, sql: string) => {
+ipcMain.handle("db:exec", async (event, sql: string) => {
+  const db = getDb(event);
   return new Promise((resolve, reject) => {
     db.run(sql, (err: Error | null) => {
       if (err) return reject(err.message);
@@ -190,7 +210,8 @@ ipcMain.handle("db:exec", async (_event, sql: string) => {
 });
 
 // Get table schema
-ipcMain.handle("db:describe", async (_event, tableName: string) => {
+ipcMain.handle("db:describe", async (event, tableName: string) => {
+  const db = getDb(event);
   return new Promise((resolve, reject) => {
     db.all(`DESCRIBE "${tableName}"`, (err: Error | null, rows: any[]) => {
       if (err) return reject(err.message);
@@ -200,7 +221,8 @@ ipcMain.handle("db:describe", async (_event, tableName: string) => {
 });
 
 // List all tables
-ipcMain.handle("db:tables", async () => {
+ipcMain.handle("db:tables", async (event) => {
+  const db = getDb(event);
   return new Promise((resolve, reject) => {
     db.all("SHOW TABLES", (err: Error | null, rows: any[]) => {
       if (err) return reject(err.message);
@@ -210,9 +232,10 @@ ipcMain.handle("db:tables", async () => {
 });
 
 // Save dialog for export
-ipcMain.handle("dialog:save-csv", async () => {
-  if (!mainWindow) return null;
-  const result = await dialog.showSaveDialog(mainWindow, {
+ipcMain.handle("dialog:save-csv", async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return null;
+  const result = await dialog.showSaveDialog(win, {
     filters: [{ name: "CSV Files", extensions: ["csv"] }],
   });
   return result.canceled ? null : result.filePath;
@@ -221,7 +244,8 @@ ipcMain.handle("dialog:save-csv", async () => {
 // Export query results to CSV via DuckDB
 ipcMain.handle(
   "db:export-csv",
-  async (_event, sql: string, filePath: string) => {
+  async (event, sql: string, filePath: string) => {
+    const db = getDb(event);
     return new Promise((resolve, reject) => {
       db.run(
         `COPY (${sql}) TO '${filePath.replace(/'/g, "''")}' (HEADER, DELIMITER ',')`,
@@ -237,13 +261,11 @@ ipcMain.handle(
 // ── App Lifecycle ──
 
 app.whenReady().then(() => {
-  initDatabase();
   buildMenu();
   createWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      initDatabase();
       createWindow();
     }
   });
