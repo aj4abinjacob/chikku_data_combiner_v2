@@ -37,13 +37,14 @@ function createWindow(): void {
     win.webContents.openDevTools();
   }
 
+  const wcId = win.webContents.id;
   win.on("closed", () => {
-    const oldDb = dbMap.get(win.webContents.id);
+    const oldDb = dbMap.get(wcId);
     if (oldDb) {
       oldDb.close(() => {
-        log.info(`DuckDB closed for window ${win.webContents.id}`);
+        log.info(`DuckDB closed for window ${wcId}`);
       });
-      dbMap.delete(win.webContents.id);
+      dbMap.delete(wcId);
     }
   });
 }
