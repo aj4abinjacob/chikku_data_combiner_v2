@@ -50,9 +50,11 @@ export function useChunkCache({
     loadingRef.current = new Set();
     lruRef.current = [];
     generationRef.current += 1;
-    setTotalRows(0);
 
-    if (!tableName || !enabled) return;
+    if (!tableName || !enabled) {
+      setTotalRows(0);
+      return;
+    }
 
     const gen = generationRef.current;
 

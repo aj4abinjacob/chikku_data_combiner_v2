@@ -24,6 +24,7 @@ export function App(): React.ReactElement {
   const [combineDialogOpen, setCombineDialogOpen] = useState(false);
   const [schema, setSchema] = useState<ColumnInfo[]>([]);
   const [resetKey, setResetKey] = useState(0);
+  const [schemaVersion, setSchemaVersion] = useState(0);
   const [viewState, setViewState] = useState<ViewState>({
     visibleColumns: [],
     columnOrder: [],
@@ -69,7 +70,7 @@ export function App(): React.ReactElement {
 
       if (newTables.length > 0) {
         setActiveTable(newTables[0].tableName);
-        setViewState((prev) => ({ ...prev, visibleColumns: [], columnOrder: [], filters: [] }));
+        setViewState((prev) => ({ ...prev, filters: [] }));
         setResetKey((k) => k + 1);
         setFilterPanelOpen(false);
       }
@@ -95,7 +96,7 @@ export function App(): React.ReactElement {
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When active table changes, refresh schema
+  // When active table changes, refresh schema and reset columns
   useEffect(() => {
     if (!activeTable) return;
 
@@ -103,18 +104,15 @@ export function App(): React.ReactElement {
       try {
         const desc = await window.api.describe(activeTable);
         setSchema(desc);
-
-        if (viewState.visibleColumns.length === 0) {
-          const allCols = desc.map((c: ColumnInfo) => c.column_name);
-          setViewState((prev) => ({ ...prev, visibleColumns: allCols, columnOrder: allCols }));
-        }
+        const allCols = desc.map((c: ColumnInfo) => c.column_name);
+        setViewState((prev) => ({ ...prev, visibleColumns: allCols, columnOrder: allCols }));
       } catch (err) {
         console.error("Schema fetch error:", err);
       }
     };
 
     fetchSchema();
-  }, [activeTable, viewState.visibleColumns.length]);
+  }, [activeTable, schemaVersion]);
 
   // Open the column mapping dialog
   const handleCombineOpen = useCallback(() => {
@@ -144,7 +142,7 @@ export function App(): React.ReactElement {
         return [...without, combinedTable];
       });
       setActiveTable("combined");
-      setViewState((prev) => ({ ...prev, visibleColumns: [], columnOrder: [], filters: [] }));
+      setViewState((prev) => ({ ...prev, filters: [] }));
       setResetKey((k) => k + 1);
       setCombineDialogOpen(false);
     } catch (err) {
@@ -223,7 +221,7 @@ export function App(): React.ReactElement {
       if (!activeTable) return;
       try {
         await window.api.exec(sql);
-        setViewState((prev) => ({ ...prev, visibleColumns: [], columnOrder: [] }));
+        setSchemaVersion((v) => v + 1);
         setResetKey((k) => k + 1);
       } catch (err) {
         console.error("Column operation error:", err);
@@ -246,7 +244,7 @@ export function App(): React.ReactElement {
             columnOrder={viewState.columnOrder}
             onSelectTable={(name) => {
               setActiveTable(name);
-              setViewState((prev) => ({ ...prev, visibleColumns: [], columnOrder: [], filters: [] }));
+              setViewState((prev) => ({ ...prev, filters: [] }));
               setResetKey((k) => k + 1);
             }}
             onToggleColumn={toggleColumn}
