@@ -14,7 +14,7 @@ import {
 import { LoadedTable, ColumnInfo } from "../types";
 
 type OpType =
-  | "extract_number"
+  | "regex_extract"
   | "trim"
   | "upper"
   | "lower"
@@ -23,7 +23,7 @@ type OpType =
   | "custom_sql";
 
 const OP_LABELS: Record<OpType, string> = {
-  extract_number: "Extract Number",
+  regex_extract: "Regex Extract",
   trim: "Trim Whitespace",
   upper: "To Uppercase",
   lower: "To Lowercase",
@@ -64,7 +64,7 @@ export function Sidebar({
   onToggleFilterPanel,
 }: SidebarProps): React.ReactElement {
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [opType, setOpType] = useState<OpType>("extract_number");
+  const [opType, setOpType] = useState<OpType>("regex_extract");
   const [sourceCol, setSourceCol] = useState("");
   const [targetCol, setTargetCol] = useState("");
   const [param1, setParam1] = useState("");
@@ -140,7 +140,7 @@ export function Sidebar({
     setTargetCol("");
     setParam1("");
     setParam2("");
-    setOpType("extract_number");
+    setOpType("regex_extract");
   };
 
   const handleApply = () => {
@@ -150,9 +150,12 @@ export function Sidebar({
     let expr = "";
 
     switch (opType) {
-      case "extract_number":
-        expr = `CAST(regexp_extract("${sourceCol}", '([0-9]+\\.?[0-9]*)', 1) AS DOUBLE)`;
+      case "regex_extract": {
+        const pattern = param1 || '(.+)';
+        const groupIdx = param2 || '1';
+        expr = `regexp_extract(CAST("${sourceCol}" AS VARCHAR), '${pattern.replace(/'/g, "''")}', ${groupIdx})`;
         break;
+      }
       case "trim":
         expr = `TRIM("${sourceCol}")`;
         break;
@@ -349,6 +352,25 @@ export function Sidebar({
                 placeholder={sourceCol || "new_column"}
               />
             </FormGroup>
+
+            {opType === "regex_extract" && (
+              <>
+                <FormGroup label="Pattern (regex)" helperText="Use a capture group, e.g. ([0-9]+)">
+                  <InputGroup
+                    value={param1}
+                    onChange={(e) => setParam1(e.target.value)}
+                    placeholder="([0-9]+\.?[0-9]*)"
+                  />
+                </FormGroup>
+                <FormGroup label="Capture Group Index" helperText="Which group to extract (default: 1)">
+                  <InputGroup
+                    value={param2}
+                    onChange={(e) => setParam2(e.target.value)}
+                    placeholder="1"
+                  />
+                </FormGroup>
+              </>
+            )}
 
             {opType === "replace_regex" && (
               <>

@@ -114,7 +114,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - "Combine N Tables" button (visible when 2+ tables loaded)
 - Column visibility checkboxes
 - Column Operation dialog with 7 operation types:
-  - `extract_number` — regex extract + cast to DOUBLE
+  - `regex_extract` — regexp_extract() with user-provided pattern + capture group index; casts source to VARCHAR first so it works on any data type
   - `trim` — TRIM()
   - `upper` / `lower` — UPPER() / LOWER()
   - `replace_regex` — regexp_replace() with pattern + replacement params
