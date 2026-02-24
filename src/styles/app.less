@@ -143,6 +143,11 @@ html, body, #root {
     border-radius: 4px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
     transition: box-shadow 0.15s, border-color 0.15s;
+    overflow: hidden;
+
+    .bp4-control {
+      flex-shrink: 0;
+    }
 
     &:hover {
       border-color: #bfccd6;
@@ -177,10 +182,20 @@ html, body, #root {
       padding-bottom: 4px;
     }
 
+    > span:not(.column-type) {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .column-type {
       color: #5c7080;
       font-size: 11px;
       margin-left: auto;
+      flex-shrink: 0;
+      white-space: nowrap;
     }
   }
 
