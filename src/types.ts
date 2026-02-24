@@ -23,7 +23,7 @@ export interface LoadedTable {
 }
 
 export interface ColumnOperation {
-  type: "regex_extract" | "replace_regex" | "substring" | "trim" | "upper" | "lower" | "custom_sql";
+  type: "regex_extract" | "replace_regex" | "substring" | "trim" | "upper" | "lower" | "custom_sql" | "create_column" | "delete_column" | "combine_columns";
   sourceColumn: string;
   targetColumn: string; // new column name, or same as source to replace
   params: Record<string, string>;

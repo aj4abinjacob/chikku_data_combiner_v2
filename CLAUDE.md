@@ -116,13 +116,16 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - **Selective combine**: checkboxes next to each table (visible when 2+ tables loaded) to select which tables to combine; `selectedForCombine: Set<string>` state cleaned up when tables change
 - "Combine N Selected" button (enabled when 2+ tables selected, passes selected names to `onCombine`)
 - Column visibility checkboxes
-- Column Operation dialog with 7 operation types:
+- Column Operation dialog with 10 operation types:
   - `regex_extract` — regexp_extract() with user-provided pattern + capture group index; casts source to VARCHAR first so it works on any data type
   - `trim` — TRIM()
   - `upper` / `lower` — UPPER() / LOWER()
   - `replace_regex` — regexp_replace() with pattern + replacement params
   - `substring` — SUBSTRING() with start + length params
   - `custom_sql` — arbitrary SQL expression
+  - `create_column` — adds a new column with a user-defined value (literal or SQL expression); no source column needed
+  - `delete_column` — removes a column from the table; prevents deleting the last column; red "Delete" button with warning callout
+  - `combine_columns` — concatenates 2+ selected columns with an optional separator; all columns cast to VARCHAR; multi-select checkboxes with numbered order badges
 - Filter panel toggle button
 
 ### DataGrid.tsx — Virtualized Scrollable Data Grid
