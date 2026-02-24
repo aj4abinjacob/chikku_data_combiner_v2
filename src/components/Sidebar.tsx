@@ -81,6 +81,7 @@ export function Sidebar({
   const [param1, setParam1] = useState("");
   const [param2, setParam2] = useState("");
   const [combineSourceCols, setCombineSourceCols] = useState<string[]>([]);
+  const [combineSearch, setCombineSearch] = useState("");
   const [previews, setPreviews] = useState<Array<{ original: string; result: string }>>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
@@ -210,32 +211,11 @@ export function Sidebar({
       return;
     }
 
-    // delete_column: no preview needed
-    if (opType === "delete_column") {
+    // delete_column and create_column: no preview needed
+    if (opType === "delete_column" || opType === "create_column") {
       setPreviews([]);
       setPreviewError(null);
       return;
-    }
-
-    // create_column: preview the expression result (no source column needed)
-    if (opType === "create_column") {
-      if (!param1) {
-        setPreviews([]);
-        setPreviewError(null);
-        return;
-      }
-      const timer = setTimeout(async () => {
-        try {
-          const sql = `SELECT CAST(${param1} AS VARCHAR) AS "result" FROM "${activeTable}" LIMIT 3`;
-          const rows = await window.api.query(sql);
-          setPreviews(rows.map((r: any) => ({ original: "", result: String(r.result ?? "") })));
-          setPreviewError(null);
-        } catch (e: any) {
-          setPreviews([]);
-          setPreviewError(e.message || "Preview failed");
-        }
-      }, 300);
-      return () => clearTimeout(timer);
     }
 
     // combine_columns: preview the concatenation result
@@ -292,6 +272,7 @@ export function Sidebar({
     setParam1("");
     setParam2("");
     setCombineSourceCols([]);
+    setCombineSearch("");
     setOpType("regex_extract");
     setPreviews([]);
     setPreviewError(null);
@@ -322,8 +303,9 @@ export function Sidebar({
         .join(", ");
       finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT ${otherCols} FROM "${activeTable}"`;
     } else if (opType === "create_column") {
-      if (!targetCol || !param1) return;
-      finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT *, ${param1} AS "${targetCol}" FROM "${activeTable}"`;
+      if (!targetCol) return;
+      const valueExpr = param1 || "NULL";
+      finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT *, ${valueExpr} AS "${targetCol}" FROM "${activeTable}"`;
     } else if (opType === "combine_columns") {
       if (combineSourceCols.length < 2 || !targetCol) return;
       const concatExpr = buildCombineExpression(combineSourceCols, param1);
@@ -563,7 +545,7 @@ export function Sidebar({
             {opType === "create_column" && (
               <FormGroup
                 label="Value"
-                helperText={`Enter a value (e.g. 0, 'unknown') or SQL expression (e.g. "price" * 1.1)`}
+                helperText={`Leave empty for NULL. Or enter a value (e.g. 0, 'unknown') or SQL expression (e.g. "price" * 1.1)`}
               >
                 <InputGroup
                   value={param1}
@@ -578,30 +560,43 @@ export function Sidebar({
               <>
                 <FormGroup label="Columns to Combine" helperText="Select 2 or more columns. They will be concatenated in the order selected.">
                   <div className="combine-col-list">
-                    {schema.map((col) => {
-                      const isSelected = combineSourceCols.includes(col.column_name);
-                      const orderIndex = combineSourceCols.indexOf(col.column_name);
-                      return (
-                        <div key={col.column_name} className="combine-col-item">
-                          <Checkbox
-                            checked={isSelected}
-                            onChange={() => {
-                              if (isSelected) {
-                                setCombineSourceCols((prev) => prev.filter((c) => c !== col.column_name));
-                              } else {
-                                setCombineSourceCols((prev) => [...prev, col.column_name]);
-                              }
-                            }}
-                            style={{ marginBottom: 0 }}
-                          />
-                          <span>{col.column_name}</span>
-                          <span className="column-type">{col.column_type}</span>
-                          {isSelected && (
-                            <span className="combine-order-badge">{orderIndex + 1}</span>
-                          )}
-                        </div>
-                      );
-                    })}
+                    <div className="combine-col-search">
+                      <InputGroup
+                        leftIcon="search"
+                        placeholder="Search columns..."
+                        value={combineSearch}
+                        onChange={(e) => setCombineSearch(e.target.value)}
+                        small
+                      />
+                    </div>
+                    <div className="combine-col-items">
+                      {schema
+                        .filter((col) => col.column_name.toLowerCase().includes(combineSearch.toLowerCase()))
+                        .map((col) => {
+                          const isSelected = combineSourceCols.includes(col.column_name);
+                          const orderIndex = combineSourceCols.indexOf(col.column_name);
+                          return (
+                            <div key={col.column_name} className={`combine-col-item${isSelected ? " selected" : ""}`}>
+                              <Checkbox
+                                checked={isSelected}
+                                onChange={() => {
+                                  if (isSelected) {
+                                    setCombineSourceCols((prev) => prev.filter((c) => c !== col.column_name));
+                                  } else {
+                                    setCombineSourceCols((prev) => [...prev, col.column_name]);
+                                  }
+                                }}
+                                style={{ marginBottom: 0 }}
+                              />
+                              <span className="combine-col-name">{col.column_name}</span>
+                              <span className="column-type">{col.column_type}</span>
+                              <span className={`combine-order-badge${isSelected ? " visible" : ""}`}>
+                                {isSelected ? orderIndex + 1 : ""}
+                              </span>
+                            </div>
+                          );
+                        })}
+                    </div>
                   </div>
                 </FormGroup>
                 <FormGroup label="Separator" helperText="String to insert between column values (can be empty)">
@@ -685,7 +680,7 @@ export function Sidebar({
             )}
 
             {/* Preview — shown for operations that produce a result */}
-            {opType !== "delete_column" && (previews.length > 0 || previewError) && (
+            {opType !== "delete_column" && opType !== "create_column" && (previews.length > 0 || previewError) && (
               <div className="op-preview">
                 <div className="op-preview-header">Preview</div>
                 {previewError ? (
@@ -694,14 +689,14 @@ export function Sidebar({
                   <table className="op-preview-table">
                     <thead>
                       <tr>
-                        {opType !== "create_column" && opType !== "combine_columns" && <th>Original</th>}
+                        {opType !== "combine_columns" && <th>Original</th>}
                         <th>Result</th>
                       </tr>
                     </thead>
                     <tbody>
                       {previews.map((p, i) => (
                         <tr key={i}>
-                          {opType !== "create_column" && opType !== "combine_columns" && <td>{p.original}</td>}
+                          {opType !== "combine_columns" && <td>{p.original}</td>}
                           <td>{p.result}</td>
                         </tr>
                       ))}
@@ -724,7 +719,7 @@ export function Sidebar({
                   opType === "delete_column"
                     ? !sourceCol || schema.length <= 1
                     : opType === "create_column"
-                    ? !targetCol || !param1
+                    ? !targetCol
                     : opType === "combine_columns"
                     ? combineSourceCols.length < 2 || !targetCol
                     : !sourceCol
