@@ -138,22 +138,27 @@ export function Sidebar({
   };
 
   const buildExpression = (op: OpType, col: string, p1: string, p2: string): string | null => {
+    // For string-based ops, cast to VARCHAR if the column isn't already a string type
+    const colType = colTypeMap.get(col) || "";
+    const isString = /^(VARCHAR|TEXT|STRING|CHAR)/i.test(colType);
+    const ref = isString ? `"${col}"` : `CAST("${col}" AS VARCHAR)`;
+
     switch (op) {
       case "regex_extract": {
         const pattern = p1 || "(.+)";
         const groupIdx = p2 || "1";
-        return `regexp_extract(CAST("${col}" AS VARCHAR), '${pattern.replace(/'/g, "''")}', ${groupIdx})`;
+        return `regexp_extract(${ref}, '${pattern.replace(/'/g, "''")}', ${groupIdx})`;
       }
       case "trim":
-        return `TRIM("${col}")`;
+        return `TRIM(${ref})`;
       case "upper":
-        return `UPPER("${col}")`;
+        return `UPPER(${ref})`;
       case "lower":
-        return `LOWER("${col}")`;
+        return `LOWER(${ref})`;
       case "replace_regex":
-        return `regexp_replace("${col}", '${p1.replace(/'/g, "''")}', '${p2.replace(/'/g, "''")}')`;
+        return `regexp_replace(${ref}, '${p1.replace(/'/g, "''")}', '${p2.replace(/'/g, "''")}')`;
       case "substring":
-        return `SUBSTRING("${col}", ${p1 || "1"}, ${p2 || "10"})`;
+        return `SUBSTRING(${ref}, ${p1 || "1"}, ${p2 || "10"})`;
       case "custom_sql":
         return p1 || null;
       default:
