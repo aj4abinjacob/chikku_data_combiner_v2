@@ -83,6 +83,7 @@ export function DataGrid({
     }
     setSelected(new Set());
     anchor.current = null;
+    rangeRef.current = null; // force ensureRange to re-fire
   }, [resetKey]);
 
   // Calculate initial column widths when columns change

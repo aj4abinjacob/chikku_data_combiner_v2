@@ -41,7 +41,10 @@ export function useChunkCache({
   const tableNameRef = useRef(tableName);
   tableNameRef.current = tableName;
 
-  // Reset cache when table, filters, sort, or columns change
+  // Stable key for visible columns — sorted so reordering doesn't trigger reset
+  const visibleColumnsKey = [...viewState.visibleColumns].sort().join(",");
+
+  // Reset cache when table, filters, sort, or column set changes
   useEffect(() => {
     cacheRef.current = new Map();
     loadingRef.current = new Set();
@@ -71,7 +74,7 @@ export function useChunkCache({
     viewState.filters,
     viewState.sortColumn,
     viewState.sortDirection,
-    viewState.visibleColumns,
+    visibleColumnsKey,
   ]);
 
   const fetchChunk = useCallback(

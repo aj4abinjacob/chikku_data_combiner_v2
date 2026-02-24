@@ -174,7 +174,6 @@ export function App(): React.ReactElement {
         const newVisible = newOrder.filter((col) => visibleSet.has(col));
         return { ...prev, columnOrder: newOrder, visibleColumns: newVisible };
       });
-      setResetKey((k) => k + 1);
     },
     []
   );
@@ -195,7 +194,6 @@ export function App(): React.ReactElement {
         }
         return { ...prev, columnOrder: newColumnOrder, visibleColumns: newVisible };
       });
-      setResetKey((k) => k + 1);
     },
     []
   );
