@@ -60,9 +60,15 @@ function InValuePicker({
   const [uniqueValues, setUniqueValues] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
+  const [listFilter, setListFilter] = useState<"all" | "selected" | "not-selected">("all");
   const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
   const dropdownRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
+
+  // Reset list filter when dropdown closes
+  useEffect(() => {
+    if (!open) setListFilter("all");
+  }, [open]);
 
   // Position the dropdown and close on outside click
   useEffect(() => {
@@ -74,7 +80,7 @@ function InValuePicker({
       setPos({
         top: rect.top,
         left: rect.left,
-        width: Math.max(rect.width, 260),
+        width: Math.max(rect.width, 300),
       });
     }
 
@@ -139,11 +145,12 @@ function InValuePicker({
 
   const clearAll = () => onChange("");
 
-  const filtered = search
-    ? uniqueValues.filter((v) =>
-        v.toLowerCase().includes(search.toLowerCase())
-      )
-    : uniqueValues;
+  const filtered = uniqueValues.filter((v) => {
+    if (search && !v.toLowerCase().includes(search.toLowerCase())) return false;
+    if (listFilter === "selected" && !selected.has(v)) return false;
+    if (listFilter === "not-selected" && selected.has(v)) return false;
+    return true;
+  });
 
   const dropdown = open
     ? ReactDOM.createPortal(
@@ -169,6 +176,21 @@ function InValuePicker({
             <div className="in-value-dropdown-actions">
               <Button small minimal text="All" onClick={selectAll} />
               <Button small minimal text="None" onClick={clearAll} />
+              <span className="in-value-dropdown-separator" />
+              <Button
+                small
+                minimal
+                text="Selected"
+                active={listFilter === "selected"}
+                onClick={() => setListFilter(listFilter === "selected" ? "all" : "selected")}
+              />
+              <Button
+                small
+                minimal
+                text="Not Selected"
+                active={listFilter === "not-selected"}
+                onClick={() => setListFilter(listFilter === "not-selected" ? "all" : "not-selected")}
+              />
               <span className="in-value-dropdown-count">
                 {selected.size} / {uniqueValues.length}
               </span>

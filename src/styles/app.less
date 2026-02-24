@@ -498,7 +498,7 @@ html, body, #root {
   }
 
   .filter-value-input {
-    width: 220px;
+    width: 300px;
     flex-shrink: 0;
 
     // Match HTMLSelect appearance
@@ -518,7 +518,7 @@ html, body, #root {
   }
 
   .filter-value-btn {
-    width: 220px;
+    width: 300px;
     flex-shrink: 0;
     height: 30px;
   }
@@ -527,7 +527,7 @@ html, body, #root {
 
 // ── IN value picker ──
 .in-value-picker-wrapper {
-  width: 220px;
+  width: 300px;
   flex-shrink: 0;
 }
 
@@ -571,7 +571,20 @@ html, body, #root {
   .bp4-button {
     font-size: 11px;
     color: #137cbd;
+
+    &.bp4-active {
+      background: rgba(19, 124, 189, 0.12);
+      color: #106ba3;
+    }
   }
+}
+
+.in-value-dropdown-separator {
+  width: 1px;
+  height: 14px;
+  background: #d8e1e8;
+  margin: 0 2px;
+  flex-shrink: 0;
 }
 
 .in-value-dropdown-count {
