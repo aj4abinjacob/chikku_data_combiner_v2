@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@blueprintjs/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
+const TOOLTIP_DELAY = 600; // ms before tooltip appears
+
 const ROW_HEIGHT = 28;
 
 function cellKey(row: number, col: string): string {
@@ -35,6 +37,44 @@ export function DataGrid({
   const anchor = useRef<{ row: number; col: string } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // ── Cell tooltip state ──
+  const [tooltip, setTooltip] = useState<{
+    text: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleCellMouseEnter = useCallback(
+    (e: React.MouseEvent, value: string) => {
+      if (!value) return;
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      tooltipTimer.current = setTimeout(() => {
+        setTooltip({
+          text: value,
+          x: rect.left,
+          y: rect.top,
+        });
+      }, TOOLTIP_DELAY);
+    },
+    []
+  );
+
+  const handleCellMouseLeave = useCallback(() => {
+    if (tooltipTimer.current) {
+      clearTimeout(tooltipTimer.current);
+      tooltipTimer.current = null;
+    }
+    setTooltip(null);
+  }, []);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+    };
+  }, []);
 
   // ── Column resize state ──
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
@@ -373,34 +413,56 @@ export function DataGrid({
                   <div className="dg-cell dg-row-num-cell">
                     {virtualRow.index + 1}
                   </div>
-                  {columns.map((col) => (
-                    <div
-                      key={col}
-                      className={[
-                        "dg-cell",
-                        selected.has(cellKey(virtualRow.index, col))
-                          ? "cell-selected"
-                          : "",
-                        draggingColumn === col ? "column-dragging" : "",
-                        !loaded ? "loading-cell" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                      style={{ width: columnWidths[col] ?? 150 }}
-                      title={loaded ? String(row[col] ?? "") : ""}
-                      onClick={(e) =>
-                        handleCellClick(virtualRow.index, col, e)
-                      }
-                    >
-                      {loaded ? formatCell(row[col]) : "..."}
-                    </div>
-                  ))}
+                  {columns.map((col) => {
+                    const cellText = loaded ? formatCell(row[col]) : "...";
+                    return (
+                      <div
+                        key={col}
+                        className={[
+                          "dg-cell",
+                          selected.has(cellKey(virtualRow.index, col))
+                            ? "cell-selected"
+                            : "",
+                          draggingColumn === col ? "column-dragging" : "",
+                          !loaded ? "loading-cell" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        style={{ width: columnWidths[col] ?? 150 }}
+                        onClick={(e) =>
+                          handleCellClick(virtualRow.index, col, e)
+                        }
+                        onMouseEnter={(e) =>
+                          loaded
+                            ? handleCellMouseEnter(
+                                e,
+                                String(row[col] ?? "")
+                              )
+                            : undefined
+                        }
+                        onMouseLeave={handleCellMouseLeave}
+                      >
+                        {cellText}
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })}
           </div>
         </div>
       </div>
+      {tooltip && (
+        <div
+          className="dg-tooltip"
+          style={{
+            left: tooltip.x,
+            top: tooltip.y,
+          }}
+        >
+          {tooltip.text}
+        </div>
+      )}
     </div>
   );
 }
