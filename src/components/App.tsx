@@ -265,7 +265,14 @@ export function App(): React.ReactElement {
             columnOrder={viewState.columnOrder}
             onSelectTable={(name) => {
               setActiveTable(name);
-              setViewState((prev) => ({ ...prev, filters: [] }));
+              setViewState((prev) => ({
+                ...prev,
+                filters: [],
+                visibleColumns: [],
+                columnOrder: [],
+                sortColumn: null,
+                sortDirection: "ASC",
+              }));
               setResetKey((k) => k + 1);
             }}
             onToggleColumn={toggleColumn}

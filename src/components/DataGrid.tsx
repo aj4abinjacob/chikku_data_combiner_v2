@@ -61,6 +61,13 @@ export function DataGrid({
 
   // Notify chunk cache of visible range
   const rangeRef = useRef<{ start: number; end: number } | null>(null);
+
+  // Reset range tracking when columns change so ensureRange re-fires after schema update
+  const columnsKey = columns.join(",");
+  useEffect(() => {
+    rangeRef.current = null;
+  }, [columnsKey]);
+
   useEffect(() => {
     const range = virtualizer.range;
     if (!range) return;

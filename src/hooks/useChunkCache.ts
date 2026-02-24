@@ -44,13 +44,23 @@ export function useChunkCache({
   // Stable key for visible columns — sorted so reordering doesn't trigger reset
   const visibleColumnsKey = [...viewState.visibleColumns].sort().join(",");
 
-  // Reset cache when table, filters, sort, or column set changes
-  useEffect(() => {
+  // Build a key from all deps that should trigger cache invalidation
+  const filtersKey = JSON.stringify(viewState.filters);
+  const cacheKey = `${tableName}|${enabled}|${visibleColumnsKey}|${filtersKey}|${viewState.sortColumn}|${viewState.sortDirection}`;
+  const prevCacheKeyRef = useRef<string>("");
+
+  // Reset cache synchronously during render (before effects run)
+  // so that child component effects see the updated generation
+  if (cacheKey !== prevCacheKeyRef.current) {
+    prevCacheKeyRef.current = cacheKey;
     cacheRef.current = new Map();
     loadingRef.current = new Set();
     lruRef.current = [];
     generationRef.current += 1;
+  }
 
+  // Fetch row count asynchronously when cache deps change
+  useEffect(() => {
     if (!tableName || !enabled) {
       setTotalRows(0);
       return;
@@ -73,7 +83,7 @@ export function useChunkCache({
   }, [
     tableName,
     enabled,
-    viewState.filters,
+    filtersKey,
     viewState.sortColumn,
     viewState.sortDirection,
     visibleColumnsKey,
