@@ -24,6 +24,69 @@ export function DataGrid({
   const anchor = useRef<{ row: number; col: string } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // ── Column resize state ──
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  const isDragging = useRef(false);
+  const dragColRef = useRef<string | null>(null);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(0);
+
+  // Calculate initial column widths when columns change
+  useEffect(() => {
+    if (columns.length === 0) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const availableWidth = container.clientWidth - 50; // subtract row-number column
+    const perCol = Math.max(150, Math.floor(availableWidth / columns.length));
+    const widths: Record<string, number> = {};
+    for (const col of columns) {
+      widths[col] = perCol;
+    }
+    setColumnWidths(widths);
+  }, [columns]);
+
+  // Document-level drag listeners for column resize
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDragging.current || !dragColRef.current) return;
+      const delta = e.clientX - dragStartX.current;
+      const newWidth = Math.max(50, dragStartWidth.current + delta);
+      setColumnWidths((prev) => ({
+        ...prev,
+        [dragColRef.current!]: newWidth,
+      }));
+    };
+
+    const onMouseUp = () => {
+      if (!isDragging.current) return;
+      isDragging.current = false;
+      dragColRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent, col: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      isDragging.current = true;
+      dragColRef.current = col;
+      dragStartX.current = e.clientX;
+      dragStartWidth.current = columnWidths[col] ?? 150;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    },
+    [columnWidths]
+  );
+
   const handleCellClick = useCallback(
     (rowIdx: number, col: string, e: React.MouseEvent) => {
       const meta = e.metaKey || e.ctrlKey;
@@ -102,9 +165,15 @@ export function DataGrid({
   return (
     <div className="data-grid-container" ref={containerRef} tabIndex={-1}>
       <table className="data-table">
+        <colgroup>
+          <col style={{ width: 50 }} />
+          {columns.map((col) => (
+            <col key={col} style={{ width: columnWidths[col] ?? 150 }} />
+          ))}
+        </colgroup>
         <thead>
           <tr>
-            <th style={{ width: 50, textAlign: "right", color: "#5c7080" }}>#</th>
+            <th style={{ textAlign: "right", color: "#5c7080" }}>#</th>
             {columns.map((col) => (
               <th key={col} onClick={() => onSort(col)}>
                 {col}
@@ -116,6 +185,10 @@ export function DataGrid({
                     />
                   </span>
                 )}
+                <div
+                  className="col-resize-handle"
+                  onMouseDown={(e) => handleResizeStart(e, col)}
+                />
               </th>
             ))}
           </tr>

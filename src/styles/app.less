@@ -136,6 +136,7 @@ html, body, #root {
 }
 
 .data-table {
+  table-layout: fixed;
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
@@ -162,6 +163,20 @@ html, body, #root {
       margin-left: 4px;
       color: #5c7080;
     }
+
+    .col-resize-handle {
+      position: absolute;
+      top: 0;
+      right: -3px;
+      width: 7px;
+      bottom: 0;
+      cursor: col-resize;
+      z-index: 1;
+
+      &:hover {
+        background: rgba(19, 124, 189, 0.3);
+      }
+    }
   }
 
   td {
@@ -169,7 +184,6 @@ html, body, #root {
     border-bottom: 1px solid #e1e8ed;
     border-right: 1px solid #e1e8ed;
     white-space: nowrap;
-    max-width: 300px;
     overflow: hidden;
     text-overflow: ellipsis;
     transition: background 0.15s ease;
