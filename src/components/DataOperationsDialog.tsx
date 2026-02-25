@@ -61,6 +61,8 @@ export function DataOperationsDialog({
   const [param2, setParam2] = useState("");
   const [combineSourceCols, setCombineSourceCols] = useState<string[]>([]);
   const [combineSearch, setCombineSearch] = useState("");
+  const [renameRows, setRenameRows] = useState<Array<{ sourceCol: string; newName: string }>>([{ sourceCol: "", newName: "" }]);
+  const [deleteColumns, setDeleteColumns] = useState<string[]>([]);
   const [previews, setPreviews] = useState<Array<{ original: string; result: string }>>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
@@ -190,6 +192,8 @@ export function DataOperationsDialog({
     setParam2("");
     setCombineSourceCols([]);
     setCombineSearch("");
+    setRenameRows([{ sourceCol: "", newName: "" }]);
+    setDeleteColumns([]);
     setOpType("regex_extract");
     setPreviews([]);
     setPreviewError(null);
@@ -201,12 +205,20 @@ export function DataOperationsDialog({
     let finalSql: string;
 
     if (opType === "rename_column") {
-      if (!sourceCol || !targetCol) return;
-      finalSql = `ALTER TABLE "${activeTable}" RENAME COLUMN "${sourceCol}" TO "${targetCol}"`;
+      const validRows = renameRows.filter((r) => r.sourceCol && r.newName.trim());
+      if (validRows.length === 0) return;
+      const renameMap = new Map(validRows.map((r) => [r.sourceCol, r.newName.trim()]));
+      const cols = schema
+        .map((c) => {
+          const newName = renameMap.get(c.column_name);
+          return newName ? `"${c.column_name}" AS "${newName}"` : `"${c.column_name}"`;
+        })
+        .join(", ");
+      finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT ${cols} FROM "${activeTable}"`;
     } else if (opType === "delete_column") {
-      if (!sourceCol || schema.length <= 1) return;
+      if (deleteColumns.length === 0 || deleteColumns.length >= schema.length) return;
       const otherCols = schema
-        .filter((c) => c.column_name !== sourceCol)
+        .filter((c) => !deleteColumns.includes(c.column_name))
         .map((c) => `"${c.column_name}"`)
         .join(", ");
       finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT ${otherCols} FROM "${activeTable}"`;
@@ -267,8 +279,8 @@ export function DataOperationsDialog({
             </HTMLSelect>
           </FormGroup>
 
-          {/* Source Column — shown for all ops except create_column and combine_columns */}
-          {opType !== "create_column" && opType !== "combine_columns" && (
+          {/* Source Column — shown for all ops except create_column, combine_columns, rename_column, delete_column */}
+          {opType !== "create_column" && opType !== "combine_columns" && opType !== "rename_column" && opType !== "delete_column" && (
             <FormGroup label="Source Column">
               <HTMLSelect
                 value={sourceCol}
@@ -285,11 +297,11 @@ export function DataOperationsDialog({
             </FormGroup>
           )}
 
-          {/* Target Column — shown for all ops except delete_column */}
-          {opType !== "delete_column" && (
+          {/* Target Column — shown for all ops except delete_column and rename_column */}
+          {opType !== "delete_column" && opType !== "rename_column" && (
             <FormGroup
-              label={opType === "create_column" || opType === "combine_columns" ? "New Column Name" : opType === "rename_column" ? "New Name" : "Target Column Name"}
-              helperText={opType === "create_column" || opType === "combine_columns" || opType === "rename_column" ? undefined : "Leave blank to replace the source column"}
+              label={opType === "create_column" || opType === "combine_columns" ? "New Column Name" : "Target Column Name"}
+              helperText={opType === "create_column" || opType === "combine_columns" ? undefined : "Leave blank to replace the source column"}
             >
               <InputGroup
                 value={targetCol}
@@ -299,14 +311,103 @@ export function DataOperationsDialog({
             </FormGroup>
           )}
 
-          {/* delete_column: warning */}
-          {opType === "delete_column" && sourceCol && (
-            <div className="bp4-callout bp4-intent-warning" style={{ marginBottom: 10 }}>
-              <p style={{ margin: 0 }}>
-                This will permanently remove the column <strong>{sourceCol}</strong> from the table.
-                {schema.length <= 1 && " Cannot delete the only column."}
-              </p>
-            </div>
+          {/* delete_column: multi-select */}
+          {opType === "delete_column" && (
+            <>
+              <FormGroup label="Columns to Delete" helperText="Select one or more columns to remove.">
+                <div className="combine-col-list">
+                  <div className="combine-col-items">
+                    {schema.map((col) => {
+                      const isSelected = deleteColumns.includes(col.column_name);
+                      return (
+                        <div key={col.column_name} className={`combine-col-item${isSelected ? " selected" : ""}`}>
+                          <Checkbox
+                            checked={isSelected}
+                            onChange={() => {
+                              if (isSelected) {
+                                setDeleteColumns((prev) => prev.filter((c) => c !== col.column_name));
+                              } else {
+                                setDeleteColumns((prev) => [...prev, col.column_name]);
+                              }
+                            }}
+                            style={{ marginBottom: 0 }}
+                          />
+                          <span className="combine-col-name">{col.column_name}</span>
+                          <span className="column-type">{col.column_type}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </FormGroup>
+              {deleteColumns.length > 0 && (
+                <div className="bp4-callout bp4-intent-warning" style={{ marginBottom: 10 }}>
+                  <p style={{ margin: 0 }}>
+                    This will permanently remove {deleteColumns.length} column{deleteColumns.length > 1 ? "s" : ""} from the table.
+                    {deleteColumns.length >= schema.length && " Cannot delete all columns — at least one must remain."}
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* rename_column: multi-row rename */}
+          {opType === "rename_column" && (
+            <FormGroup label="Columns to Rename" helperText="Select columns and provide new names.">
+              <div className="rename-col-list">
+                <div className="rename-col-items">
+                  {renameRows.map((row, idx) => {
+                    const usedCols = renameRows.filter((_, i) => i !== idx).map((r) => r.sourceCol).filter(Boolean);
+                    const availableCols = schema.filter((c) => !usedCols.includes(c.column_name));
+                    return (
+                      <div key={idx} className="rename-col-row">
+                        <HTMLSelect
+                          value={row.sourceCol}
+                          onChange={(e) => {
+                            setRenameRows((prev) => prev.map((r, i) => (i === idx ? { ...r, sourceCol: e.target.value } : r)));
+                          }}
+                          fill
+                        >
+                          <option value="">Select column...</option>
+                          {availableCols.map((col) => (
+                            <option key={col.column_name} value={col.column_name}>
+                              {col.column_name}
+                            </option>
+                          ))}
+                        </HTMLSelect>
+                        <span className="rename-arrow">&rarr;</span>
+                        <InputGroup
+                          value={row.newName}
+                          onChange={(e) => {
+                            setRenameRows((prev) => prev.map((r, i) => (i === idx ? { ...r, newName: e.target.value } : r)));
+                          }}
+                          placeholder="New name"
+                          fill
+                        />
+                        {renameRows.length > 1 && (
+                          <Button
+                            icon="cross"
+                            minimal
+                            small
+                            onClick={() => setRenameRows((prev) => prev.filter((_, i) => i !== idx))}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {renameRows.length < schema.length && (
+                  <Button
+                    icon="plus"
+                    text="Add"
+                    small
+                    minimal
+                    onClick={() => setRenameRows((prev) => [...prev, { sourceCol: "", newName: "" }])}
+                    style={{ marginTop: 4 }}
+                  />
+                )}
+              </div>
+            </FormGroup>
           )}
 
           {/* create_column: value input */}
@@ -485,13 +586,13 @@ export function DataOperationsDialog({
               text={opType === "delete_column" ? "Delete" : "Apply"}
               disabled={
                 opType === "delete_column"
-                  ? !sourceCol || schema.length <= 1
+                  ? deleteColumns.length === 0 || deleteColumns.length >= schema.length
                   : opType === "create_column"
                   ? !targetCol
                   : opType === "combine_columns"
                   ? combineSourceCols.length < 2 || !targetCol
                   : opType === "rename_column"
-                  ? !sourceCol || !targetCol
+                  ? renameRows.filter((r) => r.sourceCol && r.newName.trim()).length === 0
                   : !sourceCol
               }
             />
