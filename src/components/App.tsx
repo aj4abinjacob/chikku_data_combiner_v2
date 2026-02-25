@@ -163,7 +163,14 @@ export function App(): React.ReactElement {
         return [...without, combinedTable];
       });
       setActiveTable("combined");
-      setViewState((prev) => ({ ...prev, filters: [] }));
+      setViewState((prev) => ({
+        ...prev,
+        filters: [],
+        visibleColumns: [],
+        columnOrder: [],
+        sortColumn: null,
+        sortDirection: "ASC",
+      }));
       setResetKey((k) => k + 1);
       setCombineDialogOpen(false);
     } catch (err) {

@@ -8,6 +8,8 @@ import {
   Icon,
   InputGroup,
   Intent,
+  NonIdealState,
+  Tag,
 } from "@blueprintjs/core";
 import { Tooltip2 } from "@blueprintjs/popover2";
 import { LoadedTable, ColumnMapping } from "../types";
@@ -48,10 +50,13 @@ export function CombineDialog({
     return map;
   }, [tables]);
 
-  // Sorted column names for stable display
-  const sortedColumnNames = useMemo(() => {
-    return [...allColumns.keys()].sort(Intl.Collator().compare);
-  }, [allColumns]);
+  // Columns grouped by table — for grouped display in right panel
+  const columnsByTable = useMemo(() => {
+    return tables.map((table) => ({
+      tableName: table.tableName,
+      columns: table.schema.map((col) => col.column_name),
+    }));
+  }, [tables]);
 
   // How many times each column is used in input mappings
   const columnUsage = useMemo(() => {
@@ -63,6 +68,15 @@ export function CombineDialog({
     }
     return usage;
   }, [mappings]);
+
+  // Whether any columns are shared across ALL tables
+  const hasSharedColumns = useMemo(() => {
+    const tableCount = tables.length;
+    for (const tableList of allColumns.values()) {
+      if (tableList.length === tableCount) return true;
+    }
+    return false;
+  }, [tables, allColumns]);
 
   // Validation errors
   const validationErrors = useMemo(() => {
@@ -171,15 +185,18 @@ export function CombineDialog({
     );
   }, []);
 
-  const handleInputChange = useCallback((id: string, value: string) => {
-    const cols = value
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    setMappings((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, inputColumns: cols } : m))
-    );
-  }, []);
+  const handleRemoveInputColumn = useCallback(
+    (mappingId: string, colName: string) => {
+      setMappings((prev) =>
+        prev.map((m) =>
+          m.id === mappingId
+            ? { ...m, inputColumns: m.inputColumns.filter((c) => c !== colName) }
+            : m
+        )
+      );
+    },
+    []
+  );
 
   const handleCombine = useCallback(() => {
     const tableData = tables.map((t) => ({
@@ -223,110 +240,166 @@ export function CombineDialog({
                   icon="automatic-updates"
                   text="Fill Similar"
                   onClick={handleFillSimilar}
+                  disabled={!hasSharedColumns}
                   small
                   style={{ marginRight: 4 }}
                 />
                 <Button icon="add" text="Add Row" onClick={handleAddMapping} small />
               </div>
             </div>
+            {validationErrors.length > 0 && mappings.length > 0 && (
+              <Callout
+                intent={Intent.WARNING}
+                icon="warning-sign"
+                className="combine-validation-callout"
+              >
+                {validationErrors.map((e, i) => (
+                  <div key={i}>{e}</div>
+                ))}
+              </Callout>
+            )}
             <div className="combine-mappings-list">
-              {mappings.map((m, index) => (
-                <div key={m.id} className="combine-mapping-row">
-                  <span className="combine-mapping-index">{index + 1}</span>
-                  <div className="combine-field-group">
-                    <label className="combine-field-label">Output</label>
-                    <InputGroup
-                      value={m.outputColumn}
-                      onChange={(e) => handleOutputChange(m.id, e.target.value)}
-                      onFocus={() => {
-                        setFocusedMappingId(m.id);
-                        setFocusedField("output");
+              {mappings.map((m, index) => {
+                const isActive = focusedMappingId === m.id;
+                return (
+                  <div
+                    key={m.id}
+                    className={`combine-mapping-row${isActive ? " active" : ""}`}
+                    onClick={() => setFocusedMappingId(m.id)}
+                  >
+                    <span className="combine-mapping-index">{index + 1}</span>
+                    <div className="combine-field-group">
+                      <label className="combine-field-label">Output</label>
+                      <InputGroup
+                        value={m.outputColumn}
+                        onChange={(e) => handleOutputChange(m.id, e.target.value)}
+                        onFocus={() => {
+                          setFocusedMappingId(m.id);
+                          setFocusedField("output");
+                        }}
+                        placeholder="output column name"
+                        className={
+                          isActive && focusedField === "output"
+                            ? "combine-field-focused"
+                            : ""
+                        }
+                      />
+                    </div>
+                    <Icon icon="arrow-left" size={12} style={{ opacity: 0.4, flexShrink: 0 }} />
+                    <div className="combine-field-group">
+                      <label className="combine-field-label">Input</label>
+                      <div
+                        className={`combine-input-tags${
+                          isActive && focusedField === "input" ? " focused" : ""
+                        }`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setFocusedMappingId(m.id);
+                          setFocusedField("input");
+                        }}
+                      >
+                        {m.inputColumns.length === 0 && (
+                          <span className="combine-input-placeholder">
+                            click columns to add
+                          </span>
+                        )}
+                        {m.inputColumns.map((col) => (
+                          <Tag
+                            key={col}
+                            minimal
+                            round
+                            intent={Intent.PRIMARY}
+                            onRemove={() => handleRemoveInputColumn(m.id, col)}
+                          >
+                            {col}
+                          </Tag>
+                        ))}
+                      </div>
+                    </div>
+                    <Button
+                      icon="cross"
+                      minimal
+                      small
+                      intent={Intent.DANGER}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRemoveMapping(m.id);
                       }}
-                      placeholder="output column name"
-                      className={
-                        focusedMappingId === m.id && focusedField === "output"
-                          ? "combine-field-focused"
-                          : ""
-                      }
                     />
                   </div>
-                  <Icon icon="arrow-left" size={12} style={{ opacity: 0.4, flexShrink: 0 }} />
-                  <div className="combine-field-group">
-                    <label className="combine-field-label">Input</label>
-                    <InputGroup
-                      value={m.inputColumns.join(", ")}
-                      onChange={(e) => handleInputChange(m.id, e.target.value)}
-                      onFocus={() => {
-                        setFocusedMappingId(m.id);
-                        setFocusedField("input");
-                      }}
-                      placeholder="source column(s)"
-                      className={
-                        focusedMappingId === m.id && focusedField === "input"
-                          ? "combine-field-focused"
-                          : ""
-                      }
-                    />
-                  </div>
-                  <Button
-                    icon="cross"
-                    minimal
-                    small
-                    intent={Intent.DANGER}
-                    onClick={() => handleRemoveMapping(m.id)}
-                  />
-                </div>
-              ))}
+                );
+              })}
               {mappings.length === 0 && (
-                <div className="combine-empty-state">
-                  Click "Fill Similar" to auto-map shared columns, or "Add Row" to
-                  map manually.
-                </div>
+                <NonIdealState
+                  icon="merge-columns"
+                  title="No column mappings"
+                  description="Map columns from your source tables to define how they combine."
+                  className="combine-empty-state"
+                  action={
+                    <div className="combine-empty-actions">
+                      <Button
+                        icon="automatic-updates"
+                        text="Fill Similar Columns"
+                        onClick={handleFillSimilar}
+                        disabled={!hasSharedColumns}
+                        intent={Intent.PRIMARY}
+                        outlined
+                      />
+                      <Button
+                        icon="add"
+                        text="Add Row Manually"
+                        onClick={handleAddMapping}
+                      />
+                    </div>
+                  }
+                />
               )}
             </div>
           </div>
 
-          {/* Right panel: all column buttons */}
+          {/* Right panel: columns grouped by table */}
           <div className="combine-columns-panel">
             <h4>Available Columns</h4>
-            <div className="combine-column-buttons">
-              {sortedColumnNames.map((colName) => {
-                const tableList = allColumns.get(colName) || [];
-                const usageCount = columnUsage.get(colName) || 0;
-                const intent =
-                  usageCount === 0
-                    ? Intent.NONE
-                    : usageCount === 1
-                    ? Intent.SUCCESS
-                    : Intent.DANGER;
-                return (
-                  <Tooltip2
-                    key={colName}
-                    content={`In: ${tableList.join(", ")}`}
-                    placement="top"
-                    compact
-                  >
-                    <Button
-                      text={colName}
-                      intent={intent}
-                      small
-                      onClick={() => handleColumnClick(colName)}
-                      outlined={usageCount === 0}
-                    />
-                  </Tooltip2>
-                );
-              })}
+            <div className="combine-column-groups">
+              {columnsByTable.map(({ tableName, columns }) => (
+                <div key={tableName} className="combine-column-group">
+                  <div className="combine-column-group-header">
+                    <Icon icon="th" size={12} />
+                    <span>{tableName}</span>
+                  </div>
+                  <div className="combine-column-group-buttons">
+                    {columns.map((colName) => {
+                      const usageCount = columnUsage.get(colName) || 0;
+                      const intent =
+                        usageCount === 0
+                          ? Intent.NONE
+                          : usageCount === 1
+                          ? Intent.SUCCESS
+                          : Intent.DANGER;
+                      const tableList = allColumns.get(colName) || [];
+                      return (
+                        <Tooltip2
+                          key={colName}
+                          content={`In: ${tableList.join(", ")}`}
+                          placement="top"
+                          compact
+                        >
+                          <Button
+                            text={colName}
+                            intent={intent}
+                            small
+                            onClick={() => handleColumnClick(colName)}
+                            outlined={usageCount === 0}
+                          />
+                        </Tooltip2>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
-
-        {validationErrors.length > 0 && (
-          <Callout intent={Intent.WARNING} style={{ marginTop: 12 }} icon="warning-sign">
-            {validationErrors.map((e, i) => (
-              <div key={i}>{e}</div>
-            ))}
-          </Callout>
-        )}
       </DialogBody>
 
       <DialogFooter

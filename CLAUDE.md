@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Important:** Always update this file after making any changes, adding new features, modifying architecture, updating components, or altering the data flow. Keep all sections accurate and in sync with the current state of the codebase.
+
 ## Project
 
 Chikku Data Combiner v2 — an Electron desktop app for viewing, combining, and transforming CSV data. Built with React, DuckDB, and BlueprintJS.
