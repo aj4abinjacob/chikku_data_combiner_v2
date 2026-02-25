@@ -24,7 +24,8 @@ type OpType =
   | "custom_sql"
   | "create_column"
   | "delete_column"
-  | "combine_columns";
+  | "combine_columns"
+  | "rename_column";
 
 const OP_LABELS: Record<OpType, string> = {
   regex_extract: "Regex Extract",
@@ -37,6 +38,7 @@ const OP_LABELS: Record<OpType, string> = {
   create_column: "Create New Column",
   delete_column: "Delete Column",
   combine_columns: "Combine Columns",
+  rename_column: "Rename Column",
 };
 
 interface SidebarProps {
@@ -198,6 +200,8 @@ export function Sidebar({
         return null;
       case "combine_columns":
         return null; // handled separately in handleApply
+      case "rename_column":
+        return null; // handled separately in handleApply
       default:
         return null;
     }
@@ -211,8 +215,8 @@ export function Sidebar({
       return;
     }
 
-    // delete_column and create_column: no preview needed
-    if (opType === "delete_column" || opType === "create_column") {
+    // delete_column, create_column, rename_column: no preview needed
+    if (opType === "delete_column" || opType === "create_column" || opType === "rename_column") {
       setPreviews([]);
       setPreviewError(null);
       return;
@@ -295,7 +299,10 @@ export function Sidebar({
 
     let finalSql: string;
 
-    if (opType === "delete_column") {
+    if (opType === "rename_column") {
+      if (!sourceCol || !targetCol) return;
+      finalSql = `ALTER TABLE "${activeTable}" RENAME COLUMN "${sourceCol}" TO "${targetCol}"`;
+    } else if (opType === "delete_column") {
       if (!sourceCol || schema.length <= 1) return;
       const otherCols = schema
         .filter((c) => c.column_name !== sourceCol)
@@ -520,8 +527,8 @@ export function Sidebar({
             {/* Target Column — shown for all ops except delete_column */}
             {opType !== "delete_column" && (
               <FormGroup
-                label={opType === "create_column" || opType === "combine_columns" ? "New Column Name" : "Target Column Name"}
-                helperText={opType === "create_column" || opType === "combine_columns" ? undefined : "Leave blank to replace the source column"}
+                label={opType === "create_column" || opType === "combine_columns" ? "New Column Name" : opType === "rename_column" ? "New Name" : "Target Column Name"}
+                helperText={opType === "create_column" || opType === "combine_columns" || opType === "rename_column" ? undefined : "Leave blank to replace the source column"}
               >
                 <InputGroup
                   value={targetCol}
@@ -680,7 +687,7 @@ export function Sidebar({
             )}
 
             {/* Preview — shown for operations that produce a result */}
-            {opType !== "delete_column" && opType !== "create_column" && (previews.length > 0 || previewError) && (
+            {opType !== "delete_column" && opType !== "create_column" && opType !== "rename_column" && (previews.length > 0 || previewError) && (
               <div className="op-preview">
                 <div className="op-preview-header">Preview</div>
                 {previewError ? (
@@ -722,6 +729,8 @@ export function Sidebar({
                     ? !targetCol
                     : opType === "combine_columns"
                     ? combineSourceCols.length < 2 || !targetCol
+                    : opType === "rename_column"
+                    ? !sourceCol || !targetCol
                     : !sourceCol
                 }
               />
