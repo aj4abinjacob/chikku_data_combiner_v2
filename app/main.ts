@@ -5,6 +5,25 @@ import { Database } from "duckdb";
 
 // Per-window DuckDB instances, keyed by webContents.id
 const dbMap = new Map<number, Database>();
+let isQuitting = false;
+
+function closeDb(wcId: number): Promise<void> {
+  return new Promise((resolve) => {
+    const db = dbMap.get(wcId);
+    if (!db) return resolve();
+    dbMap.delete(wcId);
+    try {
+      db.close((err: Error | null) => {
+        if (err) log.warn(`DuckDB close error for window ${wcId}:`, err.message);
+        else log.info(`DuckDB closed for window ${wcId}`);
+        resolve();
+      });
+    } catch (e) {
+      log.warn(`DuckDB close threw for window ${wcId}:`, e);
+      resolve();
+    }
+  });
+}
 
 function getDb(event: Electron.IpcMainInvokeEvent): Database {
   const db = dbMap.get(event.sender.id);
@@ -39,12 +58,10 @@ function createWindow(): void {
 
   const wcId = win.webContents.id;
   win.on("closed", () => {
-    const oldDb = dbMap.get(wcId);
-    if (oldDb) {
-      oldDb.close(() => {
-        log.info(`DuckDB closed for window ${wcId}`);
-      });
-      dbMap.delete(wcId);
+    // DB cleanup is handled in will-quit to avoid race conditions during app shutdown
+    // Only clean up here if the window closes but the app stays open (e.g. macOS)
+    if (!isQuitting) {
+      closeDb(wcId);
     }
   });
 }
@@ -270,6 +287,19 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+app.on("before-quit", () => {
+  isQuitting = true;
+});
+
+app.on("will-quit", (event) => {
+  if (dbMap.size > 0) {
+    event.preventDefault();
+    Promise.all([...dbMap.keys()].map((id) => closeDb(id))).then(() => {
+      app.quit();
+    });
+  }
 });
 
 app.on("window-all-closed", () => {

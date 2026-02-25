@@ -50,23 +50,21 @@ export function CombineDialog({
     return map;
   }, [tables]);
 
-  // Columns grouped by table — for grouped display in right panel
-  const columnsByTable = useMemo(() => {
-    return tables.map((table) => ({
-      tableName: table.tableName,
-      columns: table.schema.map((col) => col.column_name),
-    }));
-  }, [tables]);
+  // Sorted unique column names (case-insensitive) for flat display
+  const sortedColumnNames = useMemo(() => {
+    const collator = new Intl.Collator(undefined, { sensitivity: "base" });
+    return [...allColumns.keys()].sort(collator.compare);
+  }, [allColumns]);
 
-  // How many times each column is used in input mappings
-  const columnUsage = useMemo(() => {
-    const usage = new Map<string, number>();
+  // Set of columns already used as input (for disabling in the right panel)
+  const usedInputColumns = useMemo(() => {
+    const used = new Set<string>();
     for (const m of mappings) {
       for (const ic of m.inputColumns) {
-        if (ic) usage.set(ic, (usage.get(ic) || 0) + 1);
+        if (ic) used.add(ic);
       }
     }
-    return usage;
+    return used;
   }, [mappings]);
 
   // Whether any columns are shared across ALL tables
@@ -106,21 +104,16 @@ export function CombineDialog({
         break;
       }
     }
-    for (const [col, count] of columnUsage) {
-      if (count > 1) {
-        errors.push(`Column "${col}" is mapped more than once`);
-        break;
-      }
-    }
     return errors;
-  }, [mappings, columnUsage]);
+  }, [mappings]);
 
   // Fill similar columns — columns that exist in ALL tables
   const handleFillSimilar = useCallback(() => {
     const tableCount = tables.length;
     const newMappings: ColumnMapping[] = [];
+    const collator = new Intl.Collator(undefined, { sensitivity: "base" });
     const sorted = [...allColumns.entries()].sort(([a], [b]) =>
-      Intl.Collator().compare(a, b)
+      collator.compare(a, b)
     );
     for (const [colName, tableList] of sorted) {
       if (tableList.length === tableCount) {
@@ -155,6 +148,18 @@ export function CombineDialog({
     [focusedMappingId]
   );
 
+  // Which tables a column belongs to — used to enforce one-per-table rule
+  const columnToTables = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const table of tables) {
+      for (const col of table.schema) {
+        if (!map.has(col.column_name)) map.set(col.column_name, new Set());
+        map.get(col.column_name)!.add(table.tableName);
+      }
+    }
+    return map;
+  }, [tables]);
+
   const handleColumnClick = useCallback(
     (colName: string) => {
       if (!focusedMappingId) return;
@@ -164,19 +169,26 @@ export function CombineDialog({
           if (focusedField === "output") {
             return { ...m, outputColumn: colName };
           } else {
-            // Toggle: remove if present, add if not
-            const existing = m.inputColumns.includes(colName);
-            return {
-              ...m,
-              inputColumns: existing
-                ? m.inputColumns.filter((c) => c !== colName)
-                : [...m.inputColumns, colName],
-            };
+            // Toggle off if already present
+            if (m.inputColumns.includes(colName)) {
+              return { ...m, inputColumns: m.inputColumns.filter((c) => c !== colName) };
+            }
+            // Enforce one column per table: remove any existing column from the same tables
+            const clickedTables = columnToTables.get(colName) || new Set();
+            const filtered = m.inputColumns.filter((existing) => {
+              const existingTables = columnToTables.get(existing) || new Set();
+              // Keep if no table overlap with the clicked column
+              for (const t of existingTables) {
+                if (clickedTables.has(t)) return false;
+              }
+              return true;
+            });
+            return { ...m, inputColumns: [...filtered, colName] };
           }
         })
       );
     },
-    [focusedMappingId, focusedField]
+    [focusedMappingId, focusedField, columnToTables]
   );
 
   const handleOutputChange = useCallback((id: string, value: string) => {
@@ -357,46 +369,38 @@ export function CombineDialog({
             </div>
           </div>
 
-          {/* Right panel: columns grouped by table */}
+          {/* Right panel: all columns alphabetically */}
           <div className="combine-columns-panel">
             <h4>Available Columns</h4>
-            <div className="combine-column-groups">
-              {columnsByTable.map(({ tableName, columns }) => (
-                <div key={tableName} className="combine-column-group">
-                  <div className="combine-column-group-header">
-                    <Icon icon="th" size={12} />
-                    <span>{tableName}</span>
-                  </div>
-                  <div className="combine-column-group-buttons">
-                    {columns.map((colName) => {
-                      const usageCount = columnUsage.get(colName) || 0;
-                      const intent =
-                        usageCount === 0
-                          ? Intent.NONE
-                          : usageCount === 1
-                          ? Intent.SUCCESS
-                          : Intent.DANGER;
-                      const tableList = allColumns.get(colName) || [];
-                      return (
-                        <Tooltip2
-                          key={colName}
-                          content={`In: ${tableList.join(", ")}`}
-                          placement="top"
-                          compact
-                        >
-                          <Button
-                            text={colName}
-                            intent={intent}
-                            small
-                            onClick={() => handleColumnClick(colName)}
-                            outlined={usageCount === 0}
-                          />
-                        </Tooltip2>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
+            <div className="combine-column-buttons">
+              {sortedColumnNames.map((colName) => {
+                const tableList = allColumns.get(colName) || [];
+                const isUsed = usedInputColumns.has(colName);
+                return (
+                  <Tooltip2
+                    key={colName}
+                    content={`In: ${tableList.join(", ")}`}
+                    placement="top"
+                    compact
+                  >
+                    <Button
+                      text={colName}
+                      intent={isUsed ? Intent.SUCCESS : Intent.NONE}
+                      small
+                      onClick={() => handleColumnClick(colName)}
+                      outlined={!isUsed}
+                      disabled={
+                        isUsed &&
+                        focusedField === "input" &&
+                        focusedMappingId !== null &&
+                        !mappings.find(
+                          (m) => m.id === focusedMappingId && m.inputColumns.includes(colName)
+                        )
+                      }
+                    />
+                  </Tooltip2>
+                );
+              })}
             </div>
           </div>
         </div>
