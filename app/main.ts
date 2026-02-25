@@ -5,7 +5,6 @@ import { Database } from "duckdb";
 
 // Per-window DuckDB instances, keyed by webContents.id
 const dbMap = new Map<number, Database>();
-let isQuitting = false;
 
 function closeDb(wcId: number): Promise<void> {
   return new Promise((resolve) => {
@@ -57,12 +56,12 @@ function createWindow(): void {
   }
 
   const wcId = win.webContents.id;
+  win.on("close", () => {
+    // Remove DB from map immediately so IPC handlers fail fast during shutdown
+    dbMap.delete(wcId);
+  });
   win.on("closed", () => {
-    // DB cleanup is handled in will-quit to avoid race conditions during app shutdown
-    // Only clean up here if the window closes but the app stays open (e.g. macOS)
-    if (!isQuitting) {
-      closeDb(wcId);
-    }
+    closeDb(wcId);
   });
 }
 
@@ -287,10 +286,6 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
-});
-
-app.on("before-quit", () => {
-  isQuitting = true;
 });
 
 app.on("will-quit", (event) => {

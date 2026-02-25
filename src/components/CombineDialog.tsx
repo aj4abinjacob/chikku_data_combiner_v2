@@ -386,14 +386,16 @@ export function CombineDialog({
                   }
                 />
               )}
-              <Button
-                icon="add"
-                text="Add Row"
-                onClick={handleAddMapping}
-                small
-                minimal
-                style={{ alignSelf: "center", marginTop: 4 }}
-              />
+              {mappings.length > 0 && (
+                <Button
+                  icon="add"
+                  text="Add Row"
+                  onClick={handleAddMapping}
+                  small
+                  minimal
+                  style={{ alignSelf: "center", marginTop: 4 }}
+                />
+              )}
             </div>
           </div>
 
