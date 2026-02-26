@@ -79,7 +79,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 ### Key Directories
 
 - `app/` — Electron main process + preload (Node.js context)
-- `src/components/` — React components (8 files)
+- `src/components/` — React components (9 files)
 - `src/hooks/` — Custom React hooks (`useChunkCache`)
 - `src/utils/` — SQL query builder utilities
 - `src/types.ts` — All TypeScript interfaces
@@ -113,9 +113,10 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - `handleDataOperation(sql)` — executes arbitrary SQL for data transforms (column/row operations)
 - `handleSampleTable(n, isPercent)` — creates a new `sample_N` table with a random sample of rows from active table using DuckDB `USING SAMPLE`; adds to tables state with `filePath: "(sample)"`
 - `handleCreateAggregateTable(sql)` — takes a SELECT SQL, generates unique `aggregate_N` name, executes `CREATE TABLE ... AS`, adds to tables state with `filePath: "(aggregate)"`
+- `handleCreatePivotTable(sql)` — takes a PIVOT SQL, generates unique `pivot_N` name, executes `CREATE TABLE ... AS (sql)`, adds to tables state with `filePath: "(pivot)"`
 - Schema fetching effect: re-fetches schema on `activeTable` change, auto-populates `visibleColumns`
 - `resetKey` counter: increments on table/filter/sort/column changes to trigger DataGrid scroll-to-top
-- Layout: `Sidebar + DataGrid + FilterPanel + StatusBar + CombineDialog`
+- Layout: `Sidebar + DataGrid + FilterPanel + StatusBar + CombineDialog + PivotDialog`
 
 ### Sidebar.tsx — Left Panel
 - Lists loaded tables with row counts (click to switch active table)
@@ -125,6 +126,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - Column visibility checkboxes
 - "Data Operations" button opens `DataOperationsDialog`
 - "Aggregate" button opens `AggregateDialog`
+- "Pivot Table" button opens `PivotDialog`
 - Filter panel toggle button
 
 ### DataOperationsDialog.tsx — Data Operations Modal
@@ -156,6 +158,20 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - "Run" button executes the aggregate query and shows results in an HTML table (up to 200 rows)
 - "Create as Table" button materializes result as `aggregate_N` table via `onCreateTable`; appears in sidebar with `filePath: "(aggregate)"`
 - Numeric type detection via regex: `/^(TINYINT|SMALLINT|INTEGER|INT|BIGINT|HUGEINT|FLOAT|REAL|DOUBLE|DECIMAL|NUMERIC)/i`
+
+### PivotDialog.tsx — Pivot Table Modal
+- Rotates row values into column headers using DuckDB's native `PIVOT` syntax
+- Props: `isOpen`, `onClose`, `activeTable`, `schema`, `onCreateTable(sql, filePath)`
+- **Row Fields** (optional): multi-select checkboxes — become GROUP BY in the PIVOT
+- **Pivot Column** (required): single-select dropdown — values become column headers; auto-excludes row fields
+- **Value Fields** (required): multi-select checkboxes with type hints; non-numeric columns show "(count/min/max/first only)"; "Select All Numeric" / "Deselect All" quick buttons
+- **Aggregate Function** (required): single-select dropdown — SUM, COUNT, AVG, MIN, MAX, MEDIAN, STDDEV, FIRST; defaults to SUM
+- Distinct value preview: on pivot column change (300ms debounce), fetches distinct count + up to 50 sample values
+- Cardinality warnings: yellow Callout for >50 distinct values, red Callout for >200
+- "Run" button executes `PIVOT` query and shows results in HTML table (up to 200 rows, shows row + column count)
+- "Create as Table" button materializes result as `pivot_N` table via `onCreateTable`; appears in sidebar with `filePath: "(pivot)"`
+- Reuses `aggregate-*` CSS classes; only new class: `.pivot-distinct-preview`
+- Numeric type detection via same regex as AggregateDialog
 
 ### DataGrid.tsx — Virtualized Scrollable Data Grid
 - **Virtual scrolling** via `@tanstack/react-virtual` `useVirtualizer` — only renders visible rows (~30-50) plus 20 overscan rows
@@ -269,7 +285,8 @@ ViewState         // { visibleColumns[], columnOrder[], filters[], sortColumn, s
 11. **Sample Table**: User selects "Sample Table" in Data Operations → chooses row count or percentage → creates a new `sample_N` table via `CREATE TABLE ... AS SELECT * FROM ... USING SAMPLE`; appears in sidebar with `filePath: "(sample)"`
 12. **Remove Duplicates**: User selects columns to dedup → empty strings converted to NULL via `NULLIF()` on all VARCHAR columns in a CTE → deduped via `QUALIFY row_number() OVER (PARTITION BY ...) = 1`
 13. **Aggregate**: User opens Aggregate dialog → selects columns and aggregate functions (optionally with Group By) → clicks Run to preview results → optionally clicks "Create as Table" to materialize as `aggregate_N` table with `filePath: "(aggregate)"`
-14. Export: `COPY (query) TO 'path' (HEADER, DELIMITER ',')` — combined, sample, and aggregate tables are excluded from the export UNION ALL to prevent row duplication
+14. **Pivot Table**: User opens Pivot dialog → selects row fields, pivot column, value fields, and aggregate function → clicks Run to preview cross-tabulation → optionally clicks "Create as Table" to materialize as `pivot_N` table with `filePath: "(pivot)"`; uses DuckDB native `PIVOT ... ON ... USING ... GROUP BY` syntax
+15. Export: `COPY (query) TO 'path' (HEADER, DELIMITER ',')` — combined, sample, aggregate, and pivot tables are excluded from the export UNION ALL to prevent row duplication
 
 ## Keyboard Shortcuts
 

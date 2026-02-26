@@ -1294,3 +1294,36 @@ html, body, #root {
   border-top: 1px solid #e1e8ed;
   background: #f5f8fa;
 }
+
+// ── Pivot dialog distinct values preview ──
+.pivot-distinct-preview {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid #d8e1e8;
+  border-radius: 4px;
+  background: #fafcfd;
+  font-family: "SF Mono", "Menlo", "Monaco", monospace;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  .pivot-distinct-loading {
+    color: #8a9ba8;
+    font-style: italic;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .pivot-distinct-count {
+    font-weight: 600;
+    color: #394b59;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 12px;
+  }
+
+  .pivot-distinct-sample {
+    color: #5c7080;
+    line-height: 1.4;
+    word-break: break-word;
+  }
+}

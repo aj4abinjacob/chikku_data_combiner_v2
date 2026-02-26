@@ -9,6 +9,7 @@ import {
 import { LoadedTable, ColumnInfo } from "../types";
 import { DataOperationsDialog } from "./DataOperationsDialog";
 import { AggregateDialog } from "./AggregateDialog";
+import { PivotDialog } from "./PivotDialog";
 
 interface SidebarProps {
   tables: LoadedTable[];
@@ -25,6 +26,7 @@ interface SidebarProps {
   onDeleteTable: (tableName: string) => void;
   onCombine: (selectedNames: string[]) => void;
   onCreateAggregateTable: (sql: string) => void;
+  onCreatePivotTable: (sql: string) => void;
   onHide: () => void;
   onToggleFilterPanel: () => void;
 }
@@ -44,11 +46,13 @@ export function Sidebar({
   onDeleteTable,
   onCombine,
   onCreateAggregateTable,
+  onCreatePivotTable,
   onHide,
   onToggleFilterPanel,
 }: SidebarProps): React.ReactElement {
   const [dataOpDialogOpen, setDataOpDialogOpen] = useState(false);
   const [aggregateDialogOpen, setAggregateDialogOpen] = useState(false);
+  const [pivotDialogOpen, setPivotDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [selectedForCombine, setSelectedForCombine] = useState<Set<string>>(new Set());
 
@@ -257,6 +261,13 @@ export function Sidebar({
             fill
           />
           <Button
+            icon="pivot-table"
+            text="Pivot Table"
+            onClick={() => setPivotDialogOpen(true)}
+            small
+            fill
+          />
+          <Button
             icon="column-layout"
             text="Data Operations"
             onClick={() => setDataOpDialogOpen(true)}
@@ -296,6 +307,14 @@ export function Sidebar({
         activeTable={activeTable}
         schema={schema}
         onCreateTable={onCreateAggregateTable}
+      />
+
+      <PivotDialog
+        isOpen={pivotDialogOpen}
+        onClose={() => setPivotDialogOpen(false)}
+        activeTable={activeTable}
+        schema={schema}
+        onCreateTable={onCreatePivotTable}
       />
     </div>
   );

@@ -37,6 +37,13 @@ function nextAggregateName(existingNames: Set<string>): string {
   return `aggregate_${i}`;
 }
 
+/** Generate a unique "pivot_N" table name that doesn't collide with existing tables */
+function nextPivotName(existingNames: Set<string>): string {
+  let i = 1;
+  while (existingNames.has(`pivot_${i}`)) i++;
+  return `pivot_${i}`;
+}
+
 export function App(): React.ReactElement {
   const [tables, setTables] = useState<LoadedTable[]>([]);
   const [activeTable, setActiveTable] = useState<string | null>(null);
@@ -111,7 +118,7 @@ export function App(): React.ReactElement {
       const savePath = await window.api.saveDialog();
       if (!savePath) return;
       // Exclude auto-generated combined/sample/aggregate tables from the export UNION ALL
-      const sourceTables = t.filter((tb) => tb.filePath !== "(combined)" && tb.filePath !== "(sample)" && tb.filePath !== "(aggregate)");
+      const sourceTables = t.filter((tb) => tb.filePath !== "(combined)" && tb.filePath !== "(sample)" && tb.filePath !== "(aggregate)" && tb.filePath !== "(pivot)");
       const sql =
         sourceTables.length > 1
           ? buildCombineQuery(sourceTables.map((tb) => tb.tableName))
@@ -364,6 +371,45 @@ export function App(): React.ReactElement {
     []
   );
 
+  // Create pivot table from a PIVOT SQL
+  const handleCreatePivotTable = useCallback(
+    async (sql: string) => {
+      try {
+        const existingNames = new Set(tablesRef.current.map((t) => t.tableName));
+        const pivotName = nextPivotName(existingNames);
+
+        await window.api.exec(
+          `CREATE TABLE "${pivotName}" AS (${sql})`
+        );
+        const desc = await window.api.describe(pivotName);
+        const countResult = await window.api.query(
+          `SELECT COUNT(*) as count FROM "${pivotName}"`
+        );
+        const pivotTable: LoadedTable = {
+          tableName: pivotName,
+          filePath: "(pivot)",
+          schema: desc,
+          rowCount: Number(countResult[0].count),
+        };
+
+        setTables((prev) => [...prev, pivotTable]);
+        setActiveTable(pivotName);
+        setViewState((prev) => ({
+          ...prev,
+          filters: [],
+          visibleColumns: [],
+          columnOrder: [],
+          sortColumn: null,
+          sortDirection: "ASC",
+        }));
+        setResetKey((k) => k + 1);
+      } catch (err) {
+        console.error("Pivot table error:", err);
+      }
+    },
+    []
+  );
+
   const hasData = tables.length > 0;
 
   return (
@@ -395,6 +441,7 @@ export function App(): React.ReactElement {
             onDeleteTable={handleDeleteTable}
             onCombine={handleCombineOpen}
             onCreateAggregateTable={handleCreateAggregateTable}
+            onCreatePivotTable={handleCreatePivotTable}
             onHide={() => setSidebarVisible(false)}
             filterPanelOpen={filterPanelOpen}
             onToggleFilterPanel={() => setFilterPanelOpen((v) => !v)}
