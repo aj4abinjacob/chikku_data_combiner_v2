@@ -27,7 +27,17 @@ type OpType =
   | "combine_columns"
   | "rename_column"
   | "sample_table"
-  | "remove_duplicates";
+  | "remove_duplicates"
+  | "conditional_column";
+
+interface CaseCondition {
+  column: string;
+  operator: string;
+  value: string;
+  result: string;
+}
+
+const CASE_OPERATORS = ["=", "!=", ">", "<", ">=", "<=", "LIKE", "NOT LIKE", "IS NULL", "IS NOT NULL", "CONTAINS", "STARTS WITH", "ENDS WITH"];
 
 const OP_LABELS: Record<OpType, string> = {
   regex_extract: "Regex Extract",
@@ -43,6 +53,7 @@ const OP_LABELS: Record<OpType, string> = {
   rename_column: "Rename Column",
   sample_table: "Sample Table",
   remove_duplicates: "Remove Duplicates",
+  conditional_column: "Conditional Column (IF/CASE)",
 };
 
 interface DataOperationsDialogProps {
@@ -74,6 +85,8 @@ export function DataOperationsDialog({
   const [dedupColumns, setDedupColumns] = useState<string[]>([]);
   const [dedupSearch, setDedupSearch] = useState("");
   const [sampleMode, setSampleMode] = useState<"rows" | "percent">("rows");
+  const [caseConditions, setCaseConditions] = useState<CaseCondition[]>([{ column: "", operator: "=", value: "", result: "" }]);
+  const [caseDefault, setCaseDefault] = useState("");
   const [previews, setPreviews] = useState<Array<{ original: string; result: string }>>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [dedupPreview, setDedupPreview] = useState<{ before: number; after: number } | null>(null);
@@ -117,9 +130,47 @@ export function DataOperationsDialog({
         return null; // handled separately in handleApply
       case "rename_column":
         return null; // handled separately in handleApply
+      case "conditional_column":
+        return null; // handled separately
       default:
         return null;
     }
+  };
+
+  const buildCaseExpression = (conditions: CaseCondition[], defaultValue: string): string | null => {
+    const validConditions = conditions.filter((c) => c.column && c.operator && c.result);
+    if (validConditions.length === 0) return null;
+    const whens = validConditions.map((c) => {
+      const colRef = `"${c.column}"`;
+      let whenClause: string;
+      switch (c.operator) {
+        case "IS NULL":
+          whenClause = `${colRef} IS NULL`;
+          break;
+        case "IS NOT NULL":
+          whenClause = `${colRef} IS NOT NULL`;
+          break;
+        case "CONTAINS":
+          whenClause = `regexp_matches(CAST(${colRef} AS VARCHAR), '${c.value.replace(/'/g, "''")}', 'i')`;
+          break;
+        case "LIKE":
+        case "NOT LIKE":
+          whenClause = `CAST(${colRef} AS VARCHAR) ${c.operator} '${c.value.replace(/'/g, "''")}'`;
+          break;
+        case "STARTS WITH":
+          whenClause = `CAST(${colRef} AS VARCHAR) LIKE '${c.value.replace(/'/g, "''")}%'`;
+          break;
+        case "ENDS WITH":
+          whenClause = `CAST(${colRef} AS VARCHAR) LIKE '%${c.value.replace(/'/g, "''")}'`;
+          break;
+        default:
+          whenClause = `${colRef} ${c.operator} '${c.value.replace(/'/g, "''")}'`;
+          break;
+      }
+      return `WHEN ${whenClause} THEN '${c.result.replace(/'/g, "''")}'`;
+    });
+    const elseClause = defaultValue ? `ELSE '${defaultValue.replace(/'/g, "''")}'` : "ELSE NULL";
+    return `CASE ${whens.join(" ")} ${elseClause} END`;
   };
 
   const buildCombineExpression = (cols: string[], separator: string): string => {
@@ -142,7 +193,7 @@ export function DataOperationsDialog({
       return;
     }
 
-    // delete_column, create_column, rename_column, sample_table: no preview needed
+    // delete_column, create_column, rename_column, sample_table: no standard preview needed
     if (opType === "delete_column" || opType === "create_column" || opType === "rename_column" || opType === "sample_table") {
       setPreviews([]);
       setPreviewError(null);
@@ -206,6 +257,28 @@ export function DataOperationsDialog({
       return () => clearTimeout(timer);
     }
 
+    // conditional_column: preview the CASE expression
+    if (opType === "conditional_column") {
+      const caseExpr = buildCaseExpression(caseConditions, caseDefault);
+      if (!caseExpr) {
+        setPreviews([]);
+        setPreviewError(null);
+        return;
+      }
+      const timer = setTimeout(async () => {
+        try {
+          const sql = `SELECT CAST(${caseExpr} AS VARCHAR) AS "result" FROM "${activeTable}" LIMIT 5`;
+          const rows = await window.api.query(sql);
+          setPreviews(rows.map((r: any) => ({ original: "", result: String(r.result ?? "NULL") })));
+          setPreviewError(null);
+        } catch (e: any) {
+          setPreviews([]);
+          setPreviewError(e.message || "Preview failed");
+        }
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+
     // All other operations require a source column
     if (!sourceCol) {
       setPreviews([]);
@@ -230,7 +303,7 @@ export function DataOperationsDialog({
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [isOpen, activeTable, sourceCol, opType, param1, param2, combineSourceCols, dedupColumns]);
+  }, [isOpen, activeTable, sourceCol, opType, param1, param2, combineSourceCols, dedupColumns, caseConditions, caseDefault]);
 
   const resetForm = () => {
     setSourceCol("");
@@ -244,6 +317,8 @@ export function DataOperationsDialog({
     setDedupColumns([]);
     setDedupSearch("");
     setSampleMode("rows");
+    setCaseConditions([{ column: "", operator: "=", value: "", result: "" }]);
+    setCaseDefault("");
     setOpType("regex_extract");
     setPreviews([]);
     setPreviewError(null);
@@ -315,6 +390,11 @@ export function DataOperationsDialog({
       if (combineSourceCols.length < 2 || !targetCol) return;
       const concatExpr = buildCombineExpression(combineSourceCols, param1);
       finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT *, ${concatExpr} AS "${targetCol}" FROM "${activeTable}"`;
+    } else if (opType === "conditional_column") {
+      if (!targetCol) return;
+      const caseExpr = buildCaseExpression(caseConditions, caseDefault);
+      if (!caseExpr) return;
+      finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT *, ${caseExpr} AS "${targetCol}" FROM "${activeTable}"`;
     } else {
       if (!sourceCol) return;
       const target = targetCol || sourceCol;
@@ -364,8 +444,8 @@ export function DataOperationsDialog({
             </HTMLSelect>
           </FormGroup>
 
-          {/* Source Column — hidden for create_column, combine_columns, rename_column, delete_column, sample_table, remove_duplicates */}
-          {opType !== "create_column" && opType !== "combine_columns" && opType !== "rename_column" && opType !== "delete_column" && opType !== "sample_table" && opType !== "remove_duplicates" && (
+          {/* Source Column — hidden for create_column, combine_columns, rename_column, delete_column, sample_table, remove_duplicates, conditional_column */}
+          {opType !== "create_column" && opType !== "combine_columns" && opType !== "rename_column" && opType !== "delete_column" && opType !== "sample_table" && opType !== "remove_duplicates" && opType !== "conditional_column" && (
             <FormGroup label="Source Column">
               <HTMLSelect
                 value={sourceCol}
@@ -385,13 +465,13 @@ export function DataOperationsDialog({
           {/* Target Column — hidden for delete_column, rename_column, sample_table, remove_duplicates */}
           {opType !== "delete_column" && opType !== "rename_column" && opType !== "sample_table" && opType !== "remove_duplicates" && (
             <FormGroup
-              label={opType === "create_column" || opType === "combine_columns" ? "New Column Name" : "Target Column Name"}
-              helperText={opType === "create_column" || opType === "combine_columns" ? undefined : "Leave blank to replace the source column"}
+              label={opType === "create_column" || opType === "combine_columns" || opType === "conditional_column" ? "New Column Name" : "Target Column Name"}
+              helperText={opType === "create_column" || opType === "combine_columns" || opType === "conditional_column" ? undefined : "Leave blank to replace the source column"}
             >
               <InputGroup
                 value={targetCol}
                 onChange={(e) => setTargetCol(e.target.value)}
-                placeholder={opType === "create_column" || opType === "combine_columns" ? "new_column" : (sourceCol || "new_column")}
+                placeholder={opType === "create_column" || opType === "combine_columns" || opType === "conditional_column" ? "new_column" : (sourceCol || "new_column")}
               />
             </FormGroup>
           )}
@@ -653,6 +733,90 @@ export function DataOperationsDialog({
             </>
           )}
 
+          {/* conditional_column: condition builder */}
+          {opType === "conditional_column" && (
+            <>
+              <FormGroup label="Conditions" helperText="Each condition is evaluated in order. The first match determines the result.">
+                <div className="case-condition-list">
+                  {caseConditions.map((cond, idx) => (
+                    <div key={idx} className="case-condition-row">
+                      <span className="case-condition-label">IF</span>
+                      <HTMLSelect
+                        value={cond.column}
+                        onChange={(e) => {
+                          setCaseConditions((prev) => prev.map((c, i) => i === idx ? { ...c, column: e.target.value } : c));
+                        }}
+                        className="case-condition-col"
+                      >
+                        <option value="">Column...</option>
+                        {schema.map((col) => (
+                          <option key={col.column_name} value={col.column_name}>
+                            {col.column_name}
+                          </option>
+                        ))}
+                      </HTMLSelect>
+                      <HTMLSelect
+                        value={cond.operator}
+                        onChange={(e) => {
+                          setCaseConditions((prev) => prev.map((c, i) => i === idx ? { ...c, operator: e.target.value } : c));
+                        }}
+                        className="case-condition-op"
+                      >
+                        {CASE_OPERATORS.map((op) => (
+                          <option key={op} value={op}>{op}</option>
+                        ))}
+                      </HTMLSelect>
+                      {cond.operator !== "IS NULL" && cond.operator !== "IS NOT NULL" && (
+                        <InputGroup
+                          value={cond.value}
+                          onChange={(e) => {
+                            setCaseConditions((prev) => prev.map((c, i) => i === idx ? { ...c, value: e.target.value } : c));
+                          }}
+                          placeholder="value"
+                          className="case-condition-value"
+                          small
+                        />
+                      )}
+                      <span className="case-condition-then">THEN</span>
+                      <InputGroup
+                        value={cond.result}
+                        onChange={(e) => {
+                          setCaseConditions((prev) => prev.map((c, i) => i === idx ? { ...c, result: e.target.value } : c));
+                        }}
+                        placeholder="result"
+                        className="case-condition-result"
+                        small
+                      />
+                      {caseConditions.length > 1 && (
+                        <Button
+                          icon="cross"
+                          minimal
+                          small
+                          onClick={() => setCaseConditions((prev) => prev.filter((_, i) => i !== idx))}
+                        />
+                      )}
+                    </div>
+                  ))}
+                  <Button
+                    icon="plus"
+                    text="Add Condition"
+                    small
+                    minimal
+                    onClick={() => setCaseConditions((prev) => [...prev, { column: "", operator: "=", value: "", result: "" }])}
+                    style={{ marginTop: 4 }}
+                  />
+                </div>
+              </FormGroup>
+              <FormGroup label="Default Value (ELSE)" helperText="Value when no condition matches. Leave empty for NULL.">
+                <InputGroup
+                  value={caseDefault}
+                  onChange={(e) => setCaseDefault(e.target.value)}
+                  placeholder="NULL"
+                />
+              </FormGroup>
+            </>
+          )}
+
           {opType === "regex_extract" && (
             <>
               <FormGroup label="Pattern (regex)" helperText="Use a capture group, e.g. ([0-9]+)">
@@ -733,14 +897,14 @@ export function DataOperationsDialog({
                 <table className="op-preview-table">
                   <thead>
                     <tr>
-                      {opType !== "combine_columns" && <th>Original</th>}
+                      {opType !== "combine_columns" && opType !== "conditional_column" && <th>Original</th>}
                       <th>Result</th>
                     </tr>
                   </thead>
                   <tbody>
                     {previews.map((p, i) => (
                       <tr key={i}>
-                        {opType !== "combine_columns" && <td>{p.original}</td>}
+                        {opType !== "combine_columns" && opType !== "conditional_column" && <td>{p.original}</td>}
                         <td>{p.result}</td>
                       </tr>
                     ))}
@@ -772,6 +936,8 @@ export function DataOperationsDialog({
                   ? !param1 || Number(param1) <= 0 || (sampleMode === "percent" && Number(param1) > 100)
                   : opType === "remove_duplicates"
                   ? dedupColumns.length === 0
+                  : opType === "conditional_column"
+                  ? !targetCol || caseConditions.filter((c) => c.column && c.operator && c.result).length === 0
                   : !sourceCol
               }
             />

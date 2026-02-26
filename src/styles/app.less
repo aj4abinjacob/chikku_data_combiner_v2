@@ -801,6 +801,59 @@ html, body, #root {
   }
 }
 
+// ── Conditional column (CASE) builder ──
+.case-condition-list {
+  border: 1px solid #d8e1e8;
+  border-radius: 4px;
+  background: #fafcfd;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.case-condition-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+
+  .case-condition-label,
+  .case-condition-then {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #5c7080;
+    flex-shrink: 0;
+    letter-spacing: 0.3px;
+  }
+
+  .case-condition-col {
+    min-width: 0;
+    flex: 1;
+    max-width: 140px;
+  }
+
+  .case-condition-op {
+    flex-shrink: 0;
+    max-width: 130px;
+  }
+
+  .case-condition-value {
+    flex: 1;
+    min-width: 60px;
+    max-width: 120px;
+  }
+
+  .case-condition-result {
+    flex: 1;
+    min-width: 60px;
+    max-width: 120px;
+  }
+}
+
 // ── Column operation preview ──
 .op-preview {
   border-top: 1px solid #e1e8ed;

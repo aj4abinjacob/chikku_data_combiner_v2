@@ -175,7 +175,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 ### DataOperationsDialog.tsx — Data Operations Modal
 - Extracted from Sidebar; self-contained dialog for column/row transforms
 - Props: `isOpen`, `onClose`, `activeTable`, `schema`, `onApply(sql)`, `onSampleTable(n, isPercent)`
-- 13 operation types:
+- 14 operation types:
   - `regex_extract` — regexp_extract() with user-provided pattern + capture group index; casts source to VARCHAR first so it works on any data type
   - `trim` — TRIM()
   - `upper` / `lower` — UPPER() / LOWER()
@@ -188,6 +188,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
   - `rename_column` — renames a column using `ALTER TABLE ... RENAME COLUMN`; requires source column and new name; no preview
   - `sample_table` — creates a new table with a random sample of rows; supports "Number of rows" or "Percentage" mode via DuckDB `USING SAMPLE`; delegates to `onSampleTable` callback (creates `sample_N` table like combine creates `combined_N`); no preview
   - `remove_duplicates` — deduplicates rows based on user-selected columns; converts empty strings to NULL via `NULLIF()` on all VARCHAR columns in a CTE, then uses `QUALIFY row_number() OVER (PARTITION BY ...)` for dedup; multi-select checkboxes with Select All/Deselect All and search; preview shows row count before/after
+  - `conditional_column` — creates a new column using a CASE WHEN expression; multi-row condition builder with column, operator (=, !=, >, <, >=, <=, LIKE, NOT LIKE, IS NULL, IS NOT NULL, CONTAINS, STARTS WITH, ENDS WITH), value, and result; supports default ELSE value; live preview shows 5 sample rows; conditions evaluated in order (first match wins)
 - Live preview: fetches 3 sample rows and shows before/after for most operations
 - Builds complete SQL internally and passes to `onApply` (or `onSampleTable` for sample_table)
 
