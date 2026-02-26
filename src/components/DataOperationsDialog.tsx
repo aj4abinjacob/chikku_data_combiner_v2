@@ -9,6 +9,8 @@ import {
   DialogBody,
   DialogFooter,
   FormGroup,
+  RadioGroup,
+  Radio,
 } from "@blueprintjs/core";
 import { ColumnInfo } from "../types";
 
@@ -23,7 +25,9 @@ type OpType =
   | "create_column"
   | "delete_column"
   | "combine_columns"
-  | "rename_column";
+  | "rename_column"
+  | "sample_table"
+  | "remove_duplicates";
 
 const OP_LABELS: Record<OpType, string> = {
   regex_extract: "Regex Extract",
@@ -37,6 +41,8 @@ const OP_LABELS: Record<OpType, string> = {
   delete_column: "Delete Column",
   combine_columns: "Combine Columns",
   rename_column: "Rename Column",
+  sample_table: "Sample Table",
+  remove_duplicates: "Remove Duplicates",
 };
 
 interface DataOperationsDialogProps {
@@ -45,6 +51,7 @@ interface DataOperationsDialogProps {
   activeTable: string | null;
   schema: ColumnInfo[];
   onApply: (sql: string) => void;
+  onSampleTable: (n: number, isPercent: boolean) => void;
 }
 
 export function DataOperationsDialog({
@@ -53,6 +60,7 @@ export function DataOperationsDialog({
   activeTable,
   schema,
   onApply,
+  onSampleTable,
 }: DataOperationsDialogProps): React.ReactElement {
   const [opType, setOpType] = useState<OpType>("regex_extract");
   const [sourceCol, setSourceCol] = useState("");
@@ -63,8 +71,12 @@ export function DataOperationsDialog({
   const [combineSearch, setCombineSearch] = useState("");
   const [renameRows, setRenameRows] = useState<Array<{ sourceCol: string; newName: string }>>([{ sourceCol: "", newName: "" }]);
   const [deleteColumns, setDeleteColumns] = useState<string[]>([]);
+  const [dedupColumns, setDedupColumns] = useState<string[]>([]);
+  const [dedupSearch, setDedupSearch] = useState("");
+  const [sampleMode, setSampleMode] = useState<"rows" | "percent">("rows");
   const [previews, setPreviews] = useState<Array<{ original: string; result: string }>>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [dedupPreview, setDedupPreview] = useState<{ before: number; after: number } | null>(null);
 
   // Build a lookup map from schema for column types
   const colTypeMap = React.useMemo(() => {
@@ -130,11 +142,46 @@ export function DataOperationsDialog({
       return;
     }
 
-    // delete_column, create_column, rename_column: no preview needed
-    if (opType === "delete_column" || opType === "create_column" || opType === "rename_column") {
+    // delete_column, create_column, rename_column, sample_table: no preview needed
+    if (opType === "delete_column" || opType === "create_column" || opType === "rename_column" || opType === "sample_table") {
       setPreviews([]);
       setPreviewError(null);
       return;
+    }
+
+    // remove_duplicates: show row count before/after
+    if (opType === "remove_duplicates") {
+      setPreviews([]);
+      setPreviewError(null);
+      if (dedupColumns.length === 0) {
+        setDedupPreview(null);
+        return;
+      }
+      const timer = setTimeout(async () => {
+        try {
+          // Build NULLIF for varchar columns in PARTITION BY
+          const partitionCols = dedupColumns.map((col) => {
+            const colType = colTypeMap.get(col) || "";
+            const isVarchar = /^(VARCHAR|TEXT|STRING|CHAR)/i.test(colType);
+            return isVarchar ? `NULLIF("${col}", '')` : `"${col}"`;
+          }).join(", ");
+          const beforeSql = `SELECT COUNT(*) AS cnt FROM "${activeTable}"`;
+          const afterSql = `SELECT COUNT(*) AS cnt FROM (SELECT *, row_number() OVER (PARTITION BY ${partitionCols}) AS _rn FROM "${activeTable}") WHERE _rn = 1`;
+          const [beforeResult, afterResult] = await Promise.all([
+            window.api.query(beforeSql),
+            window.api.query(afterSql),
+          ]);
+          setDedupPreview({
+            before: Number(beforeResult[0].cnt),
+            after: Number(afterResult[0].cnt),
+          });
+          setPreviewError(null);
+        } catch (e: any) {
+          setDedupPreview(null);
+          setPreviewError(e.message || "Preview failed");
+        }
+      }, 300);
+      return () => clearTimeout(timer);
     }
 
     // combine_columns: preview the concatenation result
@@ -183,7 +230,7 @@ export function DataOperationsDialog({
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [isOpen, activeTable, sourceCol, opType, param1, param2, combineSourceCols]);
+  }, [isOpen, activeTable, sourceCol, opType, param1, param2, combineSourceCols, dedupColumns]);
 
   const resetForm = () => {
     setSourceCol("");
@@ -194,13 +241,51 @@ export function DataOperationsDialog({
     setCombineSearch("");
     setRenameRows([{ sourceCol: "", newName: "" }]);
     setDeleteColumns([]);
+    setDedupColumns([]);
+    setDedupSearch("");
+    setSampleMode("rows");
     setOpType("regex_extract");
     setPreviews([]);
     setPreviewError(null);
+    setDedupPreview(null);
   };
 
   const handleApply = () => {
     if (!activeTable) return;
+
+    // sample_table: delegate to onSampleTable callback
+    if (opType === "sample_table") {
+      const n = Number(param1);
+      if (!n || n <= 0) return;
+      if (sampleMode === "percent" && n > 100) return;
+      onSampleTable(n, sampleMode === "percent");
+      onClose();
+      resetForm();
+      return;
+    }
+
+    // remove_duplicates: build dedup SQL
+    if (opType === "remove_duplicates") {
+      if (dedupColumns.length === 0) return;
+      // CTE that converts empty strings to NULL for all VARCHAR columns
+      const cleanedCols = schema.map((col) => {
+        const isVarchar = /^(VARCHAR|TEXT|STRING|CHAR)/i.test(col.column_type);
+        return isVarchar
+          ? `NULLIF("${col.column_name}", '') AS "${col.column_name}"`
+          : `"${col.column_name}"`;
+      }).join(", ");
+      // PARTITION BY with NULLIF on varchar dedup columns
+      const partitionCols = dedupColumns.map((col) => {
+        const colType = colTypeMap.get(col) || "";
+        const isVarchar = /^(VARCHAR|TEXT|STRING|CHAR)/i.test(colType);
+        return isVarchar ? `NULLIF("${col}", '')` : `"${col}"`;
+      }).join(", ");
+      const finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS WITH cleaned AS (SELECT ${cleanedCols} FROM "${activeTable}") SELECT * FROM cleaned QUALIFY row_number() OVER (PARTITION BY ${partitionCols}) = 1`;
+      onApply(finalSql);
+      onClose();
+      resetForm();
+      return;
+    }
 
     let finalSql: string;
 
@@ -279,8 +364,8 @@ export function DataOperationsDialog({
             </HTMLSelect>
           </FormGroup>
 
-          {/* Source Column — shown for all ops except create_column, combine_columns, rename_column, delete_column */}
-          {opType !== "create_column" && opType !== "combine_columns" && opType !== "rename_column" && opType !== "delete_column" && (
+          {/* Source Column — hidden for create_column, combine_columns, rename_column, delete_column, sample_table, remove_duplicates */}
+          {opType !== "create_column" && opType !== "combine_columns" && opType !== "rename_column" && opType !== "delete_column" && opType !== "sample_table" && opType !== "remove_duplicates" && (
             <FormGroup label="Source Column">
               <HTMLSelect
                 value={sourceCol}
@@ -297,8 +382,8 @@ export function DataOperationsDialog({
             </FormGroup>
           )}
 
-          {/* Target Column — shown for all ops except delete_column and rename_column */}
-          {opType !== "delete_column" && opType !== "rename_column" && (
+          {/* Target Column — hidden for delete_column, rename_column, sample_table, remove_duplicates */}
+          {opType !== "delete_column" && opType !== "rename_column" && opType !== "sample_table" && opType !== "remove_duplicates" && (
             <FormGroup
               label={opType === "create_column" || opType === "combine_columns" ? "New Column Name" : "Target Column Name"}
               helperText={opType === "create_column" || opType === "combine_columns" ? undefined : "Leave blank to replace the source column"}
@@ -478,6 +563,96 @@ export function DataOperationsDialog({
             </>
           )}
 
+          {/* sample_table: sample mode + size */}
+          {opType === "sample_table" && (
+            <>
+              <FormGroup label="Sample Mode">
+                <RadioGroup
+                  selectedValue={sampleMode}
+                  onChange={(e) => setSampleMode((e.target as HTMLInputElement).value as "rows" | "percent")}
+                  inline
+                >
+                  <Radio label="Number of rows" value="rows" />
+                  <Radio label="Percentage" value="percent" />
+                </RadioGroup>
+              </FormGroup>
+              <FormGroup
+                label={sampleMode === "rows" ? "Number of Rows" : "Percentage (0-100)"}
+                helperText={sampleMode === "rows" ? "How many rows to sample" : "What percentage of rows to sample"}
+              >
+                <InputGroup
+                  value={param1}
+                  onChange={(e) => setParam1(e.target.value)}
+                  placeholder={sampleMode === "rows" ? "100" : "10"}
+                  type="number"
+                />
+              </FormGroup>
+            </>
+          )}
+
+          {/* remove_duplicates: multi-select columns for dedup */}
+          {opType === "remove_duplicates" && (
+            <>
+              <FormGroup label="Deduplicate by Columns" helperText="Select columns to check for duplicates. Rows with identical values in these columns will be deduplicated.">
+                <div className="combine-col-list">
+                  <div className="combine-col-search" style={{ display: "flex", gap: 4 }}>
+                    <InputGroup
+                      leftIcon="search"
+                      placeholder="Search columns..."
+                      value={dedupSearch}
+                      onChange={(e) => setDedupSearch(e.target.value)}
+                      small
+                      style={{ flex: 1 }}
+                    />
+                    <Button
+                      small
+                      minimal
+                      text={dedupColumns.length === schema.length ? "Deselect All" : "Select All"}
+                      onClick={() => {
+                        if (dedupColumns.length === schema.length) {
+                          setDedupColumns([]);
+                        } else {
+                          setDedupColumns(schema.map((c) => c.column_name));
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="combine-col-items">
+                    {schema
+                      .filter((col) => col.column_name.toLowerCase().includes(dedupSearch.toLowerCase()))
+                      .map((col) => {
+                        const isSelected = dedupColumns.includes(col.column_name);
+                        return (
+                          <div key={col.column_name} className={`combine-col-item${isSelected ? " selected" : ""}`}>
+                            <Checkbox
+                              checked={isSelected}
+                              onChange={() => {
+                                if (isSelected) {
+                                  setDedupColumns((prev) => prev.filter((c) => c !== col.column_name));
+                                } else {
+                                  setDedupColumns((prev) => [...prev, col.column_name]);
+                                }
+                              }}
+                              style={{ marginBottom: 0 }}
+                            />
+                            <span className="combine-col-name">{col.column_name}</span>
+                            <span className="column-type">{col.column_type}</span>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              </FormGroup>
+              {dedupPreview && (
+                <div className="bp4-callout bp4-intent-primary" style={{ marginBottom: 10 }}>
+                  <p style={{ margin: 0 }}>
+                    {dedupPreview.before.toLocaleString()} rows → {dedupPreview.after.toLocaleString()} rows ({(dedupPreview.before - dedupPreview.after).toLocaleString()} duplicate{dedupPreview.before - dedupPreview.after !== 1 ? "s" : ""} will be removed)
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+
           {opType === "regex_extract" && (
             <>
               <FormGroup label="Pattern (regex)" helperText="Use a capture group, e.g. ([0-9]+)">
@@ -549,7 +724,7 @@ export function DataOperationsDialog({
           )}
 
           {/* Preview — shown for operations that produce a result */}
-          {opType !== "delete_column" && opType !== "create_column" && opType !== "rename_column" && (previews.length > 0 || previewError) && (
+          {opType !== "delete_column" && opType !== "create_column" && opType !== "rename_column" && opType !== "sample_table" && opType !== "remove_duplicates" && (previews.length > 0 || previewError) && (
             <div className="op-preview">
               <div className="op-preview-header">Preview</div>
               {previewError ? (
@@ -593,6 +768,10 @@ export function DataOperationsDialog({
                   ? combineSourceCols.length < 2 || !targetCol
                   : opType === "rename_column"
                   ? renameRows.filter((r) => r.sourceCol && r.newName.trim()).length === 0
+                  : opType === "sample_table"
+                  ? !param1 || Number(param1) <= 0 || (sampleMode === "percent" && Number(param1) > 100)
+                  : opType === "remove_duplicates"
+                  ? dedupColumns.length === 0
                   : !sourceCol
               }
             />

@@ -23,6 +23,13 @@ function nextCombinedName(existingNames: Set<string>): string {
   return `combined_${i}`;
 }
 
+/** Generate a unique "sample_N" table name that doesn't collide with existing tables */
+function nextSampleName(existingNames: Set<string>): string {
+  let i = 1;
+  while (existingNames.has(`sample_${i}`)) i++;
+  return `sample_${i}`;
+}
+
 export function App(): React.ReactElement {
   const [tables, setTables] = useState<LoadedTable[]>([]);
   const [activeTable, setActiveTable] = useState<string | null>(null);
@@ -96,8 +103,8 @@ export function App(): React.ReactElement {
       if (!at) return;
       const savePath = await window.api.saveDialog();
       if (!savePath) return;
-      // Exclude auto-generated combined tables from the export UNION ALL
-      const sourceTables = t.filter((tb) => tb.filePath !== "(combined)");
+      // Exclude auto-generated combined/sample tables from the export UNION ALL
+      const sourceTables = t.filter((tb) => tb.filePath !== "(combined)" && tb.filePath !== "(sample)");
       const sql =
         sourceTables.length > 1
           ? buildCombineQuery(sourceTables.map((tb) => tb.tableName))
@@ -271,6 +278,46 @@ export function App(): React.ReactElement {
     [activeTable]
   );
 
+  // Sample table: create a new table with a random sample of rows
+  const handleSampleTable = useCallback(
+    async (n: number, isPercent: boolean) => {
+      if (!activeTable) return;
+      try {
+        const existingNames = new Set(tablesRef.current.map((t) => t.tableName));
+        const sampleName = nextSampleName(existingNames);
+        const sampleClause = isPercent ? `${n} PERCENT` : `${n} ROWS`;
+        await window.api.exec(
+          `CREATE TABLE "${sampleName}" AS SELECT * FROM "${activeTable}" USING SAMPLE ${sampleClause}`
+        );
+        const desc = await window.api.describe(sampleName);
+        const countResult = await window.api.query(
+          `SELECT COUNT(*) as count FROM "${sampleName}"`
+        );
+        const sampleTable: LoadedTable = {
+          tableName: sampleName,
+          filePath: "(sample)",
+          schema: desc,
+          rowCount: Number(countResult[0].count),
+        };
+
+        setTables((prev) => [...prev, sampleTable]);
+        setActiveTable(sampleName);
+        setViewState((prev) => ({
+          ...prev,
+          filters: [],
+          visibleColumns: [],
+          columnOrder: [],
+          sortColumn: null,
+          sortDirection: "ASC",
+        }));
+        setResetKey((k) => k + 1);
+      } catch (err) {
+        console.error("Sample table error:", err);
+      }
+    },
+    [activeTable]
+  );
+
   const hasData = tables.length > 0;
 
   return (
@@ -298,6 +345,7 @@ export function App(): React.ReactElement {
             onToggleColumn={toggleColumn}
             onReorderColumns={reorderColumns}
             onDataOperation={handleDataOperation}
+            onSampleTable={handleSampleTable}
             onDeleteTable={handleDeleteTable}
             onCombine={handleCombineOpen}
             onHide={() => setSidebarVisible(false)}

@@ -111,6 +111,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - `handleCombineOpen(selectedNames)` — stores selected table names, opens CombineDialog with only those tables
 - `handleCombineExecute(sql)` — executes combine SQL from dialog, creates a uniquely named table (`combined_1`, `combined_2`, etc.) via `nextCombinedName()` — never overwrites user-loaded tables
 - `handleDataOperation(sql)` — executes arbitrary SQL for data transforms (column/row operations)
+- `handleSampleTable(n, isPercent)` — creates a new `sample_N` table with a random sample of rows from active table using DuckDB `USING SAMPLE`; adds to tables state with `filePath: "(sample)"`
 - Schema fetching effect: re-fetches schema on `activeTable` change, auto-populates `visibleColumns`
 - `resetKey` counter: increments on table/filter/sort/column changes to trigger DataGrid scroll-to-top
 - Layout: `Sidebar + DataGrid + FilterPanel + StatusBar + CombineDialog`
@@ -126,8 +127,8 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 
 ### DataOperationsDialog.tsx — Data Operations Modal
 - Extracted from Sidebar; self-contained dialog for column/row transforms
-- Props: `isOpen`, `onClose`, `activeTable`, `schema`, `onApply(sql)`
-- 11 operation types:
+- Props: `isOpen`, `onClose`, `activeTable`, `schema`, `onApply(sql)`, `onSampleTable(n, isPercent)`
+- 13 operation types:
   - `regex_extract` — regexp_extract() with user-provided pattern + capture group index; casts source to VARCHAR first so it works on any data type
   - `trim` — TRIM()
   - `upper` / `lower` — UPPER() / LOWER()
@@ -138,8 +139,10 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
   - `delete_column` — removes a column from the table; prevents deleting the last column; red "Delete" button with warning callout
   - `combine_columns` — concatenates 2+ selected columns with an optional separator; all columns cast to VARCHAR; multi-select checkboxes with numbered order badges
   - `rename_column` — renames a column using `ALTER TABLE ... RENAME COLUMN`; requires source column and new name; no preview
+  - `sample_table` — creates a new table with a random sample of rows; supports "Number of rows" or "Percentage" mode via DuckDB `USING SAMPLE`; delegates to `onSampleTable` callback (creates `sample_N` table like combine creates `combined_N`); no preview
+  - `remove_duplicates` — deduplicates rows based on user-selected columns; converts empty strings to NULL via `NULLIF()` on all VARCHAR columns in a CTE, then uses `QUALIFY row_number() OVER (PARTITION BY ...)` for dedup; multi-select checkboxes with Select All/Deselect All and search; preview shows row count before/after
 - Live preview: fetches 3 sample rows and shows before/after for most operations
-- Builds complete SQL internally and passes to `onApply`
+- Builds complete SQL internally and passes to `onApply` (or `onSampleTable` for sample_table)
 
 ### DataGrid.tsx — Virtualized Scrollable Data Grid
 - **Virtual scrolling** via `@tanstack/react-virtual` `useVirtualizer` — only renders visible rows (~30-50) plus 20 overscan rows
@@ -250,7 +253,9 @@ ViewState         // { visibleColumns[], columnOrder[], filters[], sortColumn, s
 8. **Delete**: User hovers table row → clicks `x` → confirms in Alert → `DROP TABLE IF EXISTS` via IPC, removed from state
 9. **Combine**: User selects tables via checkboxes (combined tables excluded) → clicks "Combine N Selected" → CombineDialog opens with only selected tables → maps output←input columns → generates mapped UNION ALL SQL (with auto VARCHAR cast for type mismatches) → creates uniquely named `combined_N` table
 10. Data operations rebuild tables with `CREATE OR REPLACE TABLE ... AS SELECT`
-11. Export: `COPY (query) TO 'path' (HEADER, DELIMITER ',')` — combined tables are excluded from the export UNION ALL to prevent row duplication
+11. **Sample Table**: User selects "Sample Table" in Data Operations → chooses row count or percentage → creates a new `sample_N` table via `CREATE TABLE ... AS SELECT * FROM ... USING SAMPLE`; appears in sidebar with `filePath: "(sample)"`
+12. **Remove Duplicates**: User selects columns to dedup → empty strings converted to NULL via `NULLIF()` on all VARCHAR columns in a CTE → deduped via `QUALIFY row_number() OVER (PARTITION BY ...) = 1`
+13. Export: `COPY (query) TO 'path' (HEADER, DELIMITER ',')` — combined and sample tables are excluded from the export UNION ALL to prevent row duplication
 
 ## Keyboard Shortcuts
 

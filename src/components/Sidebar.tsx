@@ -20,6 +20,7 @@ interface SidebarProps {
   onToggleColumn: (colName: string) => void;
   onReorderColumns: (newOrder: string[]) => void;
   onDataOperation: (sql: string) => void;
+  onSampleTable: (n: number, isPercent: boolean) => void;
   onDeleteTable: (tableName: string) => void;
   onCombine: (selectedNames: string[]) => void;
   onHide: () => void;
@@ -37,6 +38,7 @@ export function Sidebar({
   onToggleColumn,
   onReorderColumns,
   onDataOperation,
+  onSampleTable,
   onDeleteTable,
   onCombine,
   onHide,
@@ -274,6 +276,7 @@ export function Sidebar({
         activeTable={activeTable}
         schema={schema}
         onApply={onDataOperation}
+        onSampleTable={onSampleTable}
       />
     </div>
   );
