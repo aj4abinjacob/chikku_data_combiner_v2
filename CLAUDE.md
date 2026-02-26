@@ -6,9 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Important:** After completing any code change, always ask the user if they want to commit and push. If they agree, create a commit with an adequate message and push to the remote.
 
+**Important:** When the user asks for a change or a new feature, always clarify any doubts or ambiguities before starting implementation. Ask questions first, code second.
+
 ## Project
 
-Chikku Data Combiner v2 — an Electron desktop app for viewing, combining, and transforming CSV data. Built with React, DuckDB, and BlueprintJS.
+Chikku Data Combiner v2 — an Electron desktop app for viewing, combining, and transforming data files. Supports CSV, TSV, JSON, Parquet, and Excel (.xlsx/.xls) formats. Built with React, DuckDB, BlueprintJS, and SheetJS (xlsx).
 
 ## Commands
 
@@ -37,21 +39,29 @@ npm run clean        # Remove dist/
 
 - Creates BrowserWindow with context isolation + preload, app icon set from `res/icon.svg`
 - **Per-window DuckDB instances** — each window gets its own in-memory `Database(":memory:")` stored in `dbMap: Map<webContentsId, Database>`. Cleaned up with `db.close()` on window close. No shared state between windows.
-- Native menu: File (Open CSV, Add CSV, Export CSV, Quit), Edit, View
+- Promisified helpers: `runPromise(db, sql)` and `allPromise(db, sql)` wrap DuckDB callbacks
+- Native menu: File (Open File, Add File, Export, Quit), Edit, View
+- Open/Add dialogs accept: `.csv`, `.tsv`, `.json`, `.jsonl`, `.ndjson`, `.parquet`, `.xlsx`, `.xls`
 - Menu actions use `BrowserWindow.getFocusedWindow()` to target the active window
 - IPC handlers resolve the correct DB via `event.sender.id`
+- **Excel import strategy**: converts sheet to temp CSV via `xlsx.utils.sheet_to_csv()`, loads into DuckDB with `read_csv_auto()`, cleans up temp file in `finally` block
 
 ### IPC Handlers
 
 | Channel | Purpose |
 |---------|---------|
-| `db:load-csv` | `CREATE OR REPLACE TABLE ... AS SELECT * FROM read_csv_auto(...)`, returns `{tableName, schema, rowCount}` |
+| `db:load-csv` | (Legacy) `CREATE OR REPLACE TABLE ... AS SELECT * FROM read_csv_auto(...)`, returns `{tableName, schema, rowCount}` |
+| `db:load-file` | Generalized loader: detects format by extension — CSV/TSV → `read_csv_auto()` with optional delimiter/ignore_errors; JSON → `read_json_auto()`; Parquet → `read_parquet()`; Excel → xlsx→temp CSV→DuckDB. Returns `{tableName, schema, rowCount}` or `{error, canRetry}` on CSV parse failure. |
+| `file:get-excel-sheets` | Reads `.xlsx`/`.xls` via SheetJS, returns `{name, rowCount}[]` for sheet picker |
 | `db:query` | Execute SELECT, return rows |
 | `db:exec` | Execute DDL/DML (CREATE, ALTER, etc.), return boolean |
 | `db:describe` | `DESCRIBE "tableName"`, return schema |
 | `db:tables` | `SHOW TABLES`, return table list |
-| `db:export-csv` | `COPY (sql) TO 'path' (HEADER, DELIMITER ',')` |
-| `dialog:save-csv` | Native save dialog, returns file path or null |
+| `db:export-csv` | (Legacy) `COPY (sql) TO 'path' (HEADER, DELIMITER ',')` |
+| `db:export-file` | Export query to file: CSV/TSV → `COPY ... (HEADER, DELIMITER)`, JSON → `COPY ... (FORMAT JSON, ARRAY true)`, Parquet → `COPY ... (FORMAT PARQUET)`, Excel → query rows + `xlsx.writeFile()` |
+| `db:export-excel-multi` | Takes `{sheetName, sql}[]`, queries each, builds multi-sheet workbook via SheetJS |
+| `dialog:save-csv` | (Legacy) Native save dialog for CSV |
+| `dialog:save-file` | Save dialog with format-specific filters |
 
 ### Preload (`app/preload.ts`)
 
@@ -60,12 +70,17 @@ Context bridge exposing `window.api` (typed as `DbApi`):
 ```typescript
 interface DbApi {
   loadCSV(filePath: string, tableName: string): Promise<{tableName, schema, rowCount}>
+  loadFile(filePath: string, tableName: string, options?: ImportOptions): Promise<any>
+  getExcelSheets(filePath: string): Promise<SheetInfo[]>
   query(sql: string): Promise<any[]>
   exec(sql: string): Promise<boolean>
   describe(tableName: string): Promise<ColumnInfo[]>
   tables(): Promise<any[]>
   exportCSV(sql: string, filePath: string): Promise<boolean>
+  exportFile(sql: string, filePath: string, format: string): Promise<boolean>
+  exportExcelMulti(sheets: {sheetName, sql}[], filePath: string): Promise<boolean>
   saveDialog(): Promise<string | null>
+  saveFileDialog(format: string): Promise<string | null>
   onOpenFiles(callback: (paths: string[]) => void): void   // Cmd+O
   onAddFiles(callback: (paths: string[]) => void): void    // Cmd+Shift+O
   onExportCSV(callback: () => void): void                   // Cmd+E
@@ -79,7 +94,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 ### Key Directories
 
 - `app/` — Electron main process + preload (Node.js context)
-- `src/components/` — React components (10 files)
+- `src/components/` — React components (15 files)
 - `src/hooks/` — Custom React hooks (`useChunkCache`)
 - `src/utils/` — SQL query builder utilities
 - `src/types.ts` — All TypeScript interfaces
@@ -92,7 +107,8 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - **Electron 31** — desktop shell
 - **React 18** — UI framework
 - **TypeScript 5** — all source files (strict mode, target ES2020, module CommonJS)
-- **DuckDB** — in-memory analytical database for CSV loading, querying, combining, and data operations
+- **DuckDB** — in-memory analytical database for loading, querying, combining, and data operations (handles CSV, TSV, JSON, Parquet natively)
+- **SheetJS (xlsx)** — reading/writing Excel `.xlsx`/`.xls` files in the main process
 - **BlueprintJS 4** — UI component library (`@blueprintjs/core`, `@blueprintjs/icons`, `@blueprintjs/popover2`)
 - **@tanstack/react-virtual** — virtual scrolling for the DataGrid (renders only visible rows)
 - **Webpack 5** — bundles 3 targets with ts-loader, less/css loaders, file-loader for fonts
@@ -103,10 +119,12 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 ## Components
 
 ### App.tsx — Main Orchestrator
-- State: `tables[]`, `activeTable`, `viewState`, `schema`, `resetKey`, `combineDialogOpen`, `combineTableNames`
+- State: `tables[]`, `activeTable`, `viewState`, `schema`, `resetKey`, `combineDialogOpen`, `combineTableNames`, `exportDialogOpen`, `pendingExcelImport`, `pendingRetry`
 - Uses `useChunkCache` hook for lazy data loading (no `rows`/`totalRows` state — provided by the hook)
-- Registers IPC listeners on mount: `onOpenFiles` (replace), `onAddFiles` (append), `onExportCSV`
-- `loadFiles(filePaths, replace)` — loads CSVs into DuckDB, updates table list
+- Registers IPC listeners on mount: `onOpenFiles` (replace), `onAddFiles` (append), `onExportCSV` (opens ExportDialog)
+- `loadFiles(filePaths, replace)` — detects format by extension: Excel → `getExcelSheets()`, if >1 sheet opens `ExcelSheetPickerDialog`, else imports directly; CSV/TSV → tries `loadFile()`, on failure opens `ImportRetryDialog`; JSON/Parquet → straight `loadFile()` call
+- `handleExcelSheetImport(selectedSheets)` — imports selected sheets from the pending Excel file, each as a separate table named `{fileName}_{sheetName}`
+- `handleRetryImport(options)` — retries failed CSV import with user-specified delimiter/ignore_errors options
 - `handleDeleteTable(tableName)` — drops table from DuckDB via `DROP TABLE IF EXISTS`, removes from state, switches active table if needed
 - `handleCombineOpen(selectedNames)` — stores selected table names, opens CombineDialog with only those tables
 - `handleCombineExecute(sql)` — executes combine SQL from dialog, creates a uniquely named table (`combined_1`, `combined_2`, etc.) via `nextCombinedName()` — never overwrites user-loaded tables
@@ -117,7 +135,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - `handleLookupMerge(sql, options)` — executes a JOIN SQL for the Lookup Merge feature; if `options.replaceActive` is true, replaces the active table via `CREATE OR REPLACE TABLE`; otherwise creates a new `merge_N` table with `filePath: "(merge)"`
 - Schema fetching effect: re-fetches schema on `activeTable` change, auto-populates `visibleColumns`
 - `resetKey` counter: increments on table/filter/sort/column changes to trigger DataGrid scroll-to-top
-- Layout: `Sidebar + DataGrid + FilterPanel + StatusBar + CombineDialog + LookupMergeDialog`
+- Layout: `Sidebar + DataGrid + FilterPanel + StatusBar + CombineDialog + ExportDialog + ExcelSheetPickerDialog + ImportRetryDialog`
 
 ### Sidebar.tsx — Left Panel
 - Lists loaded tables with row counts (click to switch active table)
@@ -129,7 +147,30 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - "Aggregate" button opens `AggregateDialog`
 - "Pivot Table" button opens `PivotDialog`
 - "Lookup Merge" button opens `LookupMergeDialog` (visible when 2+ tables loaded)
+- "Export" button opens `ExportDialog`
 - Filter panel toggle button
+
+### ExportDialog.tsx — Export Data Modal
+- Full export dialog (Cmd+E opens it instead of auto-exporting)
+- Props: `isOpen`, `onClose`, `tables`, `activeTable`, `viewState`, `schema`
+- **Format**: radio group — CSV, TSV, JSON, Excel (.xlsx), Parquet
+- **Tables**: radio toggle — "Active table only" (default) vs "Select tables" (checkbox list); for Excel multi-table exports, each becomes a sheet
+- **View Options**: shown when active table has filters/sort/hidden/reordered columns — "Export current view" vs "Export full data"
+- **Warnings**: yellow Callout when any table exceeds Excel's 1,048,576 row or 16,384 column limits
+- Export flow: opens native save dialog → single table non-Excel uses `exportFile()`, single table Excel uses `exportFile()`, multi-table Excel uses `exportExcelMulti()`, multi-table non-Excel builds UNION ALL
+
+### ExcelSheetPickerDialog.tsx — Excel Sheet Picker Modal
+- Shown when opening an `.xlsx`/`.xls` file with multiple sheets
+- Checkbox list of sheets (name + row count), Select All / Deselect All
+- "Import N Sheets" button — each selected sheet becomes a separate DuckDB table named `{fileName}_{sheetName}`
+- If only 1 sheet → skipped, imported directly
+
+### ImportRetryDialog.tsx — CSV Import Retry Modal
+- Shown when CSV auto-detect fails (parse error)
+- Red Callout showing the error message
+- Delimiter dropdown: Auto, Comma, Tab, Semicolon, Pipe, Custom
+- Checkbox: "Skip malformed rows"
+- "Retry" button calls `loadFile()` again with specified options
 
 ### DataOperationsDialog.tsx — Data Operations Modal
 - Extracted from Sidebar; self-contained dialog for column/row transforms
@@ -269,6 +310,11 @@ ColumnOperation   // { type, sourceColumn, targetColumn, params: Record<string,s
 FilterCondition   // { column, operator, value }
 ColumnMapping     // { id, outputColumn, inputColumns: string[] }
 ViewState         // { visibleColumns[], columnOrder[], filters[], sortColumn, sortDirection }
+FileFormat        // "csv" | "tsv" | "json" | "parquet" | "xlsx" | "xls"
+ImportOptions     // { csvDelimiter?, csvIgnoreErrors?, excelSheet? }
+SheetInfo         // { name, rowCount }
+EXCEL_MAX_ROWS    // 1,048,576
+EXCEL_MAX_COLS    // 16,384
 ```
 
 ## SQL Builder (`src/utils/sqlBuilder.ts`)
@@ -293,11 +339,13 @@ ViewState         // { visibleColumns[], columnOrder[], filters[], sortColumn, s
 - Cell classes: `.dg-cell`, `.dg-row-num-cell`, `.dg-header-cell`, `.cell-selected`, `.loading-cell`, `.column-dragging`
 - Filter inputs match HTMLSelect appearance: `height: 30px`, border styling
 - Combine dialog inputs also use `height: 30px` to match
+- Export dialog: `.export-format-row`, `.export-table-grid`
+- Import retry: `.import-retry-form`
 
 ## Data Flow
 
-1. User opens CSV files via native file dialog (Cmd+O to replace, Cmd+Shift+O to add)
-2. Main process loads CSVs into the window's DuckDB instance via `read_csv_auto()`
+1. User opens data files via native file dialog (Cmd+O to replace, Cmd+Shift+O to add) — supports CSV, TSV, JSON, Parquet, Excel
+2. **Import routing by format**: CSV/TSV → `read_csv_auto()` (with retry dialog on parse failure); JSON → `read_json_auto()`; Parquet → `read_parquet()`; Excel → SheetJS reads workbook, if multiple sheets shows `ExcelSheetPickerDialog`, converts selected sheets to temp CSV for DuckDB loading
 3. Renderer fetches schema via IPC; `useChunkCache` hook manages data loading
 4. As the user scrolls, `@tanstack/react-virtual` computes visible row indices
 5. `useChunkCache.ensureRange()` fetches missing 1000-row chunks from DuckDB via `buildChunkQuery()`
@@ -311,13 +359,13 @@ ViewState         // { visibleColumns[], columnOrder[], filters[], sortColumn, s
 13. **Aggregate**: User opens Aggregate dialog → selects columns and aggregate functions (optionally with Group By) → clicks Run to preview results → optionally clicks "Create as Table" to materialize as `aggregate_N` table with `filePath: "(aggregate)"`
 14. **Pivot Table**: User opens Pivot dialog → selects row fields, pivot column, value fields, and aggregate function → clicks Run to preview cross-tabulation → optionally clicks "Create as Table" to materialize as `pivot_N` table with `filePath: "(pivot)"`; uses DuckDB native `PIVOT ... ON ... USING ... GROUP BY` syntax
 15. **Lookup Merge**: User opens Lookup Merge dialog → selects right table → maps key column pairs (composite keys supported) → selects columns to merge → system checks for duplicate/NULL keys and shows warnings with options → user chooses Left/Inner Join and result mode → "Preview" shows first 10 rows → "Merge" executes the JOIN SQL; creates `merge_N` table with `filePath: "(merge)"` or replaces active table in-place
-16. Export: `COPY (query) TO 'path' (HEADER, DELIMITER ',')` — combined, sample, aggregate, pivot, and merge tables are excluded from the export UNION ALL to prevent row duplication
+16. **Export**: Cmd+E or sidebar Export button opens `ExportDialog` → user picks format (CSV/TSV/JSON/Excel/Parquet), tables, and view options → exports via `exportFile()` or `exportExcelMulti()` for multi-sheet Excel
 
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
-| Cmd+O / Ctrl+O | Open CSV files (replaces current) |
-| Cmd+Shift+O / Ctrl+Shift+O | Add CSV files (appends) |
-| Cmd+E / Ctrl+E | Export CSV |
+| Cmd+O / Ctrl+O | Open files (replaces current) |
+| Cmd+Shift+O / Ctrl+Shift+O | Add files (appends) |
+| Cmd+E / Ctrl+E | Export (opens Export dialog) |
 | Cmd+C / Ctrl+C | Copy selected cells |

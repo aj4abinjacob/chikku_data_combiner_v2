@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@blueprintjs/core";
-import { LoadedTable, ViewState, ColumnInfo, FilterCondition } from "../types";
+import { LoadedTable, ViewState, ColumnInfo, FilterCondition, SheetInfo } from "../types";
 import { Sidebar } from "./Sidebar";
 import { DataGrid } from "./DataGrid";
 import { FilterPanel } from "./FilterPanel";
 import { StatusBar } from "./StatusBar";
 import { CombineDialog } from "./CombineDialog";
+import { ExcelSheetPickerDialog } from "./ExcelSheetPickerDialog";
+import { ImportRetryDialog } from "./ImportRetryDialog";
+import { ExportDialog } from "./ExportDialog";
 import { buildCombineQuery } from "../utils/sqlBuilder";
 import { useChunkCache } from "../hooks/useChunkCache";
 
@@ -14,6 +17,10 @@ function makeTableName(filePath: string): string {
   const dotIdx = name.lastIndexOf(".");
   const base = dotIdx > 0 ? name.substring(0, dotIdx) : name;
   return base.replace(/[^a-zA-Z0-9_]/g, "_");
+}
+
+function getFileExtension(filePath: string): string {
+  return filePath.split(".").pop()?.toLowerCase() || "";
 }
 
 /** Generate a unique "combined_N" table name that doesn't collide with existing tables */
@@ -55,6 +62,22 @@ function escapeIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
+interface PendingExcelImport {
+  filePath: string;
+  fileName: string;
+  sheets: SheetInfo[];
+  replace: boolean;
+  otherFiles: LoadedTable[];
+}
+
+interface PendingRetry {
+  filePath: string;
+  tableName: string;
+  errorMessage: string;
+  replace: boolean;
+  otherFiles: LoadedTable[];
+}
+
 export function App(): React.ReactElement {
   const [tables, setTables] = useState<LoadedTable[]>([]);
   const [activeTable, setActiveTable] = useState<string | null>(null);
@@ -65,6 +88,9 @@ export function App(): React.ReactElement {
   const [schema, setSchema] = useState<ColumnInfo[]>([]);
   const [resetKey, setResetKey] = useState(0);
   const [schemaVersion, setSchemaVersion] = useState(0);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [pendingExcelImport, setPendingExcelImport] = useState<PendingExcelImport | null>(null);
+  const [pendingRetry, setPendingRetry] = useState<PendingRetry | null>(null);
   const [viewState, setViewState] = useState<ViewState>({
     visibleColumns: [],
     columnOrder: [],
@@ -86,23 +112,88 @@ export function App(): React.ReactElement {
     enabled: viewState.visibleColumns.length > 0,
   });
 
-  // Load CSV files into DuckDB
+  // Load a single file into DuckDB (handles all formats)
+  const loadSingleFile = useCallback(
+    async (
+      fp: string,
+      tableName: string,
+      options?: { csvDelimiter?: string; csvIgnoreErrors?: boolean; excelSheet?: string }
+    ): Promise<LoadedTable | { error: string; canRetry: boolean } | null> => {
+      try {
+        const result = await window.api.loadFile(fp, tableName, options);
+        if (result.error) {
+          return { error: result.error, canRetry: result.canRetry };
+        }
+        return {
+          tableName: result.tableName,
+          filePath: fp,
+          schema: result.schema,
+          rowCount: result.rowCount,
+        };
+      } catch (err) {
+        console.error(`Failed to load ${fp}:`, err);
+        return null;
+      }
+    },
+    []
+  );
+
+  // Load files into DuckDB (handles all formats)
   const loadFiles = useCallback(
     async (filePaths: string[], replace: boolean) => {
       const newTables: LoadedTable[] = replace ? [] : [...tablesRef.current];
 
       for (const fp of filePaths) {
-        const tableName = makeTableName(fp);
-        try {
-          const result = await window.api.loadCSV(fp, tableName);
-          newTables.push({
-            tableName: result.tableName,
-            filePath: fp,
-            schema: result.schema,
-            rowCount: result.rowCount,
-          });
-        } catch (err) {
-          console.error(`Failed to load ${fp}:`, err);
+        const ext = getFileExtension(fp);
+
+        if (ext === "xlsx" || ext === "xls") {
+          // Excel: check for multiple sheets
+          try {
+            const sheets = await window.api.getExcelSheets(fp);
+            if (sheets.length > 1) {
+              // Show sheet picker dialog
+              setPendingExcelImport({
+                filePath: fp,
+                fileName: fp.split(/[/\\]/).pop() || fp,
+                sheets,
+                replace,
+                otherFiles: newTables,
+              });
+              return; // Wait for dialog result
+            }
+            // Single sheet — import directly
+            const tableName = makeTableName(fp);
+            const result = await loadSingleFile(fp, tableName, { excelSheet: sheets[0].name });
+            if (result && !("error" in result)) {
+              newTables.push(result);
+            }
+          } catch (err) {
+            console.error(`Failed to load Excel ${fp}:`, err);
+          }
+        } else if (ext === "csv" || ext === "tsv") {
+          // CSV/TSV — try loading, show retry on failure
+          const tableName = makeTableName(fp);
+          const result = await loadSingleFile(fp, tableName);
+          if (result && "error" in result && result.canRetry) {
+            setPendingRetry({
+              filePath: fp,
+              tableName,
+              errorMessage: result.error,
+              replace,
+              otherFiles: newTables,
+            });
+            return; // Wait for retry dialog
+          }
+          if (result && !("error" in result)) {
+            newTables.push(result);
+          }
+        } else {
+          // JSON, Parquet — straight load
+          const tableName = makeTableName(fp);
+          const result = await loadSingleFile(fp, tableName);
+          if (result && !("error" in result)) {
+            newTables.push(result);
+          }
         }
       }
 
@@ -115,26 +206,71 @@ export function App(): React.ReactElement {
         setFilterPanelOpen(false);
       }
     },
-    []
+    [loadSingleFile]
+  );
+
+  // Handle Excel sheet picker result
+  const handleExcelSheetImport = useCallback(
+    async (selectedSheets: string[]) => {
+      if (!pendingExcelImport) return;
+      const { filePath, otherFiles, replace } = pendingExcelImport;
+      const newTables = [...otherFiles];
+      const baseName = makeTableName(filePath);
+
+      for (const sheetName of selectedSheets) {
+        const tableName = `${baseName}_${sheetName.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+        const result = await loadSingleFile(filePath, tableName, { excelSheet: sheetName });
+        if (result && !("error" in result)) {
+          newTables.push(result);
+        }
+      }
+
+      setTables(newTables);
+      if (newTables.length > 0) {
+        setActiveTable(newTables[replace ? 0 : newTables.length - selectedSheets.length].tableName);
+        setViewState((prev) => ({ ...prev, filters: [] }));
+        setResetKey((k) => k + 1);
+        setFilterPanelOpen(false);
+      }
+      setPendingExcelImport(null);
+    },
+    [pendingExcelImport, loadSingleFile]
+  );
+
+  // Handle CSV retry
+  const handleRetryImport = useCallback(
+    async (options: { csvDelimiter?: string; csvIgnoreErrors?: boolean }) => {
+      if (!pendingRetry) return;
+      const { filePath, tableName, otherFiles } = pendingRetry;
+      const newTables = [...otherFiles];
+
+      const result = await loadSingleFile(filePath, tableName, options);
+      if (result && !("error" in result)) {
+        newTables.push(result);
+      } else if (result && "error" in result) {
+        // Still failing — update the error message
+        setPendingRetry((prev) => prev ? { ...prev, errorMessage: result.error } : null);
+        return;
+      }
+
+      setTables(newTables);
+      if (newTables.length > 0) {
+        setActiveTable(newTables[newTables.length - 1].tableName);
+        setViewState((prev) => ({ ...prev, filters: [] }));
+        setResetKey((k) => k + 1);
+        setFilterPanelOpen(false);
+      }
+      setPendingRetry(null);
+    },
+    [pendingRetry, loadSingleFile]
   );
 
   // Register IPC listeners once on mount
   useEffect(() => {
     window.api.onOpenFiles((filePaths) => loadFiles(filePaths, true));
     window.api.onAddFiles((filePaths) => loadFiles(filePaths, false));
-    window.api.onExportCSV(async () => {
-      const at = activeTableRef.current;
-      const t = tablesRef.current;
-      if (!at) return;
-      const savePath = await window.api.saveDialog();
-      if (!savePath) return;
-      // Exclude auto-generated combined/sample/aggregate tables from the export UNION ALL
-      const sourceTables = t.filter((tb) => tb.filePath !== "(combined)" && tb.filePath !== "(sample)" && tb.filePath !== "(aggregate)" && tb.filePath !== "(pivot)" && tb.filePath !== "(merge)");
-      const sql =
-        sourceTables.length > 1
-          ? buildCombineQuery(sourceTables.map((tb) => tb.tableName))
-          : `SELECT * FROM "${at}"`;
-      await window.api.exportCSV(sql, savePath);
+    window.api.onExportCSV(() => {
+      setExportDialogOpen(true);
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -511,6 +647,7 @@ export function App(): React.ReactElement {
             onCreateAggregateTable={handleCreateAggregateTable}
             onCreatePivotTable={handleCreatePivotTable}
             onLookupMerge={handleLookupMerge}
+            onExport={() => setExportDialogOpen(true)}
             onHide={() => setSidebarVisible(false)}
             filterPanelOpen={filterPanelOpen}
             onToggleFilterPanel={() => setFilterPanelOpen((v) => !v)}
@@ -552,7 +689,7 @@ export function App(): React.ReactElement {
           ) : (
             <div className="welcome">
               <h2>Chikku Data Combiner</h2>
-              <p>Open CSV files to get started (Cmd+O / Ctrl+O)</p>
+              <p>Open files to get started (Cmd+O / Ctrl+O)</p>
               <p>Add more files to combine them (Cmd+Shift+O / Ctrl+Shift+O)</p>
             </div>
           )}
@@ -576,6 +713,32 @@ export function App(): React.ReactElement {
         onClose={() => setCombineDialogOpen(false)}
         onCombine={handleCombineExecute}
       />
+      <ExportDialog
+        isOpen={exportDialogOpen}
+        onClose={() => setExportDialogOpen(false)}
+        tables={tables}
+        activeTable={activeTable}
+        viewState={viewState}
+        schema={schema}
+      />
+      {pendingExcelImport && (
+        <ExcelSheetPickerDialog
+          isOpen={true}
+          fileName={pendingExcelImport.fileName}
+          sheets={pendingExcelImport.sheets}
+          onClose={() => setPendingExcelImport(null)}
+          onImport={handleExcelSheetImport}
+        />
+      )}
+      {pendingRetry && (
+        <ImportRetryDialog
+          isOpen={true}
+          filePath={pendingRetry.filePath}
+          errorMessage={pendingRetry.errorMessage}
+          onClose={() => setPendingRetry(null)}
+          onRetry={handleRetryImport}
+        />
+      )}
     </div>
   );
 }

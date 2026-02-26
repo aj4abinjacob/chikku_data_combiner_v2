@@ -29,6 +29,7 @@ interface SidebarProps {
   onCreateAggregateTable: (sql: string) => void;
   onCreatePivotTable: (sql: string) => void;
   onLookupMerge: (sql: string, options: { replaceActive: boolean }) => void;
+  onExport: () => void;
   onHide: () => void;
   onToggleFilterPanel: () => void;
 }
@@ -50,6 +51,7 @@ export function Sidebar({
   onCreateAggregateTable,
   onCreatePivotTable,
   onLookupMerge,
+  onExport,
   onHide,
   onToggleFilterPanel,
 }: SidebarProps): React.ReactElement {
@@ -284,6 +286,13 @@ export function Sidebar({
             icon="column-layout"
             text="Data Operations"
             onClick={() => setDataOpDialogOpen(true)}
+            small
+            fill
+          />
+          <Button
+            icon="export"
+            text="Export"
+            onClick={onExport}
             small
             fill
           />

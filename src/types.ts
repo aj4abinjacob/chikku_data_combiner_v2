@@ -48,3 +48,19 @@ export interface ViewState {
   sortColumn: string | null;
   sortDirection: "ASC" | "DESC";
 }
+
+export type FileFormat = "csv" | "tsv" | "json" | "parquet" | "xlsx" | "xls";
+
+export interface ImportOptions {
+  csvDelimiter?: string;
+  csvIgnoreErrors?: boolean;
+  excelSheet?: string;
+}
+
+export interface SheetInfo {
+  name: string;
+  rowCount: number;
+}
+
+export const EXCEL_MAX_ROWS = 1_048_576;
+export const EXCEL_MAX_COLS = 16_384;

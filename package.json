@@ -40,7 +40,8 @@
     "electron-log": "^4.4.8",
     "lodash": "^4.17.21",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/lodash": "^4.17.0",
@@ -80,6 +81,31 @@
       {
         "ext": "csv",
         "name": "Comma Separated Values",
+        "role": "Viewer"
+      },
+      {
+        "ext": "tsv",
+        "name": "Tab Separated Values",
+        "role": "Viewer"
+      },
+      {
+        "ext": "json",
+        "name": "JSON File",
+        "role": "Viewer"
+      },
+      {
+        "ext": "parquet",
+        "name": "Parquet File",
+        "role": "Viewer"
+      },
+      {
+        "ext": "xlsx",
+        "name": "Excel Workbook",
+        "role": "Viewer"
+      },
+      {
+        "ext": "xls",
+        "name": "Excel Spreadsheet",
         "role": "Viewer"
       }
     ],

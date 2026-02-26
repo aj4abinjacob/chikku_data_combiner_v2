@@ -1,10 +1,33 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage } from "electron";
 import path from "path";
+import fs from "fs";
+import os from "os";
 import log from "electron-log";
 import { Database } from "duckdb";
+import * as XLSX from "xlsx";
 
 // Per-window DuckDB instances, keyed by webContents.id
 const dbMap = new Map<number, Database>();
+
+// ── Promisified DuckDB helpers ──
+
+function runPromise(db: Database, sql: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    db.run(sql, (err: Error | null) => {
+      if (err) return reject(err.message);
+      resolve();
+    });
+  });
+}
+
+function allPromise(db: Database, sql: string): Promise<any[]> {
+  return new Promise((resolve, reject) => {
+    db.all(sql, (err: Error | null, rows: any[]) => {
+      if (err) return reject(err.message);
+      resolve(rows);
+    });
+  });
+}
 
 function closeDb(wcId: number): Promise<void> {
   return new Promise((resolve) => {
@@ -28,6 +51,10 @@ function getDb(event: Electron.IpcMainInvokeEvent): Database {
   const db = dbMap.get(event.sender.id);
   if (!db) throw new Error("No database for this window");
   return db;
+}
+
+function escapePath(filePath: string): string {
+  return filePath.replace(/'/g, "''");
 }
 
 function createWindow(): void {
@@ -68,24 +95,33 @@ function createWindow(): void {
   });
 }
 
+// ── Supported file filter for open dialogs ──
+const DATA_FILE_FILTER = [
+  { name: "Data Files", extensions: ["csv", "tsv", "json", "jsonl", "ndjson", "parquet", "xlsx", "xls"] },
+  { name: "CSV / TSV", extensions: ["csv", "tsv"] },
+  { name: "JSON", extensions: ["json", "jsonl", "ndjson"] },
+  { name: "Parquet", extensions: ["parquet"] },
+  { name: "Excel", extensions: ["xlsx", "xls"] },
+];
+
 function buildMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
     {
       label: "File",
       submenu: [
         {
-          label: "Open CSV...",
+          label: "Open File...",
           accelerator: "CmdOrCtrl+O",
-          click: () => handleOpenCSV(),
+          click: () => handleOpenFile(),
         },
         {
-          label: "Add CSV to Combine...",
+          label: "Add File...",
           accelerator: "CmdOrCtrl+Shift+O",
-          click: () => handleAddCSV(),
+          click: () => handleAddFile(),
         },
         { type: "separator" },
         {
-          label: "Export Combined CSV...",
+          label: "Export...",
           accelerator: "CmdOrCtrl+E",
           click: () => {
             const win = BrowserWindow.getFocusedWindow();
@@ -145,24 +181,24 @@ function buildMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-async function handleOpenCSV(): Promise<void> {
+async function handleOpenFile(): Promise<void> {
   const win = BrowserWindow.getFocusedWindow();
   if (!win) return;
   const result = await dialog.showOpenDialog(win, {
     properties: ["openFile", "multiSelections"],
-    filters: [{ name: "CSV Files", extensions: ["csv", "tsv"] }],
+    filters: DATA_FILE_FILTER,
   });
   if (!result.canceled && result.filePaths.length > 0) {
     win.webContents.send("open-files", result.filePaths);
   }
 }
 
-async function handleAddCSV(): Promise<void> {
+async function handleAddFile(): Promise<void> {
   const win = BrowserWindow.getFocusedWindow();
   if (!win) return;
   const result = await dialog.showOpenDialog(win, {
     properties: ["openFile", "multiSelections"],
-    filters: [{ name: "CSV Files", extensions: ["csv", "tsv"] }],
+    filters: DATA_FILE_FILTER,
   });
   if (!result.canceled && result.filePaths.length > 0) {
     win.webContents.send("add-files", result.filePaths);
@@ -171,87 +207,172 @@ async function handleAddCSV(): Promise<void> {
 
 // ── IPC Handlers ──
 
-// Load a CSV file into DuckDB and return schema + preview rows
+// Load a CSV file into DuckDB and return schema + preview rows (backward compat)
 ipcMain.handle(
   "db:load-csv",
   async (event, filePath: string, tableName: string) => {
     const db = getDb(event);
-    return new Promise((resolve, reject) => {
-      const safeTable = tableName.replace(/[^a-zA-Z0-9_]/g, "_");
-      db.run(
-        `CREATE OR REPLACE TABLE "${safeTable}" AS SELECT * FROM read_csv_auto('${filePath.replace(/'/g, "''")}')`,
-        (err: Error | null) => {
-          if (err) return reject(err.message);
-          // Get schema
-          db.all(
-            `DESCRIBE "${safeTable}"`,
-            (err2: Error | null, schema: any[]) => {
-              if (err2) return reject(err2.message);
-              // Get row count
-              db.all(
-                `SELECT COUNT(*) as count FROM "${safeTable}"`,
-                (err3: Error | null, countResult: any[]) => {
-                  if (err3) return reject(err3.message);
-                  resolve({
-                    tableName: safeTable,
-                    schema,
-                    rowCount: Number(countResult[0].count),
-                  });
-                }
-              );
-            }
-          );
+    const safeTable = tableName.replace(/[^a-zA-Z0-9_]/g, "_");
+    await runPromise(db, `CREATE OR REPLACE TABLE "${safeTable}" AS SELECT * FROM read_csv_auto('${escapePath(filePath)}')`);
+    const schema = await allPromise(db, `DESCRIBE "${safeTable}"`);
+    const countResult = await allPromise(db, `SELECT COUNT(*) as count FROM "${safeTable}"`);
+    return {
+      tableName: safeTable,
+      schema,
+      rowCount: Number(countResult[0].count),
+    };
+  }
+);
+
+// Generalized file loader — detects format by extension
+ipcMain.handle(
+  "db:load-file",
+  async (event, filePath: string, tableName: string, options?: { csvDelimiter?: string; csvIgnoreErrors?: boolean; excelSheet?: string }) => {
+    const db = getDb(event);
+    const safeTable = tableName.replace(/[^a-zA-Z0-9_]/g, "_");
+    const ext = path.extname(filePath).toLowerCase();
+    const safePath = escapePath(filePath);
+
+    try {
+      if (ext === ".xlsx" || ext === ".xls") {
+        // Excel: convert sheet to temp CSV, load into DuckDB
+        const workbook = XLSX.readFile(filePath);
+        const sheetName = options?.excelSheet || workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        if (!sheet) throw new Error(`Sheet "${sheetName}" not found`);
+
+        const tmpFile = path.join(os.tmpdir(), `chikku_import_${Date.now()}_${Math.random().toString(36).slice(2)}.csv`);
+        try {
+          const csvContent = XLSX.utils.sheet_to_csv(sheet);
+          fs.writeFileSync(tmpFile, csvContent, "utf-8");
+          await runPromise(db, `CREATE OR REPLACE TABLE "${safeTable}" AS SELECT * FROM read_csv_auto('${escapePath(tmpFile)}')`);
+        } finally {
+          try { fs.unlinkSync(tmpFile); } catch (_) { /* ignore cleanup errors */ }
         }
+      } else if (ext === ".json" || ext === ".jsonl" || ext === ".ndjson") {
+        await runPromise(db, `CREATE OR REPLACE TABLE "${safeTable}" AS SELECT * FROM read_json_auto('${safePath}')`);
+      } else if (ext === ".parquet") {
+        await runPromise(db, `CREATE OR REPLACE TABLE "${safeTable}" AS SELECT * FROM read_parquet('${safePath}')`);
+      } else {
+        // CSV/TSV
+        const params: string[] = [];
+        if (options?.csvDelimiter) {
+          params.push(`delim = '${escapePath(options.csvDelimiter)}'`);
+        }
+        if (options?.csvIgnoreErrors) {
+          params.push("ignore_errors = true");
+        }
+        const paramStr = params.length > 0 ? `, ${params.join(", ")}` : "";
+        await runPromise(db, `CREATE OR REPLACE TABLE "${safeTable}" AS SELECT * FROM read_csv_auto('${safePath}'${paramStr})`);
+      }
+
+      const schema = await allPromise(db, `DESCRIBE "${safeTable}"`);
+      const countResult = await allPromise(db, `SELECT COUNT(*) as count FROM "${safeTable}"`);
+      return {
+        tableName: safeTable,
+        schema,
+        rowCount: Number(countResult[0].count),
+      };
+    } catch (err: any) {
+      const message = typeof err === "string" ? err : err?.message || String(err);
+      // Check if this is a CSV parse error that can be retried with different options
+      const isCsvError = (ext === ".csv" || ext === ".tsv") && (
+        message.includes("CSV") || message.includes("delimiter") || message.includes("columns") ||
+        message.includes("expected") || message.includes("values") || message.includes("Error")
       );
-    });
+      if (isCsvError) {
+        return { error: message, canRetry: true };
+      }
+      throw err;
+    }
+  }
+);
+
+// Get Excel sheet info
+ipcMain.handle("file:get-excel-sheets", async (_event, filePath: string) => {
+  const workbook = XLSX.readFile(filePath);
+  return workbook.SheetNames.map((name) => {
+    const sheet = workbook.Sheets[name];
+    const range = sheet ? XLSX.utils.decode_range(sheet["!ref"] || "A1") : { s: { r: 0 }, e: { r: 0 } };
+    const rowCount = Math.max(0, range.e.r - range.s.r); // exclude header row
+    return { name, rowCount };
+  });
+});
+
+// Export a single query to a file in the specified format
+ipcMain.handle(
+  "db:export-file",
+  async (event, sql: string, filePath: string, format: string) => {
+    const db = getDb(event);
+    const safePath = escapePath(filePath);
+
+    if (format === "json") {
+      await runPromise(db, `COPY (${sql}) TO '${safePath}' (FORMAT JSON, ARRAY true)`);
+    } else if (format === "parquet") {
+      await runPromise(db, `COPY (${sql}) TO '${safePath}' (FORMAT PARQUET)`);
+    } else if (format === "tsv") {
+      await runPromise(db, `COPY (${sql}) TO '${safePath}' (HEADER, DELIMITER '\t')`);
+    } else if (format === "xlsx" || format === "xls") {
+      // Query rows from DuckDB, write via xlsx
+      const rows = await allPromise(db, sql);
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+      XLSX.writeFile(wb, filePath);
+    } else {
+      // Default: CSV
+      await runPromise(db, `COPY (${sql}) TO '${safePath}' (HEADER, DELIMITER ',')`);
+    }
+    return true;
+  }
+);
+
+// Export multiple tables as sheets in a single Excel workbook
+ipcMain.handle(
+  "db:export-excel-multi",
+  async (event, sheets: { sheetName: string; sql: string }[], filePath: string) => {
+    const db = getDb(event);
+    const wb = XLSX.utils.book_new();
+
+    for (const sheet of sheets) {
+      const rows = await allPromise(db, sheet.sql);
+      const ws = XLSX.utils.json_to_sheet(rows);
+      // Excel sheet names max 31 chars
+      const name = sheet.sheetName.slice(0, 31);
+      XLSX.utils.book_append_sheet(wb, ws, name);
+    }
+
+    XLSX.writeFile(wb, filePath);
+    return true;
   }
 );
 
 // Run a SQL query and return results
 ipcMain.handle("db:query", async (event, sql: string) => {
   const db = getDb(event);
-  return new Promise((resolve, reject) => {
-    db.all(sql, (err: Error | null, rows: any[]) => {
-      if (err) return reject(err.message);
-      resolve(rows);
-    });
-  });
+  return allPromise(db, sql);
 });
 
 // Run a SQL statement (no results expected)
 ipcMain.handle("db:exec", async (event, sql: string) => {
   const db = getDb(event);
-  return new Promise((resolve, reject) => {
-    db.run(sql, (err: Error | null) => {
-      if (err) return reject(err.message);
-      resolve(true);
-    });
-  });
+  await runPromise(db, sql);
+  return true;
 });
 
 // Get table schema
 ipcMain.handle("db:describe", async (event, tableName: string) => {
   const db = getDb(event);
-  return new Promise((resolve, reject) => {
-    db.all(`DESCRIBE "${tableName}"`, (err: Error | null, rows: any[]) => {
-      if (err) return reject(err.message);
-      resolve(rows);
-    });
-  });
+  return allPromise(db, `DESCRIBE "${tableName}"`);
 });
 
 // List all tables
 ipcMain.handle("db:tables", async (event) => {
   const db = getDb(event);
-  return new Promise((resolve, reject) => {
-    db.all("SHOW TABLES", (err: Error | null, rows: any[]) => {
-      if (err) return reject(err.message);
-      resolve(rows);
-    });
-  });
+  return allPromise(db, "SHOW TABLES");
 });
 
-// Save dialog for export
+// Save dialog for export (backward compat)
 ipcMain.handle("dialog:save-csv", async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return null;
@@ -261,20 +382,33 @@ ipcMain.handle("dialog:save-csv", async (event) => {
   return result.canceled ? null : result.filePath;
 });
 
-// Export query results to CSV via DuckDB
+// Save dialog with format-specific filters
+ipcMain.handle("dialog:save-file", async (event, format: string) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return null;
+
+  const filterMap: Record<string, Electron.FileFilter[]> = {
+    csv: [{ name: "CSV Files", extensions: ["csv"] }],
+    tsv: [{ name: "TSV Files", extensions: ["tsv"] }],
+    json: [{ name: "JSON Files", extensions: ["json"] }],
+    parquet: [{ name: "Parquet Files", extensions: ["parquet"] }],
+    xlsx: [{ name: "Excel Files", extensions: ["xlsx"] }],
+    xls: [{ name: "Excel Files", extensions: ["xls"] }],
+  };
+
+  const result = await dialog.showSaveDialog(win, {
+    filters: filterMap[format] || filterMap.csv,
+  });
+  return result.canceled ? null : result.filePath;
+});
+
+// Export query results to CSV via DuckDB (backward compat)
 ipcMain.handle(
   "db:export-csv",
   async (event, sql: string, filePath: string) => {
     const db = getDb(event);
-    return new Promise((resolve, reject) => {
-      db.run(
-        `COPY (${sql}) TO '${filePath.replace(/'/g, "''")}' (HEADER, DELIMITER ',')`,
-        (err: Error | null) => {
-          if (err) return reject(err.message);
-          resolve(true);
-        }
-      );
-    });
+    await runPromise(db, `COPY (${sql}) TO '${escapePath(filePath)}' (HEADER, DELIMITER ',')`);
+    return true;
   }
 );
 
