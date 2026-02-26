@@ -139,6 +139,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - Layout: `Sidebar + DataGrid + FilterPanel + StatusBar + CombineDialog + ExportDialog + ExcelSheetPickerDialog + ImportRetryDialog`
 
 ### Sidebar.tsx — Left Panel
+- **Three-section flex layout**: Tables (max 20%, scrollable), Columns (flex remaining, scrollable), Operations (fixed at bottom); each section scrolls independently with sticky headers
 - Lists loaded tables with row counts (click to switch active table)
 - **Delete table**: hover-reveal `x` button on each table row; opens BlueprintJS `Alert` confirmation before calling `onDeleteTable`
 - **Selective combine**: checkboxes next to each table (visible when 2+ tables loaded, including combined tables) to select which tables to combine; `selectedForCombine: Set<string>` state cleaned up when tables change
