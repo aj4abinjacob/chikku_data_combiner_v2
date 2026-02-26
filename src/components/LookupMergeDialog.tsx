@@ -13,6 +13,7 @@ import {
   RadioGroup,
 } from "@blueprintjs/core";
 import { ColumnInfo, LoadedTable } from "../types";
+import { PreviewTableDialog } from "./PreviewTableDialog";
 
 function escapeIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
@@ -37,16 +38,6 @@ let keyPairIdCounter = 0;
 function nextKeyPairId(): string {
   return `kp_${++keyPairIdCounter}`;
 }
-
-/** Format a cell value for display */
-const formatValue = (val: unknown): string => {
-  if (val === null || val === undefined) return "NULL";
-  if (typeof val === "number") {
-    if (Number.isInteger(val)) return val.toLocaleString();
-    return val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-  }
-  return String(val);
-};
 
 export function LookupMergeDialog({
   isOpen,
@@ -86,6 +77,7 @@ export function LookupMergeDialog({
   // Preview + execution
   const [results, setResults] = useState<Record<string, unknown>[] | null>(null);
   const [resultColumns, setResultColumns] = useState<string[]>([]);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
 
@@ -107,6 +99,7 @@ export function LookupMergeDialog({
       setWarningsChecked(false);
       setResults(null);
       setResultColumns([]);
+      setPreviewOpen(false);
       setError(null);
     }
   }, [isOpen, activeTable]);
@@ -366,13 +359,14 @@ export function LookupMergeDialog({
     }
 
     try {
-      const rows = await window.api.query(`${sql} LIMIT 10`);
+      const rows = await window.api.query(`${sql} LIMIT 200`);
       if (rows.length > 0) {
         setResultColumns(Object.keys(rows[0]));
       } else {
         setResultColumns([]);
       }
       setResults(rows);
+      setPreviewOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setResults(null);
@@ -656,37 +650,14 @@ export function LookupMergeDialog({
             </Callout>
           )}
 
-          {/* Preview Results */}
-          {results && (
-            <div className="aggregate-section">
-              <div className="aggregate-section-header">
-                <span>
-                  Preview ({results.length} row{results.length !== 1 ? "s" : ""}
-                  {resultColumns.length > 0 && `, ${resultColumns.length} column${resultColumns.length !== 1 ? "s" : ""}`})
-                </span>
-              </div>
-              <div className="aggregate-results-wrapper">
-                <table className="aggregate-results-table">
-                  <thead>
-                    <tr>
-                      {resultColumns.map((col) => (
-                        <th key={col}>{col}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.map((row, i) => (
-                      <tr key={i}>
-                        {resultColumns.map((col) => (
-                          <td key={col}>{formatValue(row[col])}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          {/* Preview Results — opens in separate dialog */}
+          <PreviewTableDialog
+            isOpen={previewOpen}
+            onClose={() => setPreviewOpen(false)}
+            title="Merge Preview"
+            rows={results ?? []}
+            columns={resultColumns}
+          />
         </div>
       </DialogBody>
       <DialogFooter

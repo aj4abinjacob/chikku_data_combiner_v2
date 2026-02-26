@@ -10,6 +10,7 @@ import {
   Callout,
 } from "@blueprintjs/core";
 import { ColumnInfo } from "../types";
+import { PreviewTableDialog } from "./PreviewTableDialog";
 
 const NUMERIC_RE =
   /^(TINYINT|SMALLINT|INTEGER|INT|BIGINT|HUGEINT|FLOAT|REAL|DOUBLE|DECIMAL|NUMERIC)/i;
@@ -75,6 +76,7 @@ export function PivotDialog({
     null
   );
   const [resultColumns, setResultColumns] = useState<string[]>([]);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
 
@@ -97,6 +99,7 @@ export function PivotDialog({
       setAggFunction("SUM");
       setResults(null);
       setResultColumns([]);
+      setPreviewOpen(false);
       setError(null);
       setPivotDistinctCount(null);
       setPivotDistinctValues([]);
@@ -239,6 +242,7 @@ export function PivotDialog({
         setResultColumns([]);
       }
       setResults(rows);
+      setPreviewOpen(true);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
       setResults(null);
@@ -266,19 +270,6 @@ export function PivotDialog({
   })();
 
   const canRun = !!pivotColumn && valueFields.size > 0 && hasValidUsing && !!activeTable;
-
-  /** Format a cell value for display */
-  const formatValue = (val: unknown): string => {
-    if (val === null || val === undefined) return "NULL";
-    if (typeof val === "number") {
-      if (Number.isInteger(val)) return val.toLocaleString();
-      return val.toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 4,
-      });
-    }
-    return String(val);
-  };
 
   return (
     <Dialog
@@ -460,45 +451,14 @@ export function PivotDialog({
             </Callout>
           )}
 
-          {/* Results Table */}
-          {results && (
-            <div className="aggregate-section">
-              <div className="aggregate-section-header">
-                <span>
-                  Results ({results.length} row
-                  {results.length !== 1 ? "s" : ""}
-                  {resultColumns.length > 0 &&
-                    `, ${resultColumns.length} column${resultColumns.length !== 1 ? "s" : ""}`}
-                  )
-                </span>
-              </div>
-              <div className="aggregate-results-wrapper">
-                <table className="aggregate-results-table">
-                  <thead>
-                    <tr>
-                      {resultColumns.map((col) => (
-                        <th key={col}>{col}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.slice(0, 200).map((row, i) => (
-                      <tr key={i}>
-                        {resultColumns.map((col) => (
-                          <td key={col}>{formatValue(row[col])}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {results.length > 200 && (
-                  <div className="aggregate-results-truncated">
-                    Showing first 200 of {results.length} rows
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+          {/* Results — opens in separate dialog */}
+          <PreviewTableDialog
+            isOpen={previewOpen}
+            onClose={() => setPreviewOpen(false)}
+            title="Pivot Results"
+            rows={results ?? []}
+            columns={resultColumns}
+          />
         </div>
       </DialogBody>
       <DialogFooter

@@ -185,9 +185,17 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - **NULL key detection**: queries both tables for NULL keys; shows warning Callout; radio toggle for "Standard join (NULLs don't match)" vs "Match NULLs" (uses `IS NOT DISTINCT FROM`)
 - **Join Type**: radio toggle — Left Join (keep all left rows) vs Inner Join (matched only)
 - **Result Mode**: radio toggle — "Create new table" (`merge_N`) vs "Replace active table" (`CREATE OR REPLACE TABLE`)
-- "Preview" button runs the JOIN SQL with `LIMIT 10` and shows results in HTML table
+- **Column name conflict detection**: when right-table columns share names with the left table (excluding keys), a warning Callout appears with editable rename inputs pre-filled with `col_rightTableName` suffix; renames are applied as SQL `AS` aliases; validates for empty/duplicate output names
+- "Preview" button runs the JOIN SQL with `LIMIT 200` and shows results in a separate `PreviewTableDialog`
 - "Merge" button executes via `onExecute` callback; merge tables appear in sidebar with `filePath: "(merge)"`
-- Reuses `aggregate-*` CSS classes; new CSS namespace: `merge-key-pairs`, `merge-key-row`, `merge-options-grid`
+- Reuses `aggregate-*` CSS classes; new CSS namespace: `merge-key-pairs`, `merge-key-row`, `merge-options-grid`, `merge-rename-*`
+
+### PreviewTableDialog.tsx — Reusable Preview Table Dialog
+- Standalone dialog for displaying tabular query results in a separate overlay
+- Props: `isOpen`, `onClose`, `title`, `rows`, `columns`, `maxRows` (default 200)
+- Exports shared `formatValue()` function (NULL display, number formatting)
+- Used by: LookupMergeDialog ("Merge Preview"), AggregateDialog ("Aggregate Results"), PivotDialog ("Pivot Results")
+- Reuses `aggregate-results-wrapper` / `aggregate-results-table` / `aggregate-results-truncated` CSS classes
 
 ### DataGrid.tsx — Virtualized Scrollable Data Grid
 - **Virtual scrolling** via `@tanstack/react-virtual` `useVirtualizer` — only renders visible rows (~30-50) plus 20 overscan rows
