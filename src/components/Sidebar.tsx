@@ -143,7 +143,7 @@ export function Sidebar({
   return (
     <div className="sidebar">
       {/* Loaded tables */}
-      <div className="sidebar-section">
+      <div className="sidebar-section sidebar-section-tables">
         <div className="sidebar-section-header">
           <h4>Tables</h4>
           <Button
@@ -216,7 +216,7 @@ export function Sidebar({
 
       {/* Column visibility */}
       {schema.length > 0 && (
-        <div className="sidebar-section">
+        <div className="sidebar-section sidebar-section-columns">
           <h4>Columns</h4>
           {orderedColumns.map((col, index) => (
             <div
