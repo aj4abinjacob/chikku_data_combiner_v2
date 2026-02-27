@@ -691,6 +691,20 @@ export function App(): React.ReactElement {
           );
         }
 
+        // If the operation produces string output, ensure the column is VARCHAR
+        const STRING_OPS: Set<ColOpType> = new Set([
+          "prefix_suffix", "find_replace", "regex_extract", "upper", "lower", "trim", "assign_value",
+        ]);
+        if (STRING_OPS.has(opType)) {
+          const colInfo = schema.find((c) => c.column_name === column);
+          const colType = colInfo?.column_type?.toUpperCase() ?? "";
+          if (colType && !colType.startsWith("VARCHAR") && colType !== "TEXT" && colType !== "STRING") {
+            await window.api.exec(
+              `ALTER TABLE "${currentTable}" ALTER COLUMN "${column}" TYPE VARCHAR`
+            );
+          }
+        }
+
         // Execute the UPDATE
         const sql = buildColOpUpdateSQL(currentTable, column, opType, params, viewState.filters);
         await window.api.exec(sql);
@@ -710,6 +724,10 @@ export function App(): React.ReactElement {
         setColOpsNextId((prev) => prev + 1);
         setDataVersion((v) => v + 1);
         setResetKey((k) => k + 1);
+
+        // Refresh schema (column type may have changed from ALTER)
+        const newSchema = await window.api.describe(currentTable);
+        setSchema(newSchema);
 
         // Update row count in tables state
         const countResult = await window.api.query(

@@ -60,6 +60,7 @@ export function ColumnOpsPanel({
   const [params, setParams] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
 
@@ -70,9 +71,18 @@ export function ColumnOpsPanel({
     if (!selectedColumn || !activeTable) return;
     setLoading(true);
     setError(null);
+    setSuccessMsg(null);
     try {
+      const appliedCol = selectedColumn;
+      const appliedOp = OP_OPTIONS.find((o) => o.value === opType)?.label ?? opType;
       await onApply(opType, selectedColumn, params);
+      // Reset form for next operation
+      setSelectedColumn("");
+      setOpType("assign_value");
       setParams({});
+      // Show success flash
+      setSuccessMsg(`${appliedOp} applied to "${appliedCol}"`);
+      setTimeout(() => setSuccessMsg(null), 3000);
     } catch (err: any) {
       setError(typeof err === "string" ? err : err?.message || String(err));
     } finally {
@@ -272,6 +282,12 @@ export function ColumnOpsPanel({
               ? `${totalRows.toLocaleString()} of ${unfilteredRows!.toLocaleString()} rows`
               : `All ${totalRows.toLocaleString()} rows`}
           </span>
+          {successMsg && (
+            <span className="colops-inline-success">
+              <Icon icon="tick-circle" iconSize={12} intent={Intent.SUCCESS} />
+              {successMsg}
+            </span>
+          )}
           {error && (
             <span className="colops-inline-error" title={error}>
               <Icon icon="error" iconSize={12} intent={Intent.DANGER} />

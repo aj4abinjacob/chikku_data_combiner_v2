@@ -1850,6 +1850,21 @@ html, body, #root {
   }
 }
 
+.colops-inline-success {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #0d8050;
+  font-weight: 500;
+  animation: colops-fade-in 0.2s ease-out;
+}
+
+@keyframes colops-fade-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .colops-inline-error {
   display: inline-flex;
   align-items: center;
