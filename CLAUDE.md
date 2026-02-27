@@ -45,6 +45,7 @@ npm run clean        # Remove dist/
 - Menu actions use `BrowserWindow.getFocusedWindow()` to target the active window
 - IPC handlers resolve the correct DB via `event.sender.id`
 - **Excel import strategy**: converts sheet to temp CSV via `xlsx.utils.sheet_to_csv()`, loads into DuckDB with `read_csv_auto()`, cleans up temp file in `finally` block
+- **"Open With" / file association support**: handles files opened via OS "Open With" context menu, drag-to-dock (macOS), and CLI arguments (Windows/Linux). Uses `app.on("open-file")` for macOS, `process.argv` parsing for CLI args, and single-instance lock (`requestSingleInstanceLock`) to forward files to the existing window. Files received before the renderer is ready are queued in `pendingOpenFiles[]` and flushed via `did-finish-load`. Supported extensions defined in `SUPPORTED_EXTENSIONS` Set. File associations registered in `package.json` `build.fileAssociations`.
 
 ### IPC Handlers
 
