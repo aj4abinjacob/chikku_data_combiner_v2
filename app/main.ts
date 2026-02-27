@@ -92,9 +92,10 @@ function createWindow(): void {
     flushPendingFiles(win);
   });
 
-  if (process.env.NODE_ENV === "development") {
-    win.webContents.openDevTools();
-  }
+  // DevTools can be opened manually via View > Toggle Developer Tools (Cmd+Option+I)
+  // if (process.env.NODE_ENV === "development") {
+  //   win.webContents.openDevTools();
+  // }
 
   const wcId = win.webContents.id;
   win.on("close", () => {
