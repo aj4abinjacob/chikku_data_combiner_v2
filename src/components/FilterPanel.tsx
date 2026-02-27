@@ -709,7 +709,9 @@ export function FilterPanel({
   );
 
   const clearAll = () => {
-    setDraftRoot({ id: genId(), logic: "AND", children: [] });
+    const emptyRoot: DraftFilterGroup = { id: genId(), logic: "AND", children: [] };
+    setDraftRoot(emptyRoot);
+    onApplyFilters({ logic: "AND", children: [] });
   };
 
   const applyFilters = () => {
