@@ -29,7 +29,6 @@ interface SidebarProps {
   onSort: (column: string, addLevel: boolean) => void;
   onClearSort: () => void;
   pivotConfig: PivotViewConfig | null;
-  onTogglePivotMode: () => void;
   onPivotGroup: (column: string, addLevel: boolean) => void;
   onClearPivotGroups: () => void;
   onDataOperation: (sql: string) => void;
@@ -59,7 +58,6 @@ export function Sidebar({
   onSort,
   onClearSort,
   pivotConfig,
-  onTogglePivotMode,
   onPivotGroup,
   onClearPivotGroups,
   onDataOperation,
@@ -147,9 +145,8 @@ export function Sidebar({
   // Build a pivot group index map
   const pivotGroupIndexMap = useMemo(() => {
     const map = new Map<string, { index: number; direction: "ASC" | "DESC" }>();
-    if (pivotConfig) {
-      pivotConfig.groupColumns.forEach((gc, i) => map.set(gc.column, { index: i + 1, direction: gc.direction }));
-    }
+    const groups = pivotConfig?.groupColumns ?? [];
+    groups.forEach((gc, i) => map.set(gc.column, { index: i + 1, direction: gc.direction }));
     return map;
   }, [pivotConfig]);
 
@@ -338,16 +335,6 @@ export function Sidebar({
                 disabled={noneVisible}
                 onClick={() => onSetVisibleColumns([])}
               />
-              {sortColumns.length > 0 && !pivotConfig && (
-                <Button
-                  minimal
-                  small
-                  icon="sort"
-                  title="Clear all sorts"
-                  onClick={onClearSort}
-                  className="column-clear-sort-btn"
-                />
-              )}
               {pivotConfig && pivotConfig.groupColumns.length > 0 && (
                 <Button
                   minimal
@@ -356,6 +343,16 @@ export function Sidebar({
                   title="Clear all group levels"
                   onClick={onClearPivotGroups}
                   className="column-clear-pivot-btn"
+                />
+              )}
+              {sortColumns.length > 0 && (
+                <Button
+                  minimal
+                  small
+                  icon="sort"
+                  title="Clear all sorts"
+                  onClick={onClearSort}
+                  className="column-clear-sort-btn"
                 />
               )}
             </div>
@@ -407,51 +404,50 @@ export function Sidebar({
                 />
                 <span className="column-name-text">{col.column_name}</span>
                 <span className="column-type">{col.column_type}</span>
-                {pivotConfig ? (
-                  <span
-                    className={`column-pivot-indicator${pivotInfo ? " active" : ""}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onPivotGroup(col.column_name, e.shiftKey);
-                    }}
-                    title={
-                      pivotInfo
-                        ? `Group ${pivotInfo.index}: ${pivotInfo.direction} (click to toggle, shift+click for multi-group)`
-                        : "Click to group (shift+click for multi-group)"
-                    }
-                  >
-                    {pivotInfo ? (
-                      <>
-                        <span className="column-pivot-number">{pivotInfo.index}</span>
-                        <Icon icon={pivotInfo.direction === "ASC" ? "chevron-up" : "chevron-down"} size={10} />
-                      </>
-                    ) : (
-                      <Icon icon="layers" size={10} className="column-pivot-idle" />
-                    )}
-                  </span>
-                ) : (
-                  <span
-                    className={`column-sort-indicator${sortInfo ? " active" : ""}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSort(col.column_name, e.shiftKey);
-                    }}
-                    title={
-                      sortInfo
-                        ? `Sort ${sortInfo.index}: ${sortInfo.direction} (click to toggle, shift+click for multi-sort)`
-                        : "Click to sort (shift+click for multi-sort)"
-                    }
-                  >
-                    {sortInfo ? (
-                      <>
-                        <span className="column-sort-number">{sortInfo.index}</span>
-                        <Icon icon={sortInfo.direction === "ASC" ? "chevron-up" : "chevron-down"} size={10} />
-                      </>
-                    ) : (
-                      <Icon icon="double-caret-vertical" size={10} className="column-sort-idle" />
-                    )}
-                  </span>
-                )}
+                {/* Group control (left, green) */}
+                <span
+                  className={`column-pivot-indicator${pivotInfo ? " active" : ""}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onPivotGroup(col.column_name, e.shiftKey);
+                  }}
+                  title={
+                    pivotInfo
+                      ? `Group ${pivotInfo.index}: ${pivotInfo.direction} (click to toggle, shift+click for multi-group)`
+                      : "Click to group (shift+click for multi-group)"
+                  }
+                >
+                  {pivotInfo ? (
+                    <>
+                      <span className="column-pivot-number">{pivotInfo.index}</span>
+                      <Icon icon={pivotInfo.direction === "ASC" ? "chevron-up" : "chevron-down"} size={10} />
+                    </>
+                  ) : (
+                    <Icon icon="layers" size={10} className="column-pivot-idle" />
+                  )}
+                </span>
+                {/* Sort control (right, blue) */}
+                <span
+                  className={`column-sort-indicator${sortInfo ? " active" : ""}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSort(col.column_name, e.shiftKey);
+                  }}
+                  title={
+                    sortInfo
+                      ? `Sort ${sortInfo.index}: ${sortInfo.direction} (click to toggle, shift+click for multi-sort)`
+                      : "Click to sort (shift+click for multi-sort)"
+                  }
+                >
+                  {sortInfo ? (
+                    <>
+                      <span className="column-sort-number">{sortInfo.index}</span>
+                      <Icon icon={sortInfo.direction === "ASC" ? "chevron-up" : "chevron-down"} size={10} />
+                    </>
+                  ) : (
+                    <Icon icon="double-caret-vertical" size={10} className="column-sort-idle" />
+                  )}
+                </span>
               </div>
             );
           })}
@@ -461,15 +457,6 @@ export function Sidebar({
       {/* Data operation + filter buttons */}
       {activeTable && schema.length > 0 && (
         <div className="sidebar-section sidebar-actions">
-          <Button
-            icon="layers"
-            text="Pivot View"
-            onClick={onTogglePivotMode}
-            active={!!pivotConfig}
-            intent={pivotConfig ? Intent.SUCCESS : Intent.NONE}
-            small
-            fill
-          />
           <Button
             icon="filter"
             text="Filters"

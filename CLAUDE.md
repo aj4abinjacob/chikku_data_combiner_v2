@@ -151,9 +151,8 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - `handleCreateAggregateTable(sql)` — takes a SELECT SQL, generates unique `aggregate_N` name, executes `CREATE TABLE ... AS`, adds to tables state with `filePath: "(aggregate)"`
 - `handleCreatePivotTable(sql)` — takes a PIVOT SQL, generates unique `pivot_N` name, executes `CREATE TABLE ... AS (sql)`, adds to tables state with `filePath: "(pivot)"`
 - `handleLookupMerge(sql, options)` — executes a JOIN SQL for the Lookup Merge feature; if `options.replaceActive` is true, replaces the active table via `CREATE OR REPLACE TABLE`; otherwise creates a new `merge_N` table with `filePath: "(merge)"`
-- `handleTogglePivotMode()` — toggles `pivotConfig` between null (flat mode) and default config `{ groupColumns: [], showGrandTotal: true, defaultAggFunction: "SUM" }`
-- `handlePivotGroup(column, addLevel)` — same click/shift+click logic as `handleSort` but for `pivotConfig.groupColumns`; click = single group, shift+click = add/toggle/remove level
-- `handleClearPivotGroups()` — clears all group columns
+- `handlePivotGroup(column, addLevel)` — same click/shift+click logic as `handleSort` but for `pivotConfig.groupColumns`; auto-creates `pivotConfig` if null; click = single group, shift+click = add/toggle/remove level
+- `handleClearPivotGroups()` — nulls out `pivotConfig` entirely (deactivates pivot mode)
 - `handleToggleGrandTotal()` — toggles `pivotConfig.showGrandTotal`
 - `handleDefaultAggChange(fn)` — updates `pivotConfig.defaultAggFunction`
 - `handleColOpApply(opType, column, params)` — determines undo strategy on first op (per-step vs snapshot based on free RAM), creates backup, auto-promotes non-VARCHAR columns to VARCHAR for string-producing ops (prefix/suffix, find/replace, regex, upper/lower, trim, assign), executes UPDATE SQL scoped by active filters, refreshes schema, records step
@@ -179,9 +178,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - Column visibility checkboxes with "All" / "None" buttons in header
 - Column search input (shown when 8+ columns) to filter column list by name
 - Column pills show native tooltip on hover with full column name
-- Sort indicators on column pills: numbered badge with direction arrow for active sorts, subtle icon on hover for unsorted; click to sort, Shift+click for multi-sort; "Clear sorts" button in header when sorts active
-- **Pivot view indicators**: when `pivotConfig` is active, green group badges (numbered) replace blue sort badges on column pills; click = `onPivotGroup(col, e.shiftKey)` mirrors sort behavior; "Clear groups" button in column header
-- "Pivot View" button (green when active) toggles pivot mode via `onTogglePivotMode`
+- **Unified sort + group controls on column pills**: both always visible side-by-side on every column pill. Group control (left, green): layers icon idle → numbered badge + chevron when active; click = `onPivotGroup(col, e.shiftKey)` auto-creates pivot mode. Sort control (right, blue): double-caret idle → numbered badge + chevron when active; click to sort, Shift+click for multi-sort. Both controls work independently — no mode switching. "Clear groups" and "Clear sorts" buttons shown independently in column header when active.
 - "Data Operations" button opens `DataOperationsDialog`
 - "Aggregate" button opens `AggregateDialog`
 - "Pivot Table" button opens `PivotDialog`
@@ -318,7 +315,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - **Group row rendering**: `.dg-pivot-group-row` with depth-based colored borders; entire row clickable for expand/collapse; Group column shows indent + chevron + value + count; numeric data columns show bold aggregate values (`.dg-pivot-agg-value`); non-numeric and grouped columns show blank
 - **Data row rendering** (within expanded groups): `.dg-pivot-data-row` with empty Group column (`.dg-pivot-data-group-cell`); data columns show actual cell values normally (no indent)
 - **Grand total row**: `.dg-pivot-grand-total-row` rendered **after** virtual rows (at the bottom of scroll content, not sticky to header); Group column shows "Total (count)"; numeric columns show bold aggregates; non-numeric columns blank
-- **Header pivot indicators**: green numbered badges (`.pivot-indicator`) instead of blue sort badges when pivot mode active; "Group" header replaces `#` header
+- **Header sort indicators**: always visible regardless of pivot mode; "Group" header replaces `#` header in pivot mode
 - Cell selection: click, click-drag (rectangular range), Shift+click (range), Cmd/Ctrl+click (toggle), Cmd/Ctrl+drag (add to selection) — uses absolute row indices; group rows are not selectable
 - Copy: Cmd/Ctrl+C copies selected cells as TSV; skips group rows in pivot mode
 - Multi-level sort: click column header for single-sort (ASC/DESC/remove), Shift+click to add sort levels with numbered indicators
@@ -558,8 +555,7 @@ EXCEL_MAX_COLS    // 16,384
 - Searchable column select: `.col-select-trigger` (with `-fill`, `-text`, `-placeholder`, `-caret`), `.col-select-popover`, `.col-select-search`, `.col-select-list`, `.col-select-empty`, `.col-select-item` (with `-selected`, `-highlight`, `-name`, `-type`)
 - Pivot toolbar: `.pivot-toolbar`, `.pivot-toolbar-exit`, `.pivot-toolbar-label`, `.pivot-toolbar-breadcrumb`, `.pivot-breadcrumb-sep`, `.pivot-breadcrumb-item`, `.pivot-toolbar-spacer`, `.pivot-toolbar-agg-select`
 - Pivot grid: `.dg-pivot-group-header`, `.dg-pivot-group-row`, `.dg-pivot-depth-{0-3}` (depth-based colored left borders), `.dg-pivot-group-cell`, `.dg-pivot-expand-icon`, `.dg-pivot-group-value`, `.dg-pivot-group-count`, `.dg-pivot-agg-value` (bold, right-aligned aggregates), `.dg-pivot-data-group-cell` (empty group cell for data rows), `.dg-pivot-grand-total-row` (bottom, not sticky), `.dg-pivot-data-row`
-- Pivot header indicators: `.pivot-indicator`, `.pivot-indicator-number`
-- Pivot sidebar indicators: `.column-pivot-indicator` (with `.active`, `.column-pivot-number`, `.column-pivot-idle`), `.column-clear-pivot-btn`
+- Pivot sidebar indicators: `.column-pivot-indicator` (with `.active`, `.column-pivot-number`, `.column-pivot-idle`), `.column-clear-pivot-btn` — always visible alongside sort indicators (both at `opacity: 0.4` idle, `1` on hover/active)
 
 ## Data Flow
 
@@ -581,7 +577,7 @@ EXCEL_MAX_COLS    // 16,384
 16. **Date Conversion**: User opens Date Conversion dialog → selects date column (and optionally a group-by column) → format auto-detected per group using max-value heuristic → user resolves ambiguous formats via dropdown → selects output format → preview shows converted values + NULL parse count → apply executes `CREATE OR REPLACE TABLE ... AS SELECT` with `strftime(TRY_STRPTIME(...))` expressions (CASE WHEN for per-group formats)
 17. **Column Ops**: User opens FilterPanel → switches to "Column Ops" tab → selects column and operation → filtered-rows banner shows scope → Apply executes `UPDATE ... SET ... WHERE` scoped by active filters → adaptive undo: per-step mode creates `__colops_backup_N_table` before each op (undo restores via `ALTER TABLE RENAME`), snapshot mode creates single `__colops_snapshot_table` before first op (only "Revert All" available) → strategy chosen based on estimated table size vs 15% of free RAM → backups cleaned up on table switch
 18. **Row Ops**: User opens FilterPanel → switches to "Row Ops" tab → selects operation (Delete Filtered, Keep Filtered, Remove Empty, Remove Duplicates) → for remove_empty/remove_duplicates can select specific columns → preview count shows rows to be removed → Apply shows confirmation Alert → executes DELETE or CREATE OR REPLACE TABLE SQL → adaptive undo: per-step mode creates `__rowops_backup_N_table` before each op, snapshot mode creates single `__rowops_snapshot_table` → independent undo history from Column Ops → backups cleaned up on table switch
-19. **Pivot View** (Interactive Row Grouping): User clicks "Pivot View" button in sidebar → pivot toolbar appears above grid → click column header = primary group, Shift+click = add levels (mirrors sort UX) → rows grouped hierarchically with expand/collapse arrows → group rows show SUM for numeric columns (configurable: COUNT, AVG, MIN, MAX, MEDIAN) → grand total row shows overall aggregates → Expand All / Collapse All buttons → expanding deepest level reveals individual data rows (chunk-loaded) → works with active filters → click "X" to exit → pivot resets on table switch
+19. **Pivot View** (Interactive Row Grouping): User clicks group icon on column pill in sidebar (auto-activates pivot mode) → pivot toolbar appears above grid → Shift+click group icon to add levels → sort and group are independent (both controls visible on every column pill, both work simultaneously) → rows grouped hierarchically with expand/collapse arrows → group rows show SUM for numeric columns (configurable: COUNT, AVG, MIN, MAX, MEDIAN) → grand total row shows overall aggregates → Expand All / Collapse All buttons → expanding deepest level reveals individual data rows (chunk-loaded) → works with active filters → click "X" on toolbar or "Clear groups" in sidebar to exit pivot mode → pivot resets on table switch
 20. **Export**: Cmd+E or sidebar Export button opens `ExportDialog` → user picks format (CSV/TSV/JSON/Excel/Parquet), tables, and view options → exports via `exportFile()` or `exportExcelMulti()` for multi-sheet Excel
 
 ## Keyboard Shortcuts

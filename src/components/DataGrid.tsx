@@ -98,14 +98,6 @@ export function DataGrid({
     return map;
   }, [sortColumns]);
 
-  const pivotGroupIndexMap = useMemo(() => {
-    const map = new Map<string, { index: number; direction: "ASC" | "DESC" }>();
-    if (pivotGroupColumns) {
-      pivotGroupColumns.forEach((gc, i) => map.set(gc.column, { index: i + 1, direction: gc.direction }));
-    }
-    return map;
-  }, [pivotGroupColumns]);
-
   // Set of column names being grouped — hidden from data columns in pivot mode
   const groupedColumnNames = useMemo(() => {
     if (!pivotGroupColumns) return new Set<string>();
@@ -491,8 +483,7 @@ export function DataGrid({
               <div className="dg-cell dg-row-num-cell dg-header-num">#</div>
             )}
             {displayColumns.map((col) => {
-              const pivotInfo = pivotMode ? pivotGroupIndexMap.get(col) : null;
-              const sortInfo = !pivotMode ? sortIndexMap.get(col) : null;
+              const sortInfo = sortIndexMap.get(col);
               return (
                 <div
                   key={col}
@@ -522,15 +513,6 @@ export function DataGrid({
                       )}
                       <Icon
                         icon={sortInfo.direction === "ASC" ? "chevron-up" : "chevron-down"}
-                        size={12}
-                      />
-                    </span>
-                  )}
-                  {pivotInfo && (
-                    <span className="pivot-indicator">
-                      <span className="pivot-indicator-number">{pivotInfo.index}</span>
-                      <Icon
-                        icon={pivotInfo.direction === "ASC" ? "chevron-up" : "chevron-down"}
                         size={12}
                       />
                     </span>

@@ -547,20 +547,10 @@ export function App(): React.ReactElement {
 
   // ── Pivot View handlers ──
 
-  const handleTogglePivotMode = useCallback(() => {
-    setViewState((prev) => ({
-      ...prev,
-      pivotConfig: prev.pivotConfig
-        ? null
-        : { groupColumns: [], showGrandTotal: true, defaultAggFunction: "SUM" },
-    }));
-    setResetKey((k) => k + 1);
-  }, []);
-
   const handlePivotGroup = useCallback((column: string, addLevel: boolean) => {
     setViewState((prev) => {
-      const config = prev.pivotConfig;
-      if (!config) return prev;
+      // Auto-create pivotConfig if it doesn't exist
+      const config = prev.pivotConfig ?? { groupColumns: [] as { column: string; direction: "ASC" | "DESC" }[], showGrandTotal: true, defaultAggFunction: "SUM" as const };
 
       const existing = config.groupColumns.findIndex((gc) => gc.column === column);
 
@@ -610,10 +600,7 @@ export function App(): React.ReactElement {
   }, []);
 
   const handleClearPivotGroups = useCallback(() => {
-    setViewState((prev) => {
-      if (!prev.pivotConfig) return prev;
-      return { ...prev, pivotConfig: { ...prev.pivotConfig, groupColumns: [] } };
-    });
+    setViewState((prev) => ({ ...prev, pivotConfig: null }));
     setResetKey((k) => k + 1);
   }, []);
 
@@ -1188,7 +1175,6 @@ export function App(): React.ReactElement {
             onSort={handleSort}
             onClearSort={handleClearSort}
             pivotConfig={viewState.pivotConfig}
-            onTogglePivotMode={handleTogglePivotMode}
             onPivotGroup={handlePivotGroup}
             onClearPivotGroups={handleClearPivotGroups}
             onSelectTable={(name) => {
@@ -1242,7 +1228,7 @@ export function App(): React.ReactElement {
                   onCollapseAll={pivotCollapseAll}
                   onToggleGrandTotal={handleToggleGrandTotal}
                   onDefaultAggChange={handleDefaultAggChange}
-                  onExitPivot={handleTogglePivotMode}
+                  onExitPivot={handleClearPivotGroups}
                 />
               )}
               <DataGrid
@@ -1251,7 +1237,7 @@ export function App(): React.ReactElement {
                 ensureRange={pivotActive ? pivotEnsureRange : ensureRange}
                 columns={viewState.visibleColumns}
                 sortColumns={viewState.sortColumns}
-                onSort={pivotActive ? handlePivotGroup : handleSort}
+                onSort={handleSort}
                 onReorderColumns={pivotActive ? undefined : reorderVisibleColumns}
                 resetKey={resetKey}
                 pivotMode={pivotActive}
