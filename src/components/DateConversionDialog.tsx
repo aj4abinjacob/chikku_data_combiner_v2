@@ -20,6 +20,7 @@ import {
   OUTPUT_FORMATS,
 } from "../utils/dateDetection";
 import { PreviewTableDialog } from "./PreviewTableDialog";
+import { SearchableColumnSelect } from "./SearchableColumnSelect";
 
 function escapeIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
@@ -415,22 +416,18 @@ export function DateConversionDialog({
           {/* Section 1: Date Column & Group By */}
           <div className="aggregate-section">
             <div className="aggregate-section-header">Date Column</div>
-            <HTMLSelect
+            <SearchableColumnSelect
               value={dateColumn}
-              onChange={(e) => {
-                setDateColumn(e.target.value);
+              onChange={(val) => {
+                setDateColumn(val);
                 setGroupDetections([]);
                 setPreviewRows(null);
               }}
+              columns={dateColumns}
+              placeholder="— Select a column —"
+              showType
               fill
-            >
-              <option value="">— Select a column —</option>
-              {dateColumns.map((c) => (
-                <option key={c.column_name} value={c.column_name}>
-                  {c.column_name} ({c.column_type})
-                </option>
-              ))}
-            </HTMLSelect>
+            />
           </div>
 
           {dateColumn && (
@@ -438,22 +435,19 @@ export function DateConversionDialog({
               <div className="aggregate-section-header">
                 <span>Group By (optional)</span>
               </div>
-              <HTMLSelect
+              <SearchableColumnSelect
                 value={groupByColumn}
-                onChange={(e) => {
-                  setGroupByColumn(e.target.value);
+                onChange={(val) => {
+                  setGroupByColumn(val);
                   setGroupDetections([]);
                   setPreviewRows(null);
                 }}
+                columns={groupColumns}
+                placeholder="— No grouping —"
                 fill
-              >
-                <option value="">— No grouping —</option>
-                {groupColumns.map((c) => (
-                  <option key={c.column_name} value={c.column_name}>
-                    {c.column_name}
-                  </option>
-                ))}
-              </HTMLSelect>
+                allowEmpty
+                emptyLabel="— No grouping —"
+              />
               <div style={{ fontSize: 11, color: "#8a9ba8", marginTop: 4 }}>
                 Use grouping when the same date format (e.g. 1/12/20) means different things
                 across data sources — the format will be detected per group.

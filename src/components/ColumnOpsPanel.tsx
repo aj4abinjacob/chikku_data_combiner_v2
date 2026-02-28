@@ -12,6 +12,7 @@ import {
 import { ColumnInfo, ColOpType, ColOpStep, UndoStrategy, FilterGroup } from "../types";
 import { RegexPatternPicker } from "./RegexPatternPicker";
 import { RegexPatternManagerDialog } from "./RegexPatternManagerDialog";
+import { SearchableColumnSelect } from "./SearchableColumnSelect";
 
 const OP_OPTIONS: { value: ColOpType; label: string }[] = [
   { value: "assign_value", label: "Assign Value" },
@@ -270,18 +271,13 @@ export function ColumnOpsPanel({
       <div className="colops-top">
         {/* Operation row — all controls inline */}
         <div className="colops-op-row">
-          <HTMLSelect
-            className="colops-col-select"
+          <SearchableColumnSelect
             value={selectedColumn}
-            onChange={(e) => setSelectedColumn(e.target.value)}
-          >
-            <option value="">Column...</option>
-            {columns.map((c) => (
-              <option key={c.column_name} value={c.column_name}>
-                {c.column_name}
-              </option>
-            ))}
-          </HTMLSelect>
+            onChange={setSelectedColumn}
+            columns={columns}
+            placeholder="Column..."
+            className="colops-col-select"
+          />
 
           <HTMLSelect
             className="colops-op-select"

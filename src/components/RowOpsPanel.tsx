@@ -223,9 +223,11 @@ export function RowOpsPanel({
 
   const deselectAllColumns = () => setSelectedColumns(new Set());
 
-  const filteredColumns = columns.filter((c) =>
-    !colSearch || c.column_name.toLowerCase().includes(colSearch.toLowerCase())
-  );
+  const filteredColumns = columns
+    .filter((c) =>
+      !colSearch || c.column_name.toLowerCase().includes(colSearch.toLowerCase())
+    )
+    .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }));
 
   const previewLabel = (() => {
     if (previewCount === null) return null;

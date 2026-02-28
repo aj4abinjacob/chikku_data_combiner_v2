@@ -24,6 +24,7 @@ import {
 } from "../types";
 import { ColumnOpsPanel } from "./ColumnOpsPanel";
 import { RowOpsPanel } from "./RowOpsPanel";
+import { SearchableColumnSelect } from "./SearchableColumnSelect";
 
 const OPERATORS: { value: FilterCondition["operator"]; label: string }[] = [
   { value: "CONTAINS", label: "contains" },
@@ -392,19 +393,13 @@ function FilterConditionRow({
 }: FilterConditionRowProps): React.ReactElement {
   return (
     <div className="filter-row">
-      <HTMLSelect
-        className="filter-col-select"
+      <SearchableColumnSelect
         value={draft.column}
-        onChange={(e) =>
-          onUpdate(draft.id, { column: e.target.value, value: "" })
-        }
-      >
-        {columns.map((c) => (
-          <option key={c.column_name} value={c.column_name}>
-            {c.column_name}
-          </option>
-        ))}
-      </HTMLSelect>
+        onChange={(val) => onUpdate(draft.id, { column: val, value: "" })}
+        columns={columns}
+        placeholder="Column..."
+        className="filter-col-select"
+      />
 
       <HTMLSelect
         className="filter-op-select"

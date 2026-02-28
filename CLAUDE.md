@@ -205,6 +205,8 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 ### DataOperationsDialog.tsx — Data Operations Modal
 - Extracted from Sidebar; self-contained dialog for column/row transforms
 - Props: `isOpen`, `onClose`, `activeTable`, `schema`, `onApply(sql)`, `onSampleTable(n, isPercent)`
+- **Source column**: uses `SearchableColumnSelect` for searchable dropdown; conditional column selects also use it
+- **Multi-select alphabetical sort**: combine_columns, remove_duplicates, replace_empty_null, replace_sentinel_null column lists are always sorted alphabetically (case-insensitive)
 - 16 operation types:
   - `regex_extract` — regexp_extract() with user-provided pattern + capture group index; casts source to VARCHAR first so it works on any data type; supports "All matches" mode that uses regexp_extract_all() + array_to_string() to extract all occurrences and join them with an optional separator
   - `trim` — TRIM()
@@ -254,7 +256,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - Joins data from a right table into the active (left) table using DuckDB LEFT/INNER JOIN
 - Props: `isOpen`, `onClose`, `activeTable`, `schema`, `tables` (all loaded), `onExecute(sql, { replaceActive })`
 - **Right Table**: dropdown to select from loaded tables (excluding active)
-- **Key Columns**: composite key support — multiple `[left dropdown] ↔ [right dropdown]` pairs with add/remove
+- **Key Columns**: composite key support — multiple `[left SearchableColumnSelect] ↔ [right SearchableColumnSelect]` pairs with add/remove; searchable and sortable column dropdowns with type display
 - **Columns to Merge**: checkbox list of right-table columns (excludes key columns); Select All / Deselect All
 - **Duplicate key detection**: queries right table for duplicate keys before merge; shows warning Callout with count; checkbox to "Remove duplicates before merging" (uses `QUALIFY row_number() OVER (PARTITION BY ... ORDER BY rowid) = 1`)
 - **NULL key detection**: queries both tables for NULL keys; shows warning Callout; radio toggle for "Standard join (NULLs don't match)" vs "Match NULLs" (uses `IS NOT DISTINCT FROM`)
@@ -268,8 +270,8 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 ### DateConversionDialog.tsx — Date Conversion Modal
 - Converts date columns between formats using DuckDB `TRY_STRPTIME` / `strftime`
 - Props: `isOpen`, `onClose`, `activeTable`, `schema`, `tables`, `onApply(sql)` — reuses existing `onDataOperation` callback
-- **Date Column**: HTMLSelect to pick the column containing date values
-- **Group By** (optional): HTMLSelect for per-group format detection — useful when the same numeric format (e.g. `1/12/20`) means `DD/MM/YY` in one source vs `MM/DD/YY` in another
+- **Date Column**: `SearchableColumnSelect` with type display to pick the column containing date values
+- **Group By** (optional): `SearchableColumnSelect` with `allowEmpty` for per-group format detection — useful when the same numeric format (e.g. `1/12/20`) means `DD/MM/YY` in one source vs `MM/DD/YY` in another
 - **Detection**: auto-runs on column/group selection (400ms debounce); uses `dateDetection.ts` utility; classifies as ISO / numeric / text-month; max-value heuristic for numeric dates (if max > 12 in a position → that's the day)
 - **Detection results table**: columns = Group | Sample Values | Format | Confidence; green tag for high confidence (format displayed as code), yellow for ambiguous (HTMLSelect dropdown with alternatives), red for unknown (InputGroup for manual entry)
 - **Output Format**: HTMLSelect with common presets (YYYY-MM-DD, DD/MM/YYYY, etc.) + "Custom..." option; shows example using current date
@@ -313,7 +315,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - **Recursive filter groups**: supports nested AND/OR grouping (e.g. `AND(cond, OR(cond, AND(cond, cond)))`)
 - Root group is always present; user can toggle its logic (AND/OR) and add conditions or sub-groups
 - **FilterGroupRenderer** — recursive component rendering logic toggle, children, "+ Condition" / "+ Sub-group" buttons, and delete button for non-root groups
-- **FilterConditionRow** — leaf component for individual filter conditions (column select, operator select, value input)
+- **FilterConditionRow** — leaf component for individual filter conditions (searchable column select via `SearchableColumnSelect`, operator select, value input)
 - **Draft state model**: `DraftFilterGroup`/`DraftFilterCondition` with unique `id` fields for React keys and immutable path-based updates
 - Conversion helpers: `convertToDraft(FilterGroup)` adds ids, `convertFromDraft(DraftFilterGroup)` strips ids and removes empty conditions
 - Recursive update helpers: `updateNodeById`, `addChildToGroup`, `removeNodeById` for deep immutable updates
@@ -331,6 +333,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - Props: `columns`, `activeTable`, `activeFilters`, `colOpsSteps`, `undoStrategy`, `onApply`, `onUndo`, `onRevertAll`, `onClearAll`, `totalRows`, `unfilteredRows`
 - **Filtered rows banner**: blue when filter active (shows filtered/total count), orange when no filter (all rows)
 - **Operation form**: Column (HTMLSelect), Operation (HTMLSelect with 9 types), dynamic params per op type, Apply button
+- **Column select**: uses `SearchableColumnSelect` for searchable, sortable column dropdown
 - **9 operation types**: assign_value, find_replace, regex_extract, extract_numbers, trim, upper, lower, clear_null, prefix_suffix
 - **Step history**: shows chronological list (newest first) with step number and description
 - **Adaptive undo strategy**:
@@ -341,6 +344,15 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - Clear confirmation (Alert) drops all backups; Revert All confirmation restores snapshot
 - **Regex pattern picker**: `RegexPatternPicker` button appears as `rightElement` on pattern InputGroup for `regex_extract` and `find_replace` (when regex mode enabled); also renders `RegexPatternManagerDialog`
 - CSS namespace: `.colops-*`
+
+### SearchableColumnSelect.tsx — Searchable Column Dropdown
+- Reusable Popover2-based dropdown replacing HTMLSelect for single-column selection in large datasets (100+ columns)
+- Props: `value`, `onChange`, `columns`, `placeholder?`, `showType?`, `fill?`, `className?`, `allowEmpty?`, `emptyLabel?`
+- **Trigger button**: styled like HTMLSelect (30px height, caret-down, text truncation with ellipsis)
+- **Popover content**: search InputGroup (auto-focused, clear button), scrollable column list (max 300px height, always sorted alphabetically case-insensitive)
+- **Keyboard support**: Arrow Up/Down navigates list, Enter selects, Escape closes; highlighted item auto-scrolls into view
+- **Used by**: ColumnOpsPanel (column select), DataOperationsDialog (source column, conditional column selects), FilterPanel (filter condition column), LookupMergeDialog (left/right key selects), DateConversionDialog (date column, group-by column)
+- CSS namespace: `.col-select-*`
 
 ### RegexPatternPicker.tsx — Inline Regex Pattern Picker
 - Small `Button` (book/manual icon, minimal, small) with `Popover2`
@@ -364,7 +376,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - Props: `columns`, `activeTable`, `activeFilters`, `rowOpsSteps`, `undoStrategy`, `onApply`, `onUndo`, `onRevertAll`, `onClearAll`, `totalRows`, `unfilteredRows`, `visible`
 - **4 operation types**: delete_filtered, keep_filtered, remove_empty, remove_duplicates
 - **Filter-dependent ops**: delete_filtered and keep_filtered are disabled (grayed out with hint text) when no filter is active
-- **Column selector**: multi-select with search + Select All/Deselect All for remove_empty and remove_duplicates; when no columns selected, operates on all columns; compact multi-column grid layout with type badge next to column name
+- **Column selector**: multi-select with search + Select All/Deselect All for remove_empty and remove_duplicates; when no columns selected, operates on all columns; compact multi-column grid layout with type badge next to column name; columns sorted alphabetically by default
 - **Preview counts**: debounced (400ms) preview showing "N rows will be removed"
 - **Confirmation dialog**: all operations show a confirmation Alert before executing (destructive ops)
 - **Scope banner**: matching colops style — blue when filter active, orange when no filter
@@ -499,6 +511,7 @@ EXCEL_MAX_COLS    // 16,384
 - Import retry: `.import-retry-form`
 - Regex picker: `.regex-picker-popover`, `.regex-picker-search`, `.regex-picker-list`, `.regex-picker-category`, `.regex-picker-category-label`, `.regex-picker-item`, `.regex-picker-item-title`, `.regex-picker-item-pattern`, `.regex-picker-footer`
 - Regex manager: `.regex-manager-content`, `.regex-manager-section`, `.regex-manager-section-header`, `.regex-manager-table-wrapper`, `.regex-manager-table`, `.regex-manager-empty`, `.regex-manager-form`, `.regex-manager-form-header`, `.regex-manager-form-row`, `.regex-manager-footer-left`
+- Searchable column select: `.col-select-trigger` (with `-fill`, `-text`, `-placeholder`, `-caret`), `.col-select-popover`, `.col-select-search`, `.col-select-list`, `.col-select-empty`, `.col-select-item` (with `-selected`, `-highlight`, `-name`, `-type`)
 
 ## Data Flow
 

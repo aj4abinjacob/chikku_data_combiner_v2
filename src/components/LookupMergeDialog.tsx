@@ -14,6 +14,7 @@ import {
 } from "@blueprintjs/core";
 import { ColumnInfo, LoadedTable } from "../types";
 import { PreviewTableDialog } from "./PreviewTableDialog";
+import { SearchableColumnSelect } from "./SearchableColumnSelect";
 
 function escapeIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
@@ -455,31 +456,23 @@ export function LookupMergeDialog({
               <div className="merge-key-pairs">
                 {keyPairs.map((kp) => (
                   <div key={kp.id} className="merge-key-row">
-                    <HTMLSelect
+                    <SearchableColumnSelect
                       value={kp.leftKey}
-                      onChange={(e) => updateKeyPair(kp.id, "leftKey", e.target.value)}
+                      onChange={(val) => updateKeyPair(kp.id, "leftKey", val)}
+                      columns={schema}
+                      placeholder="— Left key —"
+                      showType
                       className="merge-key-select"
-                    >
-                      <option value="">— Left key —</option>
-                      {schema.map((c) => (
-                        <option key={c.column_name} value={c.column_name}>
-                          {c.column_name} ({c.column_type})
-                        </option>
-                      ))}
-                    </HTMLSelect>
+                    />
                     <span className="merge-key-arrow">↔</span>
-                    <HTMLSelect
+                    <SearchableColumnSelect
                       value={kp.rightKey}
-                      onChange={(e) => updateKeyPair(kp.id, "rightKey", e.target.value)}
+                      onChange={(val) => updateKeyPair(kp.id, "rightKey", val)}
+                      columns={rightSchema}
+                      placeholder="— Right key —"
+                      showType
                       className="merge-key-select"
-                    >
-                      <option value="">— Right key —</option>
-                      {rightSchema.map((c) => (
-                        <option key={c.column_name} value={c.column_name}>
-                          {c.column_name} ({c.column_type})
-                        </option>
-                      ))}
-                    </HTMLSelect>
+                    />
                     <Button
                       icon="cross"
                       minimal

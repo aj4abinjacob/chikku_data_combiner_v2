@@ -16,6 +16,7 @@ import { ColumnInfo } from "../types";
 import { buildAllMatchesExtractExpr } from "../utils/colOpsSQL";
 import { RegexPatternPicker } from "./RegexPatternPicker";
 import { RegexPatternManagerDialog } from "./RegexPatternManagerDialog";
+import { SearchableColumnSelect } from "./SearchableColumnSelect";
 
 type OpType =
   | "regex_extract"
@@ -532,18 +533,14 @@ export function DataOperationsDialog({
           {/* Source Column — hidden for create_column, combine_columns, rename_column, delete_column, sample_table, remove_duplicates, conditional_column, replace_empty_null, replace_sentinel_null */}
           {opType !== "create_column" && opType !== "combine_columns" && opType !== "rename_column" && opType !== "delete_column" && opType !== "sample_table" && opType !== "remove_duplicates" && opType !== "conditional_column" && opType !== "replace_empty_null" && opType !== "replace_sentinel_null" && (
             <FormGroup label="Source Column">
-              <HTMLSelect
+              <SearchableColumnSelect
                 value={sourceCol}
-                onChange={(e) => setSourceCol(e.target.value)}
+                onChange={setSourceCol}
+                columns={schema}
+                placeholder="Select column..."
+                showType
                 fill
-              >
-                <option value="">Select column...</option>
-                {schema.map((col) => (
-                  <option key={col.column_name} value={col.column_name}>
-                    {col.column_name} ({col.column_type})
-                  </option>
-                ))}
-              </HTMLSelect>
+              />
             </FormGroup>
           )}
 
@@ -689,7 +686,8 @@ export function DataOperationsDialog({
                     />
                   </div>
                   <div className="combine-col-items">
-                    {schema
+                    {[...schema]
+                      .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }))
                       .filter((col) => col.column_name.toLowerCase().includes(combineSearch.toLowerCase()))
                       .map((col) => {
                         const isSelected = combineSourceCols.includes(col.column_name);
@@ -783,7 +781,8 @@ export function DataOperationsDialog({
                     />
                   </div>
                   <div className="combine-col-items">
-                    {schema
+                    {[...schema]
+                      .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }))
                       .filter((col) => col.column_name.toLowerCase().includes(dedupSearch.toLowerCase()))
                       .map((col) => {
                         const isSelected = dedupColumns.includes(col.column_name);
@@ -849,7 +848,8 @@ export function DataOperationsDialog({
                     />
                   </div>
                   <div className="combine-col-items">
-                    {schema
+                    {[...schema]
+                      .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }))
                       .filter((col) => col.column_name.toLowerCase().includes(emptyNullSearch.toLowerCase()))
                       .map((col) => {
                         const isSelected = emptyNullColumns.includes(col.column_name);
@@ -910,7 +910,8 @@ export function DataOperationsDialog({
                     />
                   </div>
                   <div className="combine-col-items">
-                    {schema
+                    {[...schema]
+                      .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }))
                       .filter((col) => col.column_name.toLowerCase().includes(sentinelNullSearch.toLowerCase()))
                       .map((col) => {
                         const isSelected = sentinelNullColumns.includes(col.column_name);
@@ -948,20 +949,15 @@ export function DataOperationsDialog({
                   {caseConditions.map((cond, idx) => (
                     <div key={idx} className="case-condition-row">
                       <span className="case-condition-label">IF</span>
-                      <HTMLSelect
+                      <SearchableColumnSelect
                         value={cond.column}
-                        onChange={(e) => {
-                          setCaseConditions((prev) => prev.map((c, i) => i === idx ? { ...c, column: e.target.value } : c));
+                        onChange={(val) => {
+                          setCaseConditions((prev) => prev.map((c, i) => i === idx ? { ...c, column: val } : c));
                         }}
+                        columns={schema}
+                        placeholder="Column..."
                         className="case-condition-col"
-                      >
-                        <option value="">Column...</option>
-                        {schema.map((col) => (
-                          <option key={col.column_name} value={col.column_name}>
-                            {col.column_name}
-                          </option>
-                        ))}
-                      </HTMLSelect>
+                      />
                       <HTMLSelect
                         value={cond.operator}
                         onChange={(e) => {
