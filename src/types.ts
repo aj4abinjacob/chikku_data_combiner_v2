@@ -119,6 +119,8 @@ export interface SheetInfo {
 export type ColOpType = "assign_value" | "find_replace" | "regex_extract"
   | "extract_numbers" | "trim" | "upper" | "lower" | "clear_null" | "prefix_suffix";
 
+export type ColOpTargetMode = "replace" | "new_column" | "existing_column";
+
 export type UndoStrategy = "per-step" | "snapshot";
 
 export interface ColOpStep {

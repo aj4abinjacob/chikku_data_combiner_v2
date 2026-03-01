@@ -30,10 +30,12 @@ export function buildColOpUpdateSQL(
   column: string,
   opType: ColOpType,
   params: Record<string, string>,
-  filters: FilterGroup
+  filters: FilterGroup,
+  targetColumn?: string
 ): string {
   const col = escapeIdent(column);
   const table = escapeIdent(tableName);
+  const targetCol = targetColumn ? escapeIdent(targetColumn) : col;
   let setExpr: string;
 
   switch (opType) {
@@ -96,7 +98,7 @@ export function buildColOpUpdateSQL(
       throw new Error(`Unknown column operation type: ${opType}`);
   }
 
-  let sql = `UPDATE ${table} SET ${col} = ${setExpr}`;
+  let sql = `UPDATE ${table} SET ${targetCol} = ${setExpr}`;
 
   const whereClause = buildFilterGroupClause(filters);
   if (whereClause) {
@@ -112,34 +114,36 @@ export function buildColOpUpdateSQL(
 export function buildStepDescription(
   opType: ColOpType,
   column: string,
-  params: Record<string, string>
+  params: Record<string, string>,
+  targetColumn?: string
 ): string {
+  const targetSuffix = targetColumn && targetColumn !== column ? ` → "${targetColumn}"` : "";
   switch (opType) {
     case "assign_value":
-      return `Set "${column}" to "${params.value ?? ""}"`;
+      return `Set "${column}" to "${params.value ?? ""}"${targetSuffix}`;
     case "find_replace":
-      return `Replace "${params.pattern ?? ""}" with "${params.replacement ?? ""}" in "${column}"`;
+      return `Replace "${params.pattern ?? ""}" with "${params.replacement ?? ""}" in "${column}"${targetSuffix}`;
     case "regex_extract":
       return params.allMatches === "true"
-        ? `Regex extract all matches from "${column}"${params.separator ? ` (sep: "${params.separator}")` : ""}`
-        : `Regex extract from "${column}"`;
+        ? `Regex extract all matches from "${column}"${params.separator ? ` (sep: "${params.separator}")` : ""}${targetSuffix}`
+        : `Regex extract from "${column}"${targetSuffix}`;
     case "extract_numbers":
-      return `Extract numbers from "${column}"`;
+      return `Extract numbers from "${column}"${targetSuffix}`;
     case "trim":
-      return `Trim "${column}"`;
+      return `Trim "${column}"${targetSuffix}`;
     case "upper":
-      return `Uppercase "${column}"`;
+      return `Uppercase "${column}"${targetSuffix}`;
     case "lower":
-      return `Lowercase "${column}"`;
+      return `Lowercase "${column}"${targetSuffix}`;
     case "clear_null":
-      return `Clear "${column}" to NULL`;
+      return `Clear "${column}" to NULL${targetSuffix}`;
     case "prefix_suffix": {
       const parts: string[] = [];
       if (params.prefix) parts.push(`prefix "${params.prefix}"`);
       if (params.suffix) parts.push(`suffix "${params.suffix}"`);
-      return `Add ${parts.join(" and ")} to "${column}"`;
+      return `Add ${parts.join(" and ")} to "${column}"${targetSuffix}`;
     }
     default:
-      return `${opType} on "${column}"`;
+      return `${opType} on "${column}"${targetSuffix}`;
   }
 }

@@ -9,7 +9,7 @@ import {
   Alert,
   Icon,
 } from "@blueprintjs/core";
-import { ColumnInfo, ColOpType, ColOpStep, UndoStrategy, FilterGroup } from "../types";
+import { ColumnInfo, ColOpType, ColOpStep, UndoStrategy, FilterGroup, ColOpTargetMode } from "../types";
 import { RegexPatternPicker } from "./RegexPatternPicker";
 import { RegexPatternManagerDialog } from "./RegexPatternManagerDialog";
 import { SearchableColumnSelect } from "./SearchableColumnSelect";
@@ -61,6 +61,8 @@ export function ColumnOpsPanel({
   const [selectedColumn, setSelectedColumn] = useState("");
   const [opType, setOpType] = useState<ColOpType>("assign_value");
   const [params, setParams] = useState<Record<string, string>>({});
+  const [targetMode, setTargetMode] = useState<ColOpTargetMode>("replace");
+  const [targetColumn, setTargetColumn] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -78,19 +80,27 @@ export function ColumnOpsPanel({
 
   const handleApply = async () => {
     if (!selectedColumn || !activeTable) return;
+    if (targetMode === "new_column" && !targetColumn.trim()) return;
+    if (targetMode === "existing_column" && !targetColumn) return;
     setLoading(true);
     setError(null);
     setSuccessMsg(null);
     try {
       const appliedCol = selectedColumn;
       const appliedOp = OP_OPTIONS.find((o) => o.value === opType)?.label ?? opType;
-      await onApply(opType, selectedColumn, params);
+      const fullParams = { ...params, targetMode, targetColumn: targetColumn || "" };
+      await onApply(opType, selectedColumn, fullParams);
       // Reset form for next operation
       setSelectedColumn("");
       setOpType("assign_value");
       setParams({});
+      setTargetMode("replace");
+      setTargetColumn("");
       // Show success flash
-      setSuccessMsg(`${appliedOp} applied to "${appliedCol}"`);
+      const targetLabel = targetMode === "new_column" ? ` → new "${targetColumn}"`
+        : targetMode === "existing_column" ? ` → "${targetColumn}"`
+        : "";
+      setSuccessMsg(`${appliedOp} applied to "${appliedCol}"${targetLabel}`);
       setTimeout(() => setSuccessMsg(null), 3000);
     } catch (err: any) {
       setError(typeof err === "string" ? err : err?.message || String(err));
@@ -296,6 +306,42 @@ export function ColumnOpsPanel({
 
           {renderInlineParams()}
 
+          <Icon icon="arrow-right" className="colops-arrow-icon" />
+
+          <HTMLSelect
+            className="colops-target-select"
+            value={targetMode}
+            onChange={(e) => {
+              setTargetMode(e.target.value as ColOpTargetMode);
+              setTargetColumn("");
+            }}
+          >
+            <option value="replace">Source col</option>
+            <option value="new_column">New col</option>
+            <option value="existing_column">Other col</option>
+          </HTMLSelect>
+
+          {targetMode === "new_column" && (
+            <InputGroup
+              className="colops-target-input"
+              value={targetColumn}
+              onChange={(e) => setTargetColumn(e.target.value)}
+              placeholder="Column name..."
+              intent={targetColumn && columns.some((c) => c.column_name === targetColumn.trim()) ? Intent.DANGER : Intent.NONE}
+              onKeyDown={(e) => { if (e.key === "Enter") handleApply(); }}
+            />
+          )}
+
+          {targetMode === "existing_column" && (
+            <SearchableColumnSelect
+              value={targetColumn}
+              onChange={setTargetColumn}
+              columns={columns}
+              placeholder="Target col..."
+              className="colops-target-col-select"
+            />
+          )}
+
           <Button
             className="colops-apply-btn"
             intent={Intent.PRIMARY}
@@ -304,7 +350,11 @@ export function ColumnOpsPanel({
             small
             onClick={handleApply}
             loading={loading}
-            disabled={!selectedColumn || loading}
+            disabled={
+              !selectedColumn || loading
+              || (targetMode === "new_column" && (!targetColumn.trim() || columns.some((c) => c.column_name === targetColumn.trim())))
+              || (targetMode === "existing_column" && !targetColumn)
+            }
           />
         </div>
 

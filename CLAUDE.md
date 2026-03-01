@@ -155,7 +155,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - `handleClearPivotGroups()` — nulls out `pivotConfig` entirely (deactivates pivot mode)
 - `handleToggleGrandTotal()` — toggles `pivotConfig.showGrandTotal`
 - `handleDefaultAggChange(fn)` — updates `pivotConfig.defaultAggFunction`
-- `handleColOpApply(opType, column, params)` — determines undo strategy on first op (per-step vs snapshot based on free RAM), creates backup, auto-promotes non-VARCHAR columns to VARCHAR for string-producing ops (prefix/suffix, find/replace, regex, upper/lower, trim, assign), executes UPDATE SQL scoped by active filters, refreshes schema, records step
+- `handleColOpApply(opType, column, params)` — determines undo strategy on first op (per-step vs snapshot based on free RAM), creates backup; reads `params.targetMode` ("replace" | "new_column" | "existing_column") and `params.targetColumn` for target column routing — "new_column" runs `ALTER TABLE ADD COLUMN` before UPDATE, "existing_column" promotes target column to VARCHAR instead of source; auto-promotes non-VARCHAR columns to VARCHAR for string-producing ops (prefix/suffix, find/replace, regex, upper/lower, trim, assign), executes UPDATE SQL scoped by active filters with optional targetColumn, refreshes schema, records step
 - `handleColOpUndo()` — per-step mode: restores last backup via `ALTER TABLE RENAME`, removes step
 - `handleColOpRevertAll()` — snapshot mode: restores from `__colops_snapshot_*`, drops it, clears all steps
 - `handleColOpClearAll()` — drops all backup/snapshot tables, clears steps (confirmation in ColumnOpsPanel)
@@ -231,6 +231,7 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
   - `replace_empty_null` — replaces empty and whitespace-only strings with actual NULL on all or selected VARCHAR columns; non-VARCHAR columns are skipped; optional column selector with search
   - `replace_sentinel_null` — replaces sentinel values (None, none, NONE, NaN, Nan, nan, NULL, null, Null, N/A, n/a, NA, na, #N/A, #NA) with actual NULL on all or selected VARCHAR columns; non-VARCHAR columns are skipped; optional column selector with search
 - Live preview: fetches 3 sample rows and shows before/after for most operations
+- **Target mode selector** (for regex_extract, trim, upper, lower, replace_regex, substring, custom_sql): RadioGroup with 3 modes — "Replace source" (default, overwrites source column), "New column" (InputGroup for name, validates uniqueness), "Existing column" (SearchableColumnSelect to pick target); for "existing_column" mode, column position is preserved in SELECT; for create_column/combine_columns/conditional_column, always shows new column name InputGroup (no mode selector)
 - **Regex pattern picker**: `RegexPatternPicker` button appears as `rightElement` on pattern InputGroup for `regex_extract` and `replace_regex` operations; also renders `RegexPatternManagerDialog`
 - Builds complete SQL internally and passes to `onApply` (or `onSampleTable` for sample_table)
 
@@ -354,8 +355,9 @@ React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
 - In-place column operations that apply to filtered rows via UPDATE statements
 - Props: `columns`, `activeTable`, `activeFilters`, `colOpsSteps`, `undoStrategy`, `onApply`, `onUndo`, `onRevertAll`, `onClearAll`, `totalRows`, `unfilteredRows`
 - **Filtered rows banner**: blue when filter active (shows filtered/total count), orange when no filter (all rows)
-- **Operation form**: Column (HTMLSelect), Operation (HTMLSelect with 9 types), dynamic params per op type, Apply button
+- **Operation form**: Column (SearchableColumnSelect), Operation (HTMLSelect with 9 types), dynamic params per op type, Target mode, Apply button
 - **Column select**: uses `SearchableColumnSelect` for searchable, sortable column dropdown
+- **Target mode selector**: HTMLSelect with 3 modes — "Source col" (replace source, default), "New col" (InputGroup for name, validates uniqueness), "Other col" (SearchableColumnSelect for existing column); passes `targetMode` and `targetColumn` via params to `onApply`; resets on apply and when source/opType changes
 - **9 operation types**: assign_value, find_replace, regex_extract, extract_numbers, trim, upper, lower, clear_null, prefix_suffix
 - **Step history**: shows chronological list (newest first) with step number and description
 - **Adaptive undo strategy**:
@@ -478,6 +480,7 @@ FileFormat        // "csv" | "tsv" | "json" | "parquet" | "xlsx" | "xls"
 ImportOptions     // { csvDelimiter?, csvIgnoreErrors?, excelSheet? }
 SheetInfo         // { name, rowCount }
 ColOpType         // "assign_value" | "find_replace" | "regex_extract" | "extract_numbers" | "trim" | "upper" | "lower" | "clear_null" | "prefix_suffix"
+ColOpTargetMode   // "replace" | "new_column" | "existing_column"
 UndoStrategy      // "per-step" | "snapshot"
 ColOpStep         // { id, opType, column, description, backupTable, timestamp }
 RowOpType         // "delete_filtered" | "keep_filtered" | "remove_empty" | "remove_duplicates"
@@ -507,8 +510,8 @@ EXCEL_MAX_COLS    // 16,384
 
 | Function | Purpose |
 |----------|---------|
-| `buildColOpUpdateSQL(tableName, column, opType, params, filters)` | Builds `UPDATE ... SET ... WHERE` for in-place column operations scoped by active filters |
-| `buildStepDescription(opType, column, params)` | Human-readable label for step history display |
+| `buildColOpUpdateSQL(tableName, column, opType, params, filters, targetColumn?)` | Builds `UPDATE ... SET ... WHERE` for in-place column operations scoped by active filters; optional `targetColumn` writes to a different column while reading from source `column` |
+| `buildStepDescription(opType, column, params, targetColumn?)` | Human-readable label for step history display; appends ` → "targetCol"` suffix when target differs from source |
 | `buildAllMatchesExtractExpr(colExpr, pattern, groupIdx, separator)` | Builds regexp_extract_all + array_to_string expression for extracting all matches |
 
 ## Row Ops SQL (`src/utils/rowOpsSQL.ts`)
@@ -546,7 +549,7 @@ EXCEL_MAX_COLS    // 16,384
 - Filter inputs match HTMLSelect appearance: `height: 30px`, border styling
 - Combine dialog inputs also use `height: 30px` to match
 - Filter panel tabs: `.filter-panel-tabs`, `.filter-panel-tab`, `.filter-panel-tab-badge`
-- Column ops: `.colops-body`, `.colops-filter-banner` / `.colops-filter-banner-all`, `.colops-form` / `.colops-form-row` / `.colops-form-label`, `.colops-steps` / `.colops-step-item` / `.colops-step-number` / `.colops-step-desc`, `.colops-error`, `.colops-empty`
+- Column ops: `.colops-body`, `.colops-filter-banner` / `.colops-filter-banner-all`, `.colops-form` / `.colops-form-row` / `.colops-form-label`, `.colops-steps` / `.colops-step-item` / `.colops-step-number` / `.colops-step-desc`, `.colops-error`, `.colops-empty`, `.colops-target-select`, `.colops-target-input`, `.colops-target-col-select`
 - Row ops: `.rowops-body`, `.rowops-top`, `.rowops-op-row`, `.rowops-op-select`, `.rowops-disabled-hint`, `.rowops-col-selector` (with `-header` / `-search` / `-list` / `-actions`), `.rowops-col-item`, `.rowops-scope` / `.rowops-scope-filtered` / `.rowops-scope-all`, `.rowops-preview-count`, `.rowops-steps` / `.rowops-step-item` / `.rowops-step-number` / `.rowops-step-desc` / `.rowops-step-undo`, `.rowops-inline-success` / `.rowops-inline-error`, `.rowops-empty`
 - Export dialog: `.export-format-row`, `.export-table-grid`
 - Import retry: `.import-retry-form`
@@ -575,7 +578,7 @@ EXCEL_MAX_COLS    // 16,384
 14. **Pivot Table**: User opens Pivot dialog → selects row fields, pivot column, value fields, and aggregate function → clicks Run to preview cross-tabulation → optionally clicks "Create as Table" to materialize as `pivot_N` table with `filePath: "(pivot)"`; uses DuckDB native `PIVOT ... ON ... USING ... GROUP BY` syntax
 15. **Lookup Merge**: User opens Lookup Merge dialog → selects right table → maps key column pairs (composite keys supported) → selects columns to merge → system checks for duplicate/NULL keys and shows warnings with options → user chooses Left/Inner Join and result mode → "Preview" shows first 10 rows → "Merge" executes the JOIN SQL; creates `merge_N` table with `filePath: "(merge)"` or replaces active table in-place
 16. **Date Conversion**: User opens Date Conversion dialog → selects date column (and optionally a group-by column) → format auto-detected per group using max-value heuristic → user resolves ambiguous formats via dropdown → selects output format → preview shows converted values + NULL parse count → apply executes `CREATE OR REPLACE TABLE ... AS SELECT` with `strftime(TRY_STRPTIME(...))` expressions (CASE WHEN for per-group formats)
-17. **Column Ops**: User opens FilterPanel → switches to "Column Ops" tab → selects column and operation → filtered-rows banner shows scope → Apply executes `UPDATE ... SET ... WHERE` scoped by active filters → adaptive undo: per-step mode creates `__colops_backup_N_table` before each op (undo restores via `ALTER TABLE RENAME`), snapshot mode creates single `__colops_snapshot_table` before first op (only "Revert All" available) → strategy chosen based on estimated table size vs 15% of free RAM → backups cleaned up on table switch
+17. **Column Ops**: User opens FilterPanel → switches to "Column Ops" tab → selects source column, operation, and target mode (replace source / new column / existing column) → filtered-rows banner shows scope → for "new_column" mode, `ALTER TABLE ADD COLUMN` runs first; for "existing_column" mode, target column is promoted to VARCHAR → Apply executes `UPDATE ... SET targetCol = expr(sourceCol) WHERE` scoped by active filters → adaptive undo: per-step mode creates `__colops_backup_N_table` before each op (undo restores via `ALTER TABLE RENAME`), snapshot mode creates single `__colops_snapshot_table` before first op (only "Revert All" available) → strategy chosen based on estimated table size vs 15% of free RAM → backups cleaned up on table switch
 18. **Row Ops**: User opens FilterPanel → switches to "Row Ops" tab → selects operation (Delete Filtered, Keep Filtered, Remove Empty, Remove Duplicates) → for remove_empty/remove_duplicates can select specific columns → preview count shows rows to be removed → Apply shows confirmation Alert → executes DELETE or CREATE OR REPLACE TABLE SQL → adaptive undo: per-step mode creates `__rowops_backup_N_table` before each op, snapshot mode creates single `__rowops_snapshot_table` → independent undo history from Column Ops → backups cleaned up on table switch
 19. **Pivot View** (Interactive Row Grouping): User clicks group icon on column pill in sidebar (auto-activates pivot mode) → pivot toolbar appears above grid → Shift+click group icon to add levels → sort and group are independent (both controls visible on every column pill, both work simultaneously) → rows grouped hierarchically with expand/collapse arrows → group rows show SUM for numeric columns (configurable: COUNT, AVG, MIN, MAX, MEDIAN) → grand total row shows overall aggregates → Expand All / Collapse All buttons → expanding deepest level reveals individual data rows (chunk-loaded) → works with active filters → click "X" on toolbar or "Clear groups" in sidebar to exit pivot mode → pivot resets on table switch
 20. **Export**: Cmd+E or sidebar Export button opens `ExportDialog` → user picks format (CSV/TSV/JSON/Excel/Parquet), tables, and view options → exports via `exportFile()` or `exportExcelMulti()` for multi-sheet Excel

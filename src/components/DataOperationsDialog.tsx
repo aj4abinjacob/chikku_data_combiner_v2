@@ -12,7 +12,7 @@ import {
   RadioGroup,
   Radio,
 } from "@blueprintjs/core";
-import { ColumnInfo } from "../types";
+import { ColumnInfo, ColOpTargetMode } from "../types";
 import { buildAllMatchesExtractExpr } from "../utils/colOpsSQL";
 import { RegexPatternPicker } from "./RegexPatternPicker";
 import { RegexPatternManagerDialog } from "./RegexPatternManagerDialog";
@@ -106,6 +106,7 @@ export function DataOperationsDialog({
   const [extractSeparator, setExtractSeparator] = useState("");
   const [patternManagerOpen, setPatternManagerOpen] = useState(false);
   const [patternRefreshKey, setPatternRefreshKey] = useState(0);
+  const [targetMode, setTargetMode] = useState<ColOpTargetMode>("replace");
 
   const handlePatternsChanged = useCallback(() => {
     setPatternRefreshKey((k) => k + 1);
@@ -361,6 +362,7 @@ export function DataOperationsDialog({
     setPreviews([]);
     setPreviewError(null);
     setDedupPreview(null);
+    setTargetMode("replace");
   };
 
   const handleApply = () => {
@@ -482,18 +484,30 @@ export function DataOperationsDialog({
       finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT *, ${caseExpr} AS "${targetCol}" FROM "${activeTable}"`;
     } else {
       if (!sourceCol) return;
-      const target = targetCol || sourceCol;
       const expr = buildExpression(opType, sourceCol, param1, param2);
       if (!expr) return;
 
-      if (target === sourceCol) {
+      if (targetMode === "new_column") {
+        if (!targetCol) return;
+        finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT *, ${expr} AS "${targetCol}" FROM "${activeTable}"`;
+      } else if (targetMode === "existing_column") {
+        if (!targetCol) return;
+        // Replace existing column value in-place (preserving column position)
+        const cols = schema
+          .map((c) =>
+            c.column_name === targetCol
+              ? `${expr} AS "${targetCol}"`
+              : `"${c.column_name}"`
+          )
+          .join(", ");
+        finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT ${cols} FROM "${activeTable}"`;
+      } else {
+        // "replace" source column
         const otherCols = schema
           .filter((c) => c.column_name !== sourceCol)
           .map((c) => `"${c.column_name}"`)
           .join(", ");
         finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT ${otherCols}, ${expr} AS "${sourceCol}" FROM "${activeTable}"`;
-      } else {
-        finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT *, ${expr} AS "${target}" FROM "${activeTable}"`;
       }
     }
 
@@ -544,17 +558,54 @@ export function DataOperationsDialog({
             </FormGroup>
           )}
 
-          {/* Target Column — hidden for delete_column, rename_column, sample_table, remove_duplicates, replace_empty_null, replace_sentinel_null */}
-          {opType !== "delete_column" && opType !== "rename_column" && opType !== "sample_table" && opType !== "remove_duplicates" && opType !== "replace_empty_null" && opType !== "replace_sentinel_null" && (
-            <FormGroup
-              label={opType === "create_column" || opType === "combine_columns" || opType === "conditional_column" ? "New Column Name" : "Target Column Name"}
-              helperText={opType === "create_column" || opType === "combine_columns" || opType === "conditional_column" ? undefined : "Leave blank to replace the source column"}
-            >
+          {/* Target Column — for create_column/combine_columns/conditional_column: always new column name input */}
+          {(opType === "create_column" || opType === "combine_columns" || opType === "conditional_column") && (
+            <FormGroup label="New Column Name">
               <InputGroup
                 value={targetCol}
                 onChange={(e) => setTargetCol(e.target.value)}
-                placeholder={opType === "create_column" || opType === "combine_columns" || opType === "conditional_column" ? "new_column" : (sourceCol || "new_column")}
+                placeholder="new_column"
               />
+            </FormGroup>
+          )}
+
+          {/* Target Mode — for ops that read from a source column and write output */}
+          {(opType === "regex_extract" || opType === "trim" || opType === "upper" || opType === "lower" || opType === "replace_regex" || opType === "substring" || opType === "custom_sql") && (
+            <FormGroup label="Write Result To">
+              <RadioGroup
+                inline
+                selectedValue={targetMode}
+                onChange={(e) => {
+                  const mode = (e.target as HTMLInputElement).value as ColOpTargetMode;
+                  setTargetMode(mode);
+                  setTargetCol("");
+                }}
+              >
+                <Radio label="Replace source" value="replace" />
+                <Radio label="New column" value="new_column" />
+                <Radio label="Existing column" value="existing_column" />
+              </RadioGroup>
+              {targetMode === "new_column" && (
+                <InputGroup
+                  value={targetCol}
+                  onChange={(e) => setTargetCol(e.target.value)}
+                  placeholder="new_column"
+                  style={{ marginTop: 6 }}
+                  intent={targetCol && schema.some((c) => c.column_name === targetCol.trim()) ? Intent.DANGER : Intent.NONE}
+                />
+              )}
+              {targetMode === "existing_column" && (
+                <div style={{ marginTop: 6 }}>
+                  <SearchableColumnSelect
+                    value={targetCol}
+                    onChange={setTargetCol}
+                    columns={schema}
+                    placeholder="Select target column..."
+                    showType
+                    fill
+                  />
+                </div>
+              )}
             </FormGroup>
           )}
 
@@ -1173,6 +1224,8 @@ export function DataOperationsDialog({
                   : opType === "replace_empty_null" || opType === "replace_sentinel_null"
                   ? false
                   : !sourceCol
+                    || (targetMode === "new_column" && (!targetCol.trim() || schema.some((c) => c.column_name === targetCol.trim())))
+                    || (targetMode === "existing_column" && !targetCol)
               }
             />
           </>

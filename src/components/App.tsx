@@ -861,26 +861,40 @@ export function App(): React.ReactElement {
           );
         }
 
-        // If the operation produces string output, ensure the column is VARCHAR
+        // Determine target column from params (backward compatible)
+        const targetMode = (params.targetMode as "replace" | "new_column" | "existing_column") || "replace";
+        const targetColumn = targetMode === "replace" ? undefined : params.targetColumn;
+
+        // For "new_column" mode, add the column first
+        if (targetMode === "new_column" && targetColumn) {
+          await window.api.exec(
+            `ALTER TABLE "${currentTable}" ADD COLUMN "${targetColumn}" VARCHAR`
+          );
+        }
+
+        // If the operation produces string output, ensure the target column is VARCHAR
         const STRING_OPS: Set<ColOpType> = new Set([
           "prefix_suffix", "find_replace", "regex_extract", "upper", "lower", "trim", "assign_value",
         ]);
         if (STRING_OPS.has(opType)) {
-          const colInfo = schema.find((c) => c.column_name === column);
+          // For "existing_column" mode, promote the target column; otherwise promote the source column
+          const colToPromote = (targetMode === "existing_column" && targetColumn) ? targetColumn : column;
+          const colInfo = schema.find((c) => c.column_name === colToPromote);
           const colType = colInfo?.column_type?.toUpperCase() ?? "";
-          if (colType && !colType.startsWith("VARCHAR") && colType !== "TEXT" && colType !== "STRING") {
+          // Skip promotion for new_column (already VARCHAR)
+          if (targetMode !== "new_column" && colType && !colType.startsWith("VARCHAR") && colType !== "TEXT" && colType !== "STRING") {
             await window.api.exec(
-              `ALTER TABLE "${currentTable}" ALTER COLUMN "${column}" TYPE VARCHAR`
+              `ALTER TABLE "${currentTable}" ALTER COLUMN "${colToPromote}" TYPE VARCHAR`
             );
           }
         }
 
         // Execute the UPDATE
-        const sql = buildColOpUpdateSQL(currentTable, column, opType, params, viewState.filters);
+        const sql = buildColOpUpdateSQL(currentTable, column, opType, params, viewState.filters, targetColumn);
         await window.api.exec(sql);
 
         // Record step
-        const description = buildStepDescription(opType, column, params);
+        const description = buildStepDescription(opType, column, params, targetColumn);
         const step: ColOpStep = {
           id: stepId,
           opType,
