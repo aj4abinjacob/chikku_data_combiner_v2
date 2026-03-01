@@ -1,16 +1,14 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+**Important:** Update this file after making changes. Keep sections accurate and in sync with the codebase.
 
-**Important:** Always update this file after making any changes, adding new features, modifying architecture, updating components, or altering the data flow. Keep all sections accurate and in sync with the current state of the codebase.
-
-**Important:** After completing any code change, always ask the user if they want to commit and push. If they agree, create a commit with an adequate message and push to the remote.
+**Important:** After completing any code change, always ask the user if they want to commit and push.
 
 **Important:** When the user asks for a change or a new feature, always clarify any doubts or ambiguities before starting implementation. Ask questions first, code second.
 
 ## Project
 
-Chikku Data Combiner v2 — an Electron desktop app for viewing, combining, and transforming data files. Supports CSV, TSV, JSON, Parquet, and Excel (.xlsx/.xls) formats. Built with React, DuckDB, BlueprintJS, and SheetJS (xlsx).
+Chikku Data Combiner v2 — an Electron desktop app for viewing, combining, and transforming data files. Supports CSV, TSV, JSON, Parquet, and Excel (.xlsx/.xls) formats.
 
 ## Commands
 
@@ -36,552 +34,107 @@ npm run clean        # Remove dist/
 | Renderer | `src/renderer.tsx` | `dist/renderer.bundle.js` | `electron-renderer` |
 
 ### Main Process (`app/main.ts`)
-
-- Creates BrowserWindow with context isolation + preload, app icon set from `res/icon.svg`
-- **Per-window DuckDB instances** — each window gets its own in-memory `Database(":memory:")` stored in `dbMap: Map<webContentsId, Database>`. Cleaned up with `db.close()` on window close. No shared state between windows.
-- Promisified helpers: `runPromise(db, sql)` and `allPromise(db, sql)` wrap DuckDB callbacks
-- Native menu: File (Open File, Add File, Export, Quit), Edit, View
-- Open/Add dialogs accept: `.csv`, `.tsv`, `.json`, `.jsonl`, `.ndjson`, `.parquet`, `.xlsx`, `.xls`
-- Menu actions use `BrowserWindow.getFocusedWindow()` to target the active window
-- IPC handlers resolve the correct DB via `event.sender.id`
-- **Excel import strategy**: converts sheet to temp CSV via `xlsx.utils.sheet_to_csv()`, loads into DuckDB with `read_csv_auto()`, cleans up temp file in `finally` block
-- **"Open With" / file association support**: handles files opened via OS "Open With" context menu, drag-to-dock (macOS), and CLI arguments (Windows/Linux). Uses `app.on("open-file")` for macOS, `process.argv` parsing for CLI args, and single-instance lock (`requestSingleInstanceLock`) to forward files to the existing window. Files received before the renderer is ready are queued in `pendingOpenFiles[]` and flushed via `did-finish-load`. Supported extensions defined in `SUPPORTED_EXTENSIONS` Set. File associations registered in `package.json` `build.fileAssociations`.
-- **Regex Pattern Library**: 18 built-in patterns in `app/regex-patterns.json` (copied to `dist/` at build time). Patterns fetched from GitHub `raw.githubusercontent.com` with 5s timeout, fallback to bundled copy, cached in memory. User patterns stored in `app.getPath('userData')/user-regex-patterns.json`. Uses Node.js `https` module (not subject to CSP).
-
-### IPC Handlers
-
-| Channel | Purpose |
-|---------|---------|
-| `db:load-csv` | (Legacy) `CREATE OR REPLACE TABLE ... AS SELECT * FROM read_csv_auto(...)`, returns `{tableName, schema, rowCount}` |
-| `db:load-file` | Generalized loader: detects format by extension — CSV/TSV → `read_csv_auto()` with optional delimiter/ignore_errors; JSON → `read_json_auto()`; Parquet → `read_parquet()`; Excel → xlsx→temp CSV→DuckDB. Returns `{tableName, schema, rowCount}` or `{error, canRetry}` on CSV parse failure. |
-| `file:get-excel-sheets` | Reads `.xlsx`/`.xls` via SheetJS, returns `{name, rowCount}[]` for sheet picker |
-| `db:query` | Execute SELECT, return rows |
-| `db:exec` | Execute DDL/DML (CREATE, ALTER, etc.), return boolean |
-| `db:describe` | `DESCRIBE "tableName"`, return schema |
-| `db:tables` | `SHOW TABLES`, return table list |
-| `db:export-csv` | (Legacy) `COPY (sql) TO 'path' (HEADER, DELIMITER ',')` |
-| `db:export-file` | Export query to file: CSV/TSV → `COPY ... (HEADER, DELIMITER)`, JSON → `COPY ... (FORMAT JSON, ARRAY true)`, Parquet → `COPY ... (FORMAT PARQUET)`, Excel → query rows + `xlsx.writeFile()` |
-| `db:export-excel-multi` | Takes `{sheetName, sql}[]`, queries each, builds multi-sheet workbook via SheetJS |
-| `dialog:save-csv` | (Legacy) Native save dialog for CSV |
-| `dialog:save-file` | Save dialog with format-specific filters |
-| `system:free-memory` | Returns `os.freemem()` — used by Column Ops to choose undo strategy |
-| `patterns:get-all` | Fetch regex patterns from GitHub (5s timeout, fallback to bundled `dist/regex-patterns.json`), cache in memory, merge with user patterns from `app.getPath('userData')/user-regex-patterns.json` |
-| `patterns:save-user` | Add or update a user regex pattern in the local JSON file |
-| `patterns:delete-user` | Remove a user regex pattern from the local JSON file |
-| `patterns:export` | Save dialog + write user patterns to chosen path |
-| `patterns:import` | Open dialog + read JSON + merge into user patterns (dedup by ID) |
+- Per-window DuckDB instances (`dbMap: Map<webContentsId, Database>`, in-memory `:memory:`)
+- IPC handlers resolve DB via `event.sender.id`; promisified helpers `runPromise`/`allPromise`
+- Excel import: sheet → temp CSV via SheetJS → `read_csv_auto()` → cleanup
+- "Open With" support: `app.on("open-file")` (macOS), `process.argv` (CLI), single-instance lock
+- Regex patterns: bundled `app/regex-patterns.json`, fetched from GitHub with fallback, user patterns in `userData`
+- IPC channels: `db:load-file`, `db:query`, `db:exec`, `db:describe`, `db:tables`, `db:export-file`, `db:export-excel-multi`, `dialog:save-file`, `system:free-memory`, `file:get-excel-sheets`, `patterns:*`
 
 ### Preload (`app/preload.ts`)
-
-Context bridge exposing `window.api` (typed as `DbApi`):
-
-```typescript
-interface DbApi {
-  loadCSV(filePath: string, tableName: string): Promise<{tableName, schema, rowCount}>
-  loadFile(filePath: string, tableName: string, options?: ImportOptions): Promise<any>
-  getExcelSheets(filePath: string): Promise<SheetInfo[]>
-  query(sql: string): Promise<any[]>
-  exec(sql: string): Promise<boolean>
-  describe(tableName: string): Promise<ColumnInfo[]>
-  tables(): Promise<any[]>
-  exportCSV(sql: string, filePath: string): Promise<boolean>
-  exportFile(sql: string, filePath: string, format: string): Promise<boolean>
-  exportExcelMulti(sheets: {sheetName, sql}[], filePath: string): Promise<boolean>
-  saveDialog(): Promise<string | null>
-  saveFileDialog(format: string): Promise<string | null>
-  getFreeMemory(): Promise<number>                           // os.freemem()
-  getRegexPatterns(): Promise<RegexPattern[]>                // Built-in + user patterns
-  saveUserPattern(pattern: RegexPattern): Promise<boolean>   // Add/update user pattern
-  deleteUserPattern(patternId: string): Promise<boolean>     // Remove user pattern
-  exportPatterns(): Promise<boolean>                         // Export user patterns to file
-  importPatterns(): Promise<{imported, error?}>              // Import patterns from file
-  onOpenFiles(callback: (paths: string[]) => void): void   // Cmd+O
-  onAddFiles(callback: (paths: string[]) => void): void    // Cmd+Shift+O
-  onExportCSV(callback: () => void): void                   // Cmd+E
-}
-```
-
-### Renderer (`src/renderer.tsx`)
-
-React 18 entry point. Mounts `<App />` to `#root`. Imports `./styles/app.less`.
+Context bridge exposing `window.api` (typed as `DbApi` in preload.ts). Key methods: `loadFile`, `query`, `exec`, `describe`, `tables`, `exportFile`, `exportExcelMulti`, `saveFileDialog`, `getFreeMemory`, `getExcelSheets`, `getRegexPatterns`, `saveUserPattern`, `deleteUserPattern`, `onOpenFiles`, `onAddFiles`, `onExportCSV`.
 
 ### Key Directories
 
-- `app/` — Electron main process + preload (Node.js context)
+- `app/` — Electron main process + preload
 - `src/components/` — React components (22 files)
-- `src/hooks/` — Custom React hooks (`useChunkCache`, `usePivotCache`)
-- `src/utils/` — SQL query builder, date detection, column ops SQL, and row ops SQL utilities
+- `src/hooks/` — `useChunkCache`, `usePivotCache`
+- `src/utils/` — `sqlBuilder.ts`, `colOpsSQL.ts`, `rowOpsSQL.ts`, `dateDetection.ts`
 - `src/types.ts` — All TypeScript interfaces
-- `src/styles/` — Less stylesheets (imports BlueprintJS CSS)
-- `html/` — HTML shell + favicon SVG (copied to dist at build time, has CSP policy)
-- `res/` — Build resources for electron-builder; contains `icon.svg` (app icon source)
+- `src/styles/app.less` — All styles (imports BlueprintJS CSS)
+- `html/` — HTML shell + favicon SVG (copied to dist)
+- `res/` — Build resources, `icon.svg`
 
 ### Tech Stack
-
-- **Electron 31** — desktop shell
-- **React 18** — UI framework
-- **TypeScript 5** — all source files (strict mode, target ES2020, module CommonJS)
-- **DuckDB** — in-memory analytical database for loading, querying, combining, and data operations (handles CSV, TSV, JSON, Parquet natively)
-- **SheetJS (xlsx)** — reading/writing Excel `.xlsx`/`.xls` files in the main process
-- **BlueprintJS 4** — UI component library (`@blueprintjs/core`, `@blueprintjs/icons`, `@blueprintjs/popover2`)
-- **chrono-node** — natural language date parsing for text-month format detection
-- **@tanstack/react-virtual** — virtual scrolling for the DataGrid (renders only visible rows)
-- **Webpack 5** — bundles 3 targets with ts-loader, less/css loaders, file-loader for fonts
-- **Less** — stylesheet preprocessor
-- **lodash** — utility library (available as dependency)
-- **electron-log** — logging in main process
+Electron 31, React 18, TypeScript 5 (strict, ES2020, CommonJS), DuckDB (in-memory), SheetJS (xlsx), BlueprintJS 4, chrono-node, @tanstack/react-virtual, Webpack 5, Less, lodash, electron-log.
 
 ## Components
 
 ### App.tsx — Main Orchestrator
-- State: `tables[]`, `activeTable`, `viewState`, `schema`, `resetKey`, `combineDialogOpen`, `combineTableNames`, `exportDialogOpen`, `pendingExcelImport`, `pendingRetry`, `colOpsSteps`, `undoStrategy`, `colOpsNextId`, `rowOpsSteps`, `rowOpsUndoStrategy`, `rowOpsNextId`
-- Uses `useChunkCache` hook for lazy data loading in flat mode (no `rows`/`totalRows` state — provided by the hook)
-- Uses `usePivotCache` hook for tree-based pivot data loading when `pivotActive` is true
-- Conditional hook routing: `pivotActive = !!viewState.pivotConfig && viewState.pivotConfig.groupColumns.length > 0`; flat cache disabled when pivot active, pivot cache disabled when flat
-- `numericColumns` memo: `Set<string>` of columns matching `NUMERIC_RE`; passed to DataGrid when pivotActive for aggregate display decisions
-- Registers IPC listeners on mount: `onOpenFiles` (replace), `onAddFiles` (append), `onExportCSV` (opens ExportDialog)
-- `loadFiles(filePaths, replace)` — detects format by extension: Excel → `getExcelSheets()`, if >1 sheet opens `ExcelSheetPickerDialog`, else imports directly; CSV/TSV → tries `loadFile()`, on failure opens `ImportRetryDialog`; JSON/Parquet → straight `loadFile()` call
-- `handleExcelSheetImport(selectedSheets)` — imports selected sheets from the pending Excel file, each as a separate table named `{fileName}_{sheetName}`
-- `handleRetryImport(options)` — retries failed CSV import with user-specified delimiter/ignore_errors options
-- `handleDeleteTable(tableName)` — drops table from DuckDB via `DROP TABLE IF EXISTS`, removes from state, switches active table if needed
-- `handleCombineOpen(selectedNames)` — stores selected table names, opens CombineDialog with only those tables
-- `handleCombineExecute(sql)` — executes combine SQL from dialog, creates a uniquely named table (`combined_1`, `combined_2`, etc.) via `nextCombinedName()` — never overwrites user-loaded tables
-- `handleDataOperation(sql)` — executes arbitrary SQL for data transforms (column/row operations)
-- `handleSampleTable(n, isPercent)` — creates a new `sample_N` table with a random sample of rows from active table using DuckDB `USING SAMPLE`; adds to tables state with `filePath: "(sample)"`
-- `handleCreateAggregateTable(sql)` — takes a SELECT SQL, generates unique `aggregate_N` name, executes `CREATE TABLE ... AS`, adds to tables state with `filePath: "(aggregate)"`
-- `handleCreatePivotTable(sql)` — takes a PIVOT SQL, generates unique `pivot_N` name, executes `CREATE TABLE ... AS (sql)`, adds to tables state with `filePath: "(pivot)"`
-- `handleLookupMerge(sql, options)` — executes a JOIN SQL for the Lookup Merge feature; if `options.replaceActive` is true, replaces the active table via `CREATE OR REPLACE TABLE`; otherwise creates a new `merge_N` table with `filePath: "(merge)"`
-- `handlePivotGroup(column, addLevel)` — same click/shift+click logic as `handleSort` but for `pivotConfig.groupColumns`; auto-creates `pivotConfig` if null; click = single group, shift+click = add/toggle/remove level
-- `handleClearPivotGroups()` — nulls out `pivotConfig` entirely (deactivates pivot mode)
-- `handleToggleGrandTotal()` — toggles `pivotConfig.showGrandTotal`
-- `handleDefaultAggChange(fn)` — updates `pivotConfig.defaultAggFunction`
-- `handleColOpApply(opType, column, params)` — determines undo strategy on first op (per-step vs snapshot based on free RAM), creates backup; reads `params.targetMode` ("replace" | "new_column" | "existing_column") and `params.targetColumn` for target column routing — "new_column" runs `ALTER TABLE ADD COLUMN` before UPDATE, "existing_column" promotes target column to VARCHAR instead of source; auto-promotes non-VARCHAR columns to VARCHAR for string-producing ops (prefix/suffix, find/replace, regex, upper/lower, trim, assign), executes UPDATE SQL scoped by active filters with optional targetColumn, refreshes schema, records step
-- `handleColOpUndo()` — per-step mode: restores last backup via `ALTER TABLE RENAME`, removes step
-- `handleColOpRevertAll()` — snapshot mode: restores from `__colops_snapshot_*`, drops it, clears all steps
-- `handleColOpClearAll()` — drops all backup/snapshot tables, clears steps (confirmation in ColumnOpsPanel)
-- `handleRowOpApply(opType, params)` — determines undo strategy on first op, creates backup, executes row operation SQL (DELETE or CREATE OR REPLACE TABLE), refreshes schema, records step
-- `handleRowOpUndo()` — per-step mode: restores last backup via `ALTER TABLE RENAME`, removes step
-- `handleRowOpRevertAll()` — snapshot mode: restores from `__rowops_snapshot_*`, drops it, clears all steps
-- `handleRowOpClearAll()` — drops all rowOps backup/snapshot tables, clears steps
-- Cleanup effect: on `activeTable` change, drops all backup/snapshot tables for previous table, resets both colOpsSteps and rowOpsSteps and their undoStrategy
-- Schema fetching effect: re-fetches schema on `activeTable` change, auto-populates `visibleColumns`
-- `resetKey` counter: increments on table/filter/sort/column changes to trigger DataGrid scroll-to-top
-- Layout: `Sidebar + PivotToolbar (when pivotActive) + DataGrid + FilterPanel (with Filters/Column Ops/Row Ops tabs) + StatusBar + CombineDialog + ExportDialog + ExcelSheetPickerDialog + ImportRetryDialog`
+- State: `tables[]`, `activeTable`, `viewState`, `schema`, `resetKey`, dialog states, `colOpsSteps`/`rowOpsSteps` with `undoStrategy`
+- Hooks: `useChunkCache` (flat mode), `usePivotCache` (pivot mode, when `pivotConfig.groupColumns.length > 0`)
+- Key handlers: `loadFiles`, `handleDeleteTable`, `handleCombineExecute`, `handleDataOperation`, `handleSampleTable`, `handleCreateAggregateTable`, `handleCreatePivotTable`, `handleLookupMerge`, `handleColOpApply`, `handleColOpUndo`, `handleRowOpApply`, `handleRowOpUndo`
+- `handleColOpApply`: reads `params.targetMode` ("replace"|"new_column"|"existing_column") and `params.targetColumn`; "new_column" adds column via `ALTER TABLE ADD COLUMN`; promotes non-VARCHAR to VARCHAR for string ops; executes `UPDATE` scoped by filters; adaptive undo (per-step vs snapshot based on RAM)
+- Layout: `Sidebar + PivotToolbar + DataGrid + FilterPanel + StatusBar + dialogs`
 
 ### Sidebar.tsx — Left Panel
-- **Three-section flex layout**: Tables (max 20%, scrollable), Columns (flex remaining, scrollable), Operations (fixed at bottom); each section scrolls independently with sticky headers
-- Lists loaded tables with row counts (click to switch active table)
-- **Delete table**: hover-reveal `x` button on each table row; opens BlueprintJS `Alert` confirmation before calling `onDeleteTable`
-- **Selective combine**: checkboxes next to each table (visible when 2+ tables loaded, including combined tables) to select which tables to combine; `selectedForCombine: Set<string>` state cleaned up when tables change; "All" / "None" buttons in tables header for quick selection
-- Table search input (shown when 8+ tables) to filter table list by name
-- "Combine N Selected" button (enabled when 2+ tables selected, passes selected names to `onCombine`)
-- Column visibility checkboxes with "All" / "None" buttons in header
-- Column search input (shown when 8+ columns) to filter column list by name
-- Column pills show native tooltip on hover with full column name
-- **Unified sort + group controls on column pills**: both always visible side-by-side on every column pill. Group control (left, green): layers icon idle → numbered badge + chevron when active; click = `onPivotGroup(col, e.shiftKey)` auto-creates pivot mode. Sort control (right, blue): double-caret idle → numbered badge + chevron when active; click to sort, Shift+click for multi-sort. Both controls work independently — no mode switching. "Clear groups" and "Clear sorts" buttons shown independently in column header when active.
-- "Data Operations" button opens `DataOperationsDialog`
-- "Aggregate" button opens `AggregateDialog`
-- "Pivot Table" button opens `PivotDialog`
-- "Lookup Merge" button opens `LookupMergeDialog` (visible when 2+ tables loaded)
-- "Date Conversion" button opens `DateConversionDialog`
-- "Export" button opens `ExportDialog`
-- Filter panel toggle button
+Three sections: Tables (max 20%), Columns (flex), Operations (fixed bottom). Table management (delete, selective combine, search). Column visibility/search. Unified sort+group controls on column pills. Operation buttons: Data Operations, Aggregate, Pivot Table, Lookup Merge, Date Conversion, Export.
 
-### ExportDialog.tsx — Export Data Modal
-- Full export dialog (Cmd+E opens it instead of auto-exporting)
-- Props: `isOpen`, `onClose`, `tables`, `activeTable`, `viewState`, `schema`
-- **Format**: radio group — CSV, TSV, JSON, Excel (.xlsx), Parquet
-- **Tables**: radio toggle — "Active table only" (default) vs "Select tables" (checkbox list); for Excel multi-table exports, each becomes a sheet
-- **View Options**: shown when active table has filters/sort/hidden/reordered columns — "Export current view" vs "Export full data"
-- **Warnings**: yellow Callout when any table exceeds Excel's 1,048,576 row or 16,384 column limits
-- Export flow: opens native save dialog → single table non-Excel uses `exportFile()`, single table Excel uses `exportFile()`, multi-table Excel uses `exportExcelMulti()`, multi-table non-Excel builds UNION ALL
+### DataGrid.tsx — Virtualized Data Grid
+Virtual scrolling via `@tanstack/react-virtual`. Div-based layout. Dual-mode: flat (chunk cache) and pivot (tree with group/data rows). Cell selection, copy (TSV), multi-sort, column resize/reorder. `ROW_HEIGHT = 28`.
 
-### ExcelSheetPickerDialog.tsx — Excel Sheet Picker Modal
-- Shown when opening an `.xlsx`/`.xls` file with multiple sheets
-- Checkbox list of sheets (name + row count), Select All / Deselect All
-- "Import N Sheets" button — each selected sheet becomes a separate DuckDB table named `{fileName}_{sheetName}`
-- If only 1 sheet → skipped, imported directly
+### FilterPanel.tsx — Bottom Panel (Filters + Column Ops + Row Ops)
+Resizable (80-500px). Three tabs. Recursive AND/OR filter groups. Operators include CONTAINS (regex), IN (value picker). Draft state model with immutable updates.
 
-### ImportRetryDialog.tsx — CSV Import Retry Modal
-- Shown when CSV auto-detect fails (parse error)
-- Red Callout showing the error message
-- Delimiter dropdown: Auto, Comma, Tab, Semicolon, Pipe, Custom
-- Checkbox: "Skip malformed rows"
-- "Retry" button calls `loadFile()` again with specified options
+### ColumnOpsPanel.tsx — Column Ops Tab
+In-place UPDATE operations scoped by active filters. 9 ops: assign_value, find_replace, regex_extract, extract_numbers, trim, upper, lower, clear_null, prefix_suffix. **Target mode selector**: "Source col" (replace), "New col" (InputGroup, validates uniqueness), "Other col" (SearchableColumnSelect). Adaptive undo (per-step/snapshot). Regex pattern picker integration.
 
 ### DataOperationsDialog.tsx — Data Operations Modal
-- Extracted from Sidebar; self-contained dialog for column/row transforms
-- Props: `isOpen`, `onClose`, `activeTable`, `schema`, `onApply(sql)`, `onSampleTable(n, isPercent)`
-- **Source column**: uses `SearchableColumnSelect` for searchable dropdown; conditional column selects also use it
-- **Multi-select alphabetical sort**: combine_columns, remove_duplicates, replace_empty_null, replace_sentinel_null column lists are always sorted alphabetically (case-insensitive)
-- 16 operation types:
-  - `regex_extract` — regexp_extract() with user-provided pattern + capture group index; casts source to VARCHAR first so it works on any data type; supports "All matches" mode that uses regexp_extract_all() + array_to_string() to extract all occurrences and join them with an optional separator
-  - `trim` — TRIM()
-  - `upper` / `lower` — UPPER() / LOWER()
-  - `replace_regex` — regexp_replace() with pattern + replacement params
-  - `substring` — SUBSTRING() with start + length params
-  - `custom_sql` — arbitrary SQL expression
-  - `create_column` — adds a new column with a user-defined value (literal or SQL expression); no source column needed
-  - `delete_column` — removes a column from the table; prevents deleting the last column; red "Delete" button with warning callout
-  - `combine_columns` — concatenates 2+ selected columns with an optional separator; all columns cast to VARCHAR; multi-select checkboxes with numbered order badges
-  - `rename_column` — renames a column using `ALTER TABLE ... RENAME COLUMN`; requires source column and new name; no preview
-  - `sample_table` — creates a new table with a random sample of rows; supports "Number of rows" or "Percentage" mode via DuckDB `USING SAMPLE`; delegates to `onSampleTable` callback (creates `sample_N` table like combine creates `combined_N`); no preview
-  - `remove_duplicates` — deduplicates rows based on user-selected columns; converts empty strings to NULL via `NULLIF()` on all VARCHAR columns in a CTE, then uses `QUALIFY row_number() OVER (PARTITION BY ...)` for dedup; multi-select checkboxes with Select All/Deselect All and search; preview shows row count before/after
-  - `conditional_column` — creates a new column using a CASE WHEN expression; multi-row condition builder with column, operator (=, !=, >, <, >=, <=, LIKE, NOT LIKE, IS NULL, IS NOT NULL, CONTAINS, STARTS WITH, ENDS WITH), value, and result; supports default ELSE value; live preview shows 5 sample rows; conditions evaluated in order (first match wins)
-  - `replace_empty_null` — replaces empty and whitespace-only strings with actual NULL on all or selected VARCHAR columns; non-VARCHAR columns are skipped; optional column selector with search
-  - `replace_sentinel_null` — replaces sentinel values (None, none, NONE, NaN, Nan, nan, NULL, null, Null, N/A, n/a, NA, na, #N/A, #NA) with actual NULL on all or selected VARCHAR columns; non-VARCHAR columns are skipped; optional column selector with search
-- Live preview: fetches 3 sample rows and shows before/after for most operations
-- **Target mode selector** (for regex_extract, trim, upper, lower, replace_regex, substring, custom_sql): RadioGroup with 3 modes — "Replace source" (default, overwrites source column), "New column" (InputGroup for name, validates uniqueness), "Existing column" (SearchableColumnSelect to pick target); for "existing_column" mode, column position is preserved in SELECT; for create_column/combine_columns/conditional_column, always shows new column name InputGroup (no mode selector)
-- **Regex pattern picker**: `RegexPatternPicker` button appears as `rightElement` on pattern InputGroup for `regex_extract` and `replace_regex` operations; also renders `RegexPatternManagerDialog`
-- Builds complete SQL internally and passes to `onApply` (or `onSampleTable` for sample_table)
+16 operation types: regex_extract, trim, upper, lower, replace_regex, substring, custom_sql, create_column, delete_column, combine_columns, rename_column, sample_table, remove_duplicates, conditional_column, replace_empty_null, replace_sentinel_null. **Target mode selector** (for regex_extract/trim/upper/lower/replace_regex/substring/custom_sql): RadioGroup with "Replace source", "New column", "Existing column". Live preview. Generates `CREATE OR REPLACE TABLE ... AS SELECT` SQL.
 
-### AggregateDialog.tsx — Aggregate Summary Modal
-- Computes aggregate statistics (SUM, MIN, MAX, AVG, COUNT, COUNT DISTINCT, MEDIAN, STDDEV) on table columns
-- Props: `isOpen`, `onClose`, `activeTable`, `schema`, `onCreateTable(sql, filePath)`
-- **Group By** (optional): multi-select checkboxes from all columns
-- **Function selection**: checkboxes for each aggregate function
-- **Column selection**: checkboxes per column; numeric columns get all functions, non-numeric get COUNT/COUNT DISTINCT/MIN/MAX only
-- "Select All Numeric" / "Deselect All" quick buttons
-- "Run" button executes the aggregate query and shows results in an HTML table (up to 200 rows)
-- "Create as Table" button materializes result as `aggregate_N` table via `onCreateTable`; appears in sidebar with `filePath: "(aggregate)"`
-- Numeric type detection via regex: `/^(TINYINT|SMALLINT|INTEGER|INT|BIGINT|HUGEINT|FLOAT|REAL|DOUBLE|DECIMAL|NUMERIC)/i`
-
-### PivotDialog.tsx — Pivot Table Modal
-- Rotates row values into column headers using DuckDB's native `PIVOT` syntax
-- Props: `isOpen`, `onClose`, `activeTable`, `schema`, `onCreateTable(sql, filePath)`
-- **Row Fields** (optional): multi-select checkboxes — become GROUP BY in the PIVOT
-- **Pivot Column** (required): single-select dropdown — values become column headers; auto-excludes row fields
-- **Value Fields** (required): multi-select checkboxes with type hints; non-numeric columns show "(count/min/max/first only)"; "Select All Numeric" / "Deselect All" quick buttons
-- **Aggregate Function** (required): single-select dropdown — SUM, COUNT, AVG, MIN, MAX, MEDIAN, STDDEV, FIRST; defaults to SUM
-- Distinct value preview: on pivot column change (300ms debounce), fetches distinct count + up to 50 sample values
-- Cardinality warnings: yellow Callout for >50 distinct values, red Callout for >200
-- "Run" button executes `PIVOT` query and shows results in HTML table (up to 200 rows, shows row + column count)
-- "Create as Table" button materializes result as `pivot_N` table via `onCreateTable`; appears in sidebar with `filePath: "(pivot)"`
-- Reuses `aggregate-*` CSS classes; only new class: `.pivot-distinct-preview`
-- Numeric type detection via same regex as AggregateDialog
-
-### PivotToolbar.tsx — Pivot View Controls
-- Thin bar displayed above the DataGrid when pivot mode is active with groupColumns
-- Props: `pivotConfig`, `onExpandAll`, `onCollapseAll`, `onToggleGrandTotal`, `onDefaultAggChange`, `onExitPivot`
-- Layout: `[X Exit] [Pivot View label] [breadcrumb: col1 > col2 > col3] ... [Expand All] [Collapse All] [Grand Total toggle] [Agg: SUM dropdown]`
-- Breadcrumb shows all group columns with direction arrows
-- Aggregate function dropdown: SUM, COUNT, AVG, MIN, MAX, MEDIAN
-- CSS namespace: `.pivot-toolbar-*`, `.pivot-breadcrumb-*`
-
-### LookupMergeDialog.tsx — Lookup Merge (JOIN) Modal
-- Joins data from a right table into the active (left) table using DuckDB LEFT/INNER JOIN
-- Props: `isOpen`, `onClose`, `activeTable`, `schema`, `tables` (all loaded), `onExecute(sql, { replaceActive })`
-- **Right Table**: dropdown to select from loaded tables (excluding active)
-- **Key Columns**: composite key support — multiple `[left SearchableColumnSelect] ↔ [right SearchableColumnSelect]` pairs with add/remove; searchable and sortable column dropdowns with type display
-- **Columns to Merge**: checkbox list of right-table columns (excludes key columns); Select All / Deselect All
-- **Duplicate key detection**: queries right table for duplicate keys before merge; shows warning Callout with count; checkbox to "Remove duplicates before merging" (uses `QUALIFY row_number() OVER (PARTITION BY ... ORDER BY rowid) = 1`)
-- **NULL key detection**: queries both tables for NULL keys; shows warning Callout; radio toggle for "Standard join (NULLs don't match)" vs "Match NULLs" (uses `IS NOT DISTINCT FROM`)
-- **Join Type**: radio toggle — Left Join (keep all left rows) vs Inner Join (matched only)
-- **Result Mode**: radio toggle — "Create new table" (`merge_N`) vs "Replace active table" (`CREATE OR REPLACE TABLE`)
-- **Column name conflict detection**: when right-table columns share names with the left table (excluding keys), a warning Callout appears with editable rename inputs pre-filled with `col_rightTableName` suffix; renames are applied as SQL `AS` aliases; validates for empty/duplicate output names
-- "Preview" button runs the JOIN SQL with `LIMIT 200` and shows results in a separate `PreviewTableDialog`
-- "Merge" button executes via `onExecute` callback; merge tables appear in sidebar with `filePath: "(merge)"`
-- Reuses `aggregate-*` CSS classes; new CSS namespace: `merge-key-pairs`, `merge-key-row`, `merge-options-grid`, `merge-rename-*`
-
-### DateConversionDialog.tsx — Date Conversion Modal
-- Converts date columns between formats using DuckDB `TRY_STRPTIME` / `strftime`
-- Props: `isOpen`, `onClose`, `activeTable`, `schema`, `tables`, `onApply(sql)` — reuses existing `onDataOperation` callback
-- **Date Column**: `SearchableColumnSelect` with type display to pick the column containing date values
-- **Group By** (optional): `SearchableColumnSelect` with `allowEmpty` for per-group format detection — useful when the same numeric format (e.g. `1/12/20`) means `DD/MM/YY` in one source vs `MM/DD/YY` in another
-- **Detection**: auto-runs on column/group selection (400ms debounce); uses `dateDetection.ts` utility; classifies as ISO / numeric / text-month; max-value heuristic for numeric dates (if max > 12 in a position → that's the day)
-- **Detection results table**: columns = Group | Sample Values | Format | Confidence; green tag for high confidence (format displayed as code), yellow for ambiguous (HTMLSelect dropdown with alternatives), red for unknown (InputGroup for manual entry)
-- **Output Format**: HTMLSelect with common presets (YYYY-MM-DD, DD/MM/YYYY, etc.) + "Custom..." option; shows example using current date
-- **Result Mode**: RadioGroup — "Replace column" (rebuilds SELECT at original position) vs "Create new column" (appends with alias)
-- **SQL generation**: single format → `strftime(TRY_STRPTIME(CAST("col" AS VARCHAR), 'fmt'), 'out_fmt')`; per-group → CASE WHEN with per-group format; already-DATE column → `strftime` directly; wrapped in `CREATE OR REPLACE TABLE ... AS SELECT`
-- **Preview**: extracts SELECT from generated SQL, runs with LIMIT 200, counts NULL results for parse-failure warning
-- **Edge cases**: already DATE/TIMESTAMP columns skip strptime; NULL values pass through; 50+ groups limited with default format for overflow
-- CSS namespace: `.date-conv-*`; reuses `aggregate-dialog-content`, `aggregate-section`, `merge-options-grid` classes
-
-### PreviewTableDialog.tsx — Reusable Preview Table Dialog
-- Standalone dialog for displaying tabular query results in a separate overlay
-- Props: `isOpen`, `onClose`, `title`, `rows`, `columns`, `maxRows` (default 200)
-- Exports shared `formatValue()` function (NULL display, number formatting)
-- Used by: LookupMergeDialog ("Merge Preview"), AggregateDialog ("Aggregate Results"), PivotDialog ("Pivot Results"), DateConversionDialog ("Date Conversion Preview")
-- Reuses `aggregate-results-wrapper` / `aggregate-results-table` / `aggregate-results-truncated` CSS classes
-
-### DataGrid.tsx — Virtualized Scrollable Data Grid
-- **Virtual scrolling** via `@tanstack/react-virtual` `useVirtualizer` — only renders visible rows (~30-50) plus 20 overscan rows
-- Div-based layout (flexbox rows, not `<table>`) with CSS classes `.dg-header`, `.dg-row`, `.dg-cell`
-- Props: `totalRows`, `getRow(index)`, `ensureRange(start, end)` from chunk cache — no `rows[]` array
-- **Pivot mode props**: `pivotMode`, `pivotFlatRows`, `pivotGroupColumns`, `onToggleExpand`, `grandTotals`, `showGrandTotal`, `numericColumns`
-- Fixed `ROW_HEIGHT = 28` for virtualizer sizing, `PIVOT_GROUP_COL_WIDTH = 250` for dedicated group column
-- Sticky header inside scroll container for automatic horizontal scroll sync
-- **Dual-mode rendering**: when `pivotMode` is true, uses `pivotFlatRows` for row data instead of `getRow()`
-- **Dedicated Group column** (pivot mode): replaces `#` row number column with a resizable "Group" column (default `PIVOT_GROUP_COL_WIDTH = 250px`, key `__pivot_group__` in columnWidths) that contains the entire tree hierarchy — expand/collapse icons, indented group values (with native `title` tooltip for truncated values), and count badges all live in this column; drag-to-resize handle on header right edge; data columns remain clean for aggregates/values
-- **Group row rendering**: `.dg-pivot-group-row` with depth-based colored borders; entire row clickable for expand/collapse; Group column shows indent + chevron + value + count; numeric data columns show bold aggregate values (`.dg-pivot-agg-value`); non-numeric and grouped columns show blank
-- **Data row rendering** (within expanded groups): `.dg-pivot-data-row` with empty Group column (`.dg-pivot-data-group-cell`); data columns show actual cell values normally (no indent)
-- **Grand total row**: `.dg-pivot-grand-total-row` rendered **after** virtual rows (at the bottom of scroll content, not sticky to header); Group column shows "Total (count)"; numeric columns show bold aggregates; non-numeric columns blank
-- **Header sort indicators**: always visible regardless of pivot mode; "Group" header replaces `#` header in pivot mode
-- Cell selection: click, click-drag (rectangular range), Shift+click (range), Cmd/Ctrl+click (toggle), Cmd/Ctrl+drag (add to selection) — uses absolute row indices; group rows are not selectable
-- Copy: Cmd/Ctrl+C copies selected cells as TSV; skips group rows in pivot mode
-- Multi-level sort: click column header for single-sort (ASC/DESC/remove), Shift+click to add sort levels with numbered indicators
-- Column resize: drag handle on header right edge
-- Column reorder: drag-and-drop header cells (disabled in pivot mode)
-- Row numbering: absolute 1-based index in first column (flat mode only; replaced by Group column in pivot mode)
-- Number formatting: integers as-is, floats to 4 decimal places
-- Unloaded rows show "..." placeholder (`.loading-cell` style)
-- `resetKey` prop: scrolls to top and clears selection when it changes
-- Monospace font (`SF Mono`, `Menlo`, `Monaco`)
-
-### FilterPanel.tsx — Resizable Bottom Panel with Tabs (Filters + Column Ops + Row Ops)
-- Resizable via drag handle (min 80px, max 500px, default 260px)
-- **Three tabs**: "Filters", "Column Ops", and "Row Ops" — tab buttons in header, local `activeTab` state
-- Filter count badge (blue) on Filters tab when not active; step count badge (green) on Column Ops tab when not active; step count badge (orange) on Row Ops tab when not active
-- When Filters tab active: shows Clear All / Apply Filters buttons in header
-- When Column Ops tab active: renders ColumnOpsPanel component
-- When Row Ops tab active: renders RowOpsPanel component
-- **Recursive filter groups**: supports nested AND/OR grouping (e.g. `AND(cond, OR(cond, AND(cond, cond)))`)
-- Root group is always present; user can toggle its logic (AND/OR) and add conditions or sub-groups
-- **FilterGroupRenderer** — recursive component rendering logic toggle, children, "+ Condition" / "+ Sub-group" buttons, and delete button for non-root groups
-- **FilterConditionRow** — leaf component for individual filter conditions (searchable column select via `SearchableColumnSelect`, operator select, value input)
-- **Draft state model**: `DraftFilterGroup`/`DraftFilterCondition` with unique `id` fields for React keys and immutable path-based updates
-- Conversion helpers: `convertToDraft(FilterGroup)` adds ids, `convertFromDraft(DraftFilterGroup)` strips ids and removes empty conditions
-- Recursive update helpers: `updateNodeById`, `addChildToGroup`, `removeNodeById` for deep immutable updates
-- Filter operators: `=`, `!=`, `>`, `<`, `>=`, `<=`, `LIKE`, `NOT LIKE`, `IS NULL`, `IS NOT NULL`, `CONTAINS`, `IN`, `STARTS WITH`, `NOT STARTS WITH`, `ENDS WITH`, `NOT ENDS WITH`
-- `CONTAINS` uses `regexp_matches()` (case-insensitive)
-- `IN` operator uses InValuePicker sub-component:
-  - Fetches up to 1000 distinct values from the column
-  - Searchable dropdown with Select All / Select None
-- Tracks dirty state (unsaved changes indicator)
-- Depth-based visual nesting: colored left borders cycling blue → purple → orange → green via `data-depth` attribute
-- CSS classes: `.filter-group`, `.filter-group-root`, `.filter-group-nested`, `.filter-group-header`, `.filter-group-children`, `.filter-group-actions`, `.filter-group-delete`
-
-### ColumnOpsPanel.tsx — Column Ops Tab Body
-- In-place column operations that apply to filtered rows via UPDATE statements
-- Props: `columns`, `activeTable`, `activeFilters`, `colOpsSteps`, `undoStrategy`, `onApply`, `onUndo`, `onRevertAll`, `onClearAll`, `totalRows`, `unfilteredRows`
-- **Filtered rows banner**: blue when filter active (shows filtered/total count), orange when no filter (all rows)
-- **Operation form**: Column (SearchableColumnSelect), Operation (HTMLSelect with 9 types), dynamic params per op type, Target mode, Apply button
-- **Column select**: uses `SearchableColumnSelect` for searchable, sortable column dropdown
-- **Target mode selector**: HTMLSelect with 3 modes — "Source col" (replace source, default), "New col" (InputGroup for name, validates uniqueness), "Other col" (SearchableColumnSelect for existing column); passes `targetMode` and `targetColumn` via params to `onApply`; resets on apply and when source/opType changes
-- **9 operation types**: assign_value, find_replace, regex_extract, extract_numbers, trim, upper, lower, clear_null, prefix_suffix
-- **Step history**: shows chronological list (newest first) with step number and description
-- **Adaptive undo strategy**:
-  - Per-step mode (small tables): backup before each op, undo button on latest step
-  - Snapshot mode (large tables, >15% of free RAM): single backup before first op, only "Revert All" available
-  - Strategy chosen on first op based on `rowCount * numColumns * 100` vs `os.freemem() * 0.15`
-- **Backup naming**: `__colops_backup_N_tableName` (per-step) or `__colops_snapshot_tableName` (snapshot) — never added to `tables` state
-- Clear confirmation (Alert) drops all backups; Revert All confirmation restores snapshot
-- **Regex pattern picker**: `RegexPatternPicker` button appears as `rightElement` on pattern InputGroup for `regex_extract` and `find_replace` (when regex mode enabled); also renders `RegexPatternManagerDialog`
-- CSS namespace: `.colops-*`
-
-### SearchableColumnSelect.tsx — Searchable Column Dropdown
-- Reusable Popover2-based dropdown replacing HTMLSelect for single-column selection in large datasets (100+ columns)
-- Props: `value`, `onChange`, `columns`, `placeholder?`, `showType?`, `fill?`, `className?`, `allowEmpty?`, `emptyLabel?`
-- **Trigger button**: styled like HTMLSelect (30px height, caret-down, text truncation with ellipsis)
-- **Popover content**: search InputGroup (auto-focused, clear button), scrollable column list (max 300px height, always sorted alphabetically case-insensitive)
-- **Keyboard support**: Arrow Up/Down navigates list, Enter selects, Escape closes; highlighted item auto-scrolls into view
-- **Used by**: ColumnOpsPanel (column select), DataOperationsDialog (source column, conditional column selects), FilterPanel (filter condition column), LookupMergeDialog (left/right key selects), DateConversionDialog (date column, group-by column)
-- CSS namespace: `.col-select-*`
-
-### RegexPatternPicker.tsx — Inline Regex Pattern Picker
-- Small `Button` (book/manual icon, minimal, small) with `Popover2`
-- Searchable list grouped by category (Numbers, Contact, Web, Date/Time, Text, My Patterns)
-- Each item shows title + monospace pattern preview; native tooltip with description
-- Click fills the regex input via `onSelect(pattern)` callback
-- "Manage Patterns..." link at bottom opens the manager dialog via `onOpenManager` callback
-- Lazy-loads patterns on first popover open via `window.api.getRegexPatterns()`
-- CSS namespace: `.regex-picker-*`
-
-### RegexPatternManagerDialog.tsx — Regex Pattern Manager
-- BlueprintJS Dialog with two sections: Built-in (read-only table) and My Patterns (editable table with edit/delete buttons)
-- Inline add/edit form with title, pattern, description, category fields
-- Delete with confirmation Alert
-- Import/Export buttons in dialog footer
-- Calls `onPatternsChanged()` to signal picker to refresh its cached patterns
-- CSS namespace: `.regex-manager-*`
-
-### RowOpsPanel.tsx — Row Ops Tab Body
-- Row-level operations (delete, keep, deduplicate, remove empty) with independent undo history
-- Props: `columns`, `activeTable`, `activeFilters`, `rowOpsSteps`, `undoStrategy`, `onApply`, `onUndo`, `onRevertAll`, `onClearAll`, `totalRows`, `unfilteredRows`, `visible`
-- **4 operation types**: delete_filtered, keep_filtered, remove_empty, remove_duplicates
-- **Filter-dependent ops**: delete_filtered and keep_filtered are disabled (grayed out with hint text) when no filter is active
-- **Column selector**: multi-select with search + Select All/Deselect All for remove_empty and remove_duplicates; when no columns selected, operates on all columns; compact multi-column grid layout with type badge next to column name; columns sorted alphabetically by default
-- **Preview counts**: debounced (400ms) preview showing "N rows will be removed"
-- **Confirmation dialog**: all operations show a confirmation Alert before executing (destructive ops)
-- **Scope banner**: matching colops style — blue when filter active, orange when no filter
-- **Step history**: same adaptive undo strategy as ColumnOpsPanel (per-step vs snapshot)
-- **Backup naming**: `__rowops_backup_N_tableName` (per-step) or `__rowops_snapshot_tableName` (snapshot) — no conflicts with colOps backups
-- Independent undo state from Column Ops; cleaned up on table switch
-- CSS namespace: `.rowops-*` (orange accent for step badges and latest step highlight)
-
-### CombineDialog.tsx — Column Mapping Modal
-- Large dialog (90vw, max 1100px) with two-panel layout
-- **Left panel**: Column mapping rows — each has Output field, ← arrow, Input field, Remove button
-  - Output = final column name in combined result
-  - Input = comma-separated source column names
-  - Focus tracking: clicking right-panel buttons appends to the focused field
-- **Right panel**: All unique columns across tables as clickable buttons
-  - Color-coded: outlined (unused), green/SUCCESS (used once), red/DANGER (used 2+)
-  - Tooltip on hover shows which tables contain the column
-- "Fill Common" button: auto-maps columns present in ALL loaded tables
-- "Add Row" button: manual mapping
-- One-column-per-table constraint: only one input column per source table per mapping (explained in UI hint)
-- Validation: empty outputs, duplicate outputs, empty inputs, duplicate input usage, input columns must exist in at least one table
-- Warnings (non-blocking): empty tables (0 rows), all-NULL output columns
-- Type safety: passes column type info to SQL builder; mismatched types across tables are auto-cast to VARCHAR
-- Generates SQL via `buildMappedCombineQuery()`
-
-### StatusBar.tsx — Bottom Info Bar
-- Shows: `{activeTable} | {totalRows} rows | {tableCount} table(s) loaded`
-- When pivot active: shows `| Grouped by: col1 > col2` segment
-- Info-only display (no pagination controls)
-
-### Toolbar.tsx — Minimal Toolbar
-- Sidebar toggle button and Combine button (largely superseded by Sidebar)
+### Other Components
+- **ExportDialog.tsx**: Format selection (CSV/TSV/JSON/Excel/Parquet), table selection, view options, Excel row/col limit warnings
+- **CombineDialog.tsx**: Column mapping modal for UNION ALL with auto VARCHAR cast
+- **AggregateDialog.tsx**: Aggregate stats (SUM/MIN/MAX/AVG/COUNT/MEDIAN/STDDEV), optional Group By, materializes as `aggregate_N`
+- **PivotDialog.tsx**: DuckDB native `PIVOT` syntax, materializes as `pivot_N`
+- **PivotToolbar.tsx**: Controls above DataGrid when pivot active (expand/collapse, grand total, agg function)
+- **LookupMergeDialog.tsx**: LEFT/INNER JOIN with composite keys, duplicate/NULL key detection, column conflict resolution
+- **DateConversionDialog.tsx**: Format detection (ISO/numeric/text-month), `TRY_STRPTIME`/`strftime` conversion
+- **ExcelSheetPickerDialog.tsx**: Multi-sheet import picker
+- **ImportRetryDialog.tsx**: CSV parse failure retry with delimiter/ignore options
+- **PreviewTableDialog.tsx**: Reusable results table dialog
+- **SearchableColumnSelect.tsx**: Popover2-based searchable column dropdown with keyboard nav
+- **RegexPatternPicker.tsx**: Inline pattern picker grouped by category
+- **RegexPatternManagerDialog.tsx**: Pattern CRUD + import/export
+- **RowOpsPanel.tsx**: Row ops (delete_filtered, keep_filtered, remove_empty, remove_duplicates) with independent undo
+- **StatusBar.tsx**: Table name, row count, pivot status
+- **Toolbar.tsx**: Sidebar toggle (largely superseded by Sidebar)
 
 ## Hooks
 
-### useChunkCache (`src/hooks/useChunkCache.ts`) — Lazy Data Loading
-- Fetches data from DuckDB in 1000-row chunks on demand
-- `CHUNK_SIZE = 1000`, `MAX_CACHED_CHUNKS = 20` (~20K rows max in memory)
-- LRU eviction: evicts least-recently-used chunks when cache exceeds limit
-- Generation counter: discards stale responses after cache resets (table/filter/sort changes)
-- Tracks in-flight requests to prevent duplicate fetches
-- Auto-resets on `tableName`, `filters`, `sortColumns`, or `visibleColumns` change
-- Returns: `{ totalRows, getRow(index), isRowLoaded(index), ensureRange(start, end) }`
-- Uses `buildChunkQuery()` for per-chunk SQL and `buildCountQuery()` for total count
+### useChunkCache — Lazy Data Loading
+1000-row chunks, LRU eviction (max 20 chunks), generation counter for stale responses. Returns `{ totalRows, getRow, isRowLoaded, ensureRange }`.
 
-### usePivotCache (`src/hooks/usePivotCache.ts`) — Pivot View Data Loading
-- Tree-based cache for hierarchical row grouping with lazy expand
-- Internal `GroupNode` tree: each node has `column`, `value`, `count`, `aggregates`, `expanded`, `children` (sub-groups), `dataRows` (leaf data chunks)
-- **On activation**: queries top-level groups via `buildPivotGroupQuery()`, fetches grand totals via `buildPivotGrandTotalQuery()`
-- **On expand**: loads sub-groups (more levels) or data chunks (leaf level) via `buildPivotDataChunkQuery()`
-- **Flattening**: walks tree recursively emitting group rows + expanded children + data rows into `flatRows: PivotFlatRow[]`
-- **Aggregate auto-detection**: numeric columns (matching `NUMERIC_RE`) get `defaultAggFunction`, non-numeric skipped; exception: `COUNT_DISTINCT` applies to ALL columns
-- **Cache invalidation**: full reset on tableName/filters/groupColumns/visibleColumns/defaultAggFunction change (generation counter pattern)
-- **Leaf data chunks**: `CHUNK_SIZE = 1000`, lazy loading scoped by parentPath
-- Returns: `{ flatRows, grandTotals, loading, toggleExpand, expandAll, collapseAll, ensureRange }`
+### usePivotCache — Pivot View Data
+Tree-based GroupNode cache. Lazy expand (sub-groups or data chunks). Returns `{ flatRows, grandTotals, loading, toggleExpand, expandAll, collapseAll, ensureRange }`.
 
 ## Types (`src/types.ts`)
 
-```typescript
-ColumnInfo        // { column_name, column_type, null, key, default, extra }
-LoadedTable       // { tableName, filePath, schema: ColumnInfo[], rowCount }
-ColumnOperation   // { type, sourceColumn, targetColumn, params: Record<string,string> }
-FilterCondition   // { column, operator, value }
-FilterGroup       // { logic: "AND" | "OR", children: FilterNode[] }
-FilterNode        // FilterCondition | FilterGroup (recursive union)
-isFilterGroup()   // type guard: node is FilterGroup
-hasActiveFilters() // checks if group has any children
-countConditions() // recursively counts leaf conditions in a group
-ColumnMapping     // { id, outputColumn, inputColumns: string[] }
-SortColumn        // { column: string, direction: "ASC" | "DESC" }
-PivotGroupColumn  // { column: string, direction: "ASC" | "DESC" }
-PivotAggFunction  // "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" | "MEDIAN" | "COUNT_DISTINCT"
-PivotViewConfig   // { groupColumns: PivotGroupColumn[], showGrandTotal: boolean, defaultAggFunction: PivotAggFunction }
-PivotFlatRow      // { key, type: "group"|"data", depth, groupColumn?, groupValue?, groupCount?, aggregates?, expanded?, data?, parentPath[] }
-ViewState         // { visibleColumns[], columnOrder[], filters: FilterGroup, sortColumns: SortColumn[], pivotConfig: PivotViewConfig | null }
-FileFormat        // "csv" | "tsv" | "json" | "parquet" | "xlsx" | "xls"
-ImportOptions     // { csvDelimiter?, csvIgnoreErrors?, excelSheet? }
-SheetInfo         // { name, rowCount }
-ColOpType         // "assign_value" | "find_replace" | "regex_extract" | "extract_numbers" | "trim" | "upper" | "lower" | "clear_null" | "prefix_suffix"
-ColOpTargetMode   // "replace" | "new_column" | "existing_column"
-UndoStrategy      // "per-step" | "snapshot"
-ColOpStep         // { id, opType, column, description, backupTable, timestamp }
-RowOpType         // "delete_filtered" | "keep_filtered" | "remove_empty" | "remove_duplicates"
-RowOpStep         // { id, opType, description, backupTable, timestamp }
-RegexPattern      // { id, title, pattern, description, category?, isBuiltin }
-EXCEL_MAX_ROWS    // 1,048,576
-EXCEL_MAX_COLS    // 16,384
-```
+Key types: `ColumnInfo`, `LoadedTable`, `ViewState`, `FilterGroup`/`FilterNode`/`FilterCondition` (recursive), `SortColumn`, `PivotGroupColumn`, `PivotViewConfig`, `PivotFlatRow`, `ColOpType`, `ColOpTargetMode` ("replace"|"new_column"|"existing_column"), `ColOpStep`, `RowOpType`, `RowOpStep`, `UndoStrategy`, `ColumnMapping`, `RegexPattern`, `FileFormat`, `ImportOptions`, `SheetInfo`. Helper functions: `isFilterGroup()`, `hasActiveFilters()`, `countConditions()`. Constants: `EXCEL_MAX_ROWS`, `EXCEL_MAX_COLS`.
 
-## SQL Builder (`src/utils/sqlBuilder.ts`)
+## Utils
 
-| Function | Purpose |
-|----------|---------|
-| `buildSelectQuery(tableName, viewState)` | SELECT with columns, WHERE, ORDER BY (no LIMIT/OFFSET — used for export) |
-| `buildFilterClause(filter)` | Single FilterCondition → SQL WHERE clause (internal) |
-| `buildFilterGroupClause(group)` | Recursive FilterGroup → SQL WHERE clause with AND/OR nesting |
-| `buildCombineQuery(tableNames[])` | Simple `SELECT * ... UNION ALL` (used by export) |
-| `escapeIdent(name)` | Escape a SQL identifier by doubling embedded double quotes |
-| `buildMappedCombineQuery(tables[], mappings[])` | Column-mapped UNION ALL with aliases, NULL for missing columns, auto VARCHAR cast on type mismatch, trimmed output names |
-| `buildChunkQuery(tableName, columns, filters: FilterGroup, sortColumns: SortColumn[], chunkSize, chunkIndex)` | SELECT with multi-column ORDER BY, LIMIT/OFFSET for chunk-based virtual scroll loading |
-| `buildCountQuery(tableName, filters: FilterGroup)` | `SELECT COUNT(*) ... WHERE` for total row count |
-| `buildPivotGroupQuery(tableName, groupColumn, parentPath, aggConfigs, filters, direction)` | SELECT groupCol, COUNT(*), aggregates FROM table WHERE filters AND parent GROUP BY groupCol |
-| `buildPivotGrandTotalQuery(tableName, aggConfigs, filters)` | SELECT COUNT(*), aggregates FROM table WHERE filters (overall totals) |
-| `buildPivotDataChunkQuery(tableName, visibleColumns, parentPath, filters, sortColumns, chunkSize, chunkIndex)` | SELECT for leaf data rows within an expanded group, with parent path constraints |
+### sqlBuilder.ts
+`buildSelectQuery`, `buildFilterGroupClause`, `buildCombineQuery`, `buildMappedCombineQuery`, `buildChunkQuery`, `buildCountQuery`, `buildPivotGroupQuery`, `buildPivotGrandTotalQuery`, `buildPivotDataChunkQuery`, `escapeIdent`.
 
-## Column Ops SQL (`src/utils/colOpsSQL.ts`)
+### colOpsSQL.ts
+`buildColOpUpdateSQL(tableName, column, opType, params, filters, targetColumn?)` — UPDATE with optional target column. `buildStepDescription(opType, column, params, targetColumn?)` — appends ` → "target"` when different. `buildAllMatchesExtractExpr`.
 
-| Function | Purpose |
-|----------|---------|
-| `buildColOpUpdateSQL(tableName, column, opType, params, filters, targetColumn?)` | Builds `UPDATE ... SET ... WHERE` for in-place column operations scoped by active filters; optional `targetColumn` writes to a different column while reading from source `column` |
-| `buildStepDescription(opType, column, params, targetColumn?)` | Human-readable label for step history display; appends ` → "targetCol"` suffix when target differs from source |
-| `buildAllMatchesExtractExpr(colExpr, pattern, groupIdx, separator)` | Builds regexp_extract_all + array_to_string expression for extracting all matches |
+### rowOpsSQL.ts
+`buildRowOpSQL(tableName, opType, params, filters, schema)` — DELETE or CREATE OR REPLACE TABLE. `buildRowOpStepDescription`.
 
-## Row Ops SQL (`src/utils/rowOpsSQL.ts`)
+### dateDetection.ts
+`detectDateFormat(samples)` — classifies as ISO/numeric/text-month, max-value heuristic for DD/MM vs MM/DD. `OUTPUT_FORMATS` for dropdown.
 
-| Function | Purpose |
-|----------|---------|
-| `buildRowOpSQL(tableName, opType, params, filters, schema)` | Builds DELETE or CREATE OR REPLACE TABLE SQL for row operations; `delete_filtered` → `DELETE WHERE filter`, `keep_filtered` → `DELETE WHERE NOT filter`, `remove_empty` → `DELETE WHERE all-NULL/empty`, `remove_duplicates` → `CREATE OR REPLACE TABLE ... QUALIFY row_number()` |
-| `buildRowOpStepDescription(opType, params)` | Human-readable label for row ops step history display |
+## Key Patterns
 
-## Date Detection (`src/utils/dateDetection.ts`)
-
-| Function | Purpose |
-|----------|---------|
-| `detectDateFormat(samples)` | Main entry: classifies samples, returns `{ format, confidence, alternatives }` |
-| `classifyPattern(value)` | Categorizes a single value as `iso` / `numeric` / `text-month` / `other` |
-| `analyzeNumericDates(samples, separator)` | Max-value heuristic per position for numeric `DD/MM/YY` vs `MM/DD/YY` disambiguation |
-| `OUTPUT_FORMATS` | Array of `[label, duckdbFormat]` tuples for the output format dropdown |
-
-**Detection algorithm:**
-1. Classify each sample by regex: ISO (`YYYY-MM-DD`), numeric (`D/M/Y`), text-month (alphabetic), other
-2. For numeric dates: split by separator, find max value per position; `max > 12` → that position is day; both ≤ 12 → ambiguous (return both alternatives)
-3. For text-month: use `chrono-node` to parse, detect month-first vs day-first ordering
-4. Confidence levels: `high` (unambiguous), `ambiguous` (both alternatives returned), `unknown` (cannot detect)
-
-## Styling (`src/styles/app.less`)
-
-- Imports: `blueprint.css`, `blueprint-icons.css`, `blueprint-popover2.css`
-- CSS variables: `--sidebar-width: 280px`, `--statusbar-height: 28px`
-- Color palette: `#f5f8fa` (bg), `#394b59` (text), `#5c7080` (secondary), `#137cbd` (accent blue), `#d8e1e8` (borders)
-- Layout: flexbox throughout — `.app-container` (column) → `.main-layout` (row) → `.sidebar` (fixed 280px) + `.data-area` (flex: 1)
-- DataGrid uses div-based layout: `.data-grid-container` → `.data-grid-scroll` → `.dg-header` (sticky) + virtual `.dg-row` elements
-- Sidebar columns: `.column-header-row`, `.column-header-actions`, `.column-search`, `.column-name-text`, `.column-sort-indicator` (with `.active`, `.column-sort-number`, `.column-sort-idle`), `.column-clear-sort-btn`
-- Cell classes: `.dg-cell`, `.dg-row-num-cell`, `.dg-header-cell`, `.cell-selected`, `.loading-cell`, `.column-dragging`
-- Sort indicator: `.sort-indicator`, `.sort-indicator-number` (numbered badge for multi-sort)
-- Filter inputs match HTMLSelect appearance: `height: 30px`, border styling
-- Combine dialog inputs also use `height: 30px` to match
-- Filter panel tabs: `.filter-panel-tabs`, `.filter-panel-tab`, `.filter-panel-tab-badge`
-- Column ops: `.colops-body`, `.colops-filter-banner` / `.colops-filter-banner-all`, `.colops-form` / `.colops-form-row` / `.colops-form-label`, `.colops-steps` / `.colops-step-item` / `.colops-step-number` / `.colops-step-desc`, `.colops-error`, `.colops-empty`, `.colops-target-select`, `.colops-target-input`, `.colops-target-col-select`
-- Row ops: `.rowops-body`, `.rowops-top`, `.rowops-op-row`, `.rowops-op-select`, `.rowops-disabled-hint`, `.rowops-col-selector` (with `-header` / `-search` / `-list` / `-actions`), `.rowops-col-item`, `.rowops-scope` / `.rowops-scope-filtered` / `.rowops-scope-all`, `.rowops-preview-count`, `.rowops-steps` / `.rowops-step-item` / `.rowops-step-number` / `.rowops-step-desc` / `.rowops-step-undo`, `.rowops-inline-success` / `.rowops-inline-error`, `.rowops-empty`
-- Export dialog: `.export-format-row`, `.export-table-grid`
-- Import retry: `.import-retry-form`
-- Regex picker: `.regex-picker-popover`, `.regex-picker-search`, `.regex-picker-list`, `.regex-picker-category`, `.regex-picker-category-label`, `.regex-picker-item`, `.regex-picker-item-title`, `.regex-picker-item-pattern`, `.regex-picker-footer`
-- Regex manager: `.regex-manager-content`, `.regex-manager-section`, `.regex-manager-section-header`, `.regex-manager-table-wrapper`, `.regex-manager-table`, `.regex-manager-empty`, `.regex-manager-form`, `.regex-manager-form-header`, `.regex-manager-form-row`, `.regex-manager-footer-left`
-- Searchable column select: `.col-select-trigger` (with `-fill`, `-text`, `-placeholder`, `-caret`), `.col-select-popover`, `.col-select-search`, `.col-select-list`, `.col-select-empty`, `.col-select-item` (with `-selected`, `-highlight`, `-name`, `-type`)
-- Pivot toolbar: `.pivot-toolbar`, `.pivot-toolbar-exit`, `.pivot-toolbar-label`, `.pivot-toolbar-breadcrumb`, `.pivot-breadcrumb-sep`, `.pivot-breadcrumb-item`, `.pivot-toolbar-spacer`, `.pivot-toolbar-agg-select`
-- Pivot grid: `.dg-pivot-group-header`, `.dg-pivot-group-row`, `.dg-pivot-depth-{0-3}` (depth-based colored left borders), `.dg-pivot-group-cell`, `.dg-pivot-expand-icon`, `.dg-pivot-group-value`, `.dg-pivot-group-count`, `.dg-pivot-agg-value` (bold, right-aligned aggregates), `.dg-pivot-data-group-cell` (empty group cell for data rows), `.dg-pivot-grand-total-row` (bottom, not sticky), `.dg-pivot-data-row`
-- Pivot sidebar indicators: `.column-pivot-indicator` (with `.active`, `.column-pivot-number`, `.column-pivot-idle`), `.column-clear-pivot-btn` — always visible alongside sort indicators (both at `opacity: 0.4` idle, `1` on hover/active)
-
-## Data Flow
-
-1. User opens data files via native file dialog (Cmd+O to replace, Cmd+Shift+O to add) — supports CSV, TSV, JSON, Parquet, Excel
-2. **Import routing by format**: CSV/TSV → `read_csv_auto()` (with retry dialog on parse failure); JSON → `read_json_auto()`; Parquet → `read_parquet()`; Excel → SheetJS reads workbook, if multiple sheets shows `ExcelSheetPickerDialog`, converts selected sheets to temp CSV for DuckDB loading
-3. Renderer fetches schema via IPC; `useChunkCache` hook manages data loading
-4. As the user scrolls, `@tanstack/react-virtual` computes visible row indices
-5. `useChunkCache.ensureRange()` fetches missing 1000-row chunks from DuckDB via `buildChunkQuery()`
-6. Chunks far from the viewport are evicted (LRU, max 20 chunks = ~20K rows in memory)
-7. `getRow(index)` returns cached row data synchronously; unloaded rows show "..." placeholder
-8. **Delete**: User hovers table row → clicks `x` → confirms in Alert → `DROP TABLE IF EXISTS` via IPC, removed from state
-9. **Combine**: User selects tables via checkboxes (combined tables excluded) → clicks "Combine N Selected" → CombineDialog opens with only selected tables → maps output←input columns → generates mapped UNION ALL SQL (with auto VARCHAR cast for type mismatches) → creates uniquely named `combined_N` table
-10. Data operations rebuild tables with `CREATE OR REPLACE TABLE ... AS SELECT`
-11. **Sample Table**: User selects "Sample Table" in Data Operations → chooses row count or percentage → creates a new `sample_N` table via `CREATE TABLE ... AS SELECT * FROM ... USING SAMPLE`; appears in sidebar with `filePath: "(sample)"`
-12. **Remove Duplicates**: User selects columns to dedup → empty strings converted to NULL via `NULLIF()` on all VARCHAR columns in a CTE → deduped via `QUALIFY row_number() OVER (PARTITION BY ...) = 1`
-13. **Aggregate**: User opens Aggregate dialog → selects columns and aggregate functions (optionally with Group By) → clicks Run to preview results → optionally clicks "Create as Table" to materialize as `aggregate_N` table with `filePath: "(aggregate)"`
-14. **Pivot Table**: User opens Pivot dialog → selects row fields, pivot column, value fields, and aggregate function → clicks Run to preview cross-tabulation → optionally clicks "Create as Table" to materialize as `pivot_N` table with `filePath: "(pivot)"`; uses DuckDB native `PIVOT ... ON ... USING ... GROUP BY` syntax
-15. **Lookup Merge**: User opens Lookup Merge dialog → selects right table → maps key column pairs (composite keys supported) → selects columns to merge → system checks for duplicate/NULL keys and shows warnings with options → user chooses Left/Inner Join and result mode → "Preview" shows first 10 rows → "Merge" executes the JOIN SQL; creates `merge_N` table with `filePath: "(merge)"` or replaces active table in-place
-16. **Date Conversion**: User opens Date Conversion dialog → selects date column (and optionally a group-by column) → format auto-detected per group using max-value heuristic → user resolves ambiguous formats via dropdown → selects output format → preview shows converted values + NULL parse count → apply executes `CREATE OR REPLACE TABLE ... AS SELECT` with `strftime(TRY_STRPTIME(...))` expressions (CASE WHEN for per-group formats)
-17. **Column Ops**: User opens FilterPanel → switches to "Column Ops" tab → selects source column, operation, and target mode (replace source / new column / existing column) → filtered-rows banner shows scope → for "new_column" mode, `ALTER TABLE ADD COLUMN` runs first; for "existing_column" mode, target column is promoted to VARCHAR → Apply executes `UPDATE ... SET targetCol = expr(sourceCol) WHERE` scoped by active filters → adaptive undo: per-step mode creates `__colops_backup_N_table` before each op (undo restores via `ALTER TABLE RENAME`), snapshot mode creates single `__colops_snapshot_table` before first op (only "Revert All" available) → strategy chosen based on estimated table size vs 15% of free RAM → backups cleaned up on table switch
-18. **Row Ops**: User opens FilterPanel → switches to "Row Ops" tab → selects operation (Delete Filtered, Keep Filtered, Remove Empty, Remove Duplicates) → for remove_empty/remove_duplicates can select specific columns → preview count shows rows to be removed → Apply shows confirmation Alert → executes DELETE or CREATE OR REPLACE TABLE SQL → adaptive undo: per-step mode creates `__rowops_backup_N_table` before each op, snapshot mode creates single `__rowops_snapshot_table` → independent undo history from Column Ops → backups cleaned up on table switch
-19. **Pivot View** (Interactive Row Grouping): User clicks group icon on column pill in sidebar (auto-activates pivot mode) → pivot toolbar appears above grid → Shift+click group icon to add levels → sort and group are independent (both controls visible on every column pill, both work simultaneously) → rows grouped hierarchically with expand/collapse arrows → group rows show SUM for numeric columns (configurable: COUNT, AVG, MIN, MAX, MEDIAN) → grand total row shows overall aggregates → Expand All / Collapse All buttons → expanding deepest level reveals individual data rows (chunk-loaded) → works with active filters → click "X" on toolbar or "Clear groups" in sidebar to exit pivot mode → pivot resets on table switch
-20. **Export**: Cmd+E or sidebar Export button opens `ExportDialog` → user picks format (CSV/TSV/JSON/Excel/Parquet), tables, and view options → exports via `exportFile()` or `exportExcelMulti()` for multi-sheet Excel
+- Generated tables use sequential names: `combined_N`, `sample_N`, `aggregate_N`, `pivot_N`, `merge_N`
+- Backup tables: `__colops_backup_N_table` / `__colops_snapshot_table`, `__rowops_backup_N_table` / `__rowops_snapshot_table`
+- Undo strategy chosen on first op: per-step (small tables, individual undo) vs snapshot (large tables, revert-all only)
+- Column ops target modes: "replace" (UPDATE source), "new_column" (ALTER TABLE ADD + UPDATE), "existing_column" (UPDATE different col)
+- Data operations use `CREATE OR REPLACE TABLE ... AS SELECT` pattern
+- All filter/sort state lives in `ViewState`; chunk cache auto-resets on changes
+- CSS namespaces: `.colops-*`, `.rowops-*`, `.dg-*`, `.col-select-*`, `.regex-picker-*`, `.regex-manager-*`, `.pivot-toolbar-*`, `.filter-group-*`, `.date-conv-*`, `.merge-*`
 
 ## Keyboard Shortcuts
 
