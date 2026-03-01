@@ -77,7 +77,7 @@ Virtual scrolling via `@tanstack/react-virtual`. Div-based layout. Dual-mode: fl
 Resizable (80-500px). Three tabs. Recursive AND/OR filter groups. Operators include CONTAINS (regex), IN (value picker). Draft state model with immutable updates.
 
 ### ColumnOpsPanel.tsx — Column Ops Tab
-In-place UPDATE operations scoped by active filters. 9 ops: assign_value, find_replace, regex_extract, extract_numbers, trim, upper, lower, clear_null, prefix_suffix. **Target mode selector** (extract ops only: regex_extract, extract_numbers): "Source col" (replace), "New col" (InputGroup, validates uniqueness), "Other col" (SearchableColumnSelect). All other ops always replace source. Adaptive undo (per-step/snapshot). Regex pattern picker integration.
+In-place UPDATE operations scoped by active filters. 9 ops: assign_value, find_replace, regex_extract, extract_numbers, trim, upper, lower, clear_null, prefix_suffix. **Target mode selector** (regex_extract only): "Source col" (replace), "New col", "Other col". **Live preview**: debounced (300ms) 3-sample before/after table, updates as inputs change. Adaptive undo (per-step/snapshot). Regex pattern picker integration.
 
 ### DataOperationsDialog.tsx — Data Operations Modal
 16 operation types: regex_extract, trim, upper, lower, replace_regex, substring, custom_sql, create_column, delete_column, combine_columns, rename_column, sample_table, remove_duplicates, conditional_column, replace_empty_null, replace_sentinel_null. **Target mode selector** (extract ops only: regex_extract, substring, custom_sql): RadioGroup with "Replace source", "New column", "Existing column". All other ops replace source or use dedicated new-column input. Live preview. Generates `CREATE OR REPLACE TABLE ... AS SELECT` SQL.
@@ -118,7 +118,7 @@ Key types: `ColumnInfo`, `LoadedTable`, `ViewState`, `FilterGroup`/`FilterNode`/
 `buildSelectQuery`, `buildFilterGroupClause`, `buildCombineQuery`, `buildMappedCombineQuery`, `buildChunkQuery`, `buildCountQuery`, `buildPivotGroupQuery`, `buildPivotGrandTotalQuery`, `buildPivotDataChunkQuery`, `escapeIdent`.
 
 ### colOpsSQL.ts
-`buildColOpUpdateSQL(tableName, column, opType, params, filters, targetColumn?)` — UPDATE with optional target column. `buildStepDescription(opType, column, params, targetColumn?)` — appends ` → "target"` when different. `buildAllMatchesExtractExpr`.
+`buildColOpExpr(column, opType, params)` — returns SET expression string (used by both UPDATE and preview). `buildColOpUpdateSQL(tableName, column, opType, params, filters, targetColumn?)` — UPDATE with optional target column. `buildStepDescription(opType, column, params, targetColumn?)` — appends ` → "target"` when different. `buildAllMatchesExtractExpr`.
 
 ### rowOpsSQL.ts
 `buildRowOpSQL(tableName, opType, params, filters, schema)` — DELETE or CREATE OR REPLACE TABLE. `buildRowOpStepDescription`.

@@ -2067,6 +2067,43 @@ html, body, #root {
   gap: 10px;
 }
 
+// Live preview table
+.colops-preview {
+  margin-top: 2px;
+
+  .colops-preview-error {
+    font-size: 11px;
+    color: #c23030;
+  }
+
+  .colops-preview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    font-family: "SF Mono", "Menlo", "Monaco", monospace;
+
+    th {
+      text-align: left;
+      font-size: 10px;
+      text-transform: uppercase;
+      color: #5c7080;
+      padding: 2px 6px;
+      border-bottom: 1px solid #e1e8ed;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    td {
+      padding: 2px 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 200px;
+      border-bottom: 1px solid #f0f4f7;
+    }
+  }
+}
+
 .colops-scope {
   display: inline-flex;
   align-items: center;

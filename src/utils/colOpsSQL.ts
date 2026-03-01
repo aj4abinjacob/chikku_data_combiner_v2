@@ -23,6 +23,63 @@ export function buildAllMatchesExtractExpr(
 }
 
 /**
+ * Build the SET expression for a column operation (without UPDATE wrapper).
+ * Used for both UPDATE SQL and live preview queries.
+ */
+export function buildColOpExpr(
+  column: string,
+  opType: ColOpType,
+  params: Record<string, string>
+): string {
+  const col = escapeIdent(column);
+
+  switch (opType) {
+    case "assign_value": {
+      const val = params.value?.replace(/'/g, "''") ?? "";
+      return `'${val}'`;
+    }
+    case "find_replace": {
+      const useRegex = params.useRegex === "true";
+      const pattern = useRegex
+        ? params.pattern?.replace(/'/g, "''") ?? ""
+        : escapeRegexMeta(params.pattern ?? "").replace(/'/g, "''");
+      const replacement = params.replacement?.replace(/'/g, "''") ?? "";
+      return `regexp_replace(CAST(${col} AS VARCHAR), '${pattern}', '${replacement}', 'g')`;
+    }
+    case "regex_extract": {
+      const pattern = (params.pattern ?? "").replace(/'/g, "''");
+      const groupIdx = params.groupIndex ?? "1";
+      if (params.allMatches === "true") {
+        return buildAllMatchesExtractExpr(
+          `CAST(${col} AS VARCHAR)`,
+          pattern,
+          groupIdx,
+          params.separator ?? ""
+        );
+      }
+      return `regexp_extract(CAST(${col} AS VARCHAR), '${pattern}', ${groupIdx})`;
+    }
+    case "extract_numbers":
+      return `regexp_extract(CAST(${col} AS VARCHAR), '(-?[0-9]+\\.?[0-9]*)', 1)`;
+    case "trim":
+      return `TRIM(CAST(${col} AS VARCHAR))`;
+    case "upper":
+      return `UPPER(CAST(${col} AS VARCHAR))`;
+    case "lower":
+      return `LOWER(CAST(${col} AS VARCHAR))`;
+    case "clear_null":
+      return "NULL";
+    case "prefix_suffix": {
+      const prefix = params.prefix?.replace(/'/g, "''") ?? "";
+      const suffix = params.suffix?.replace(/'/g, "''") ?? "";
+      return `'${prefix}' || CAST(${col} AS VARCHAR) || '${suffix}'`;
+    }
+    default:
+      throw new Error(`Unknown column operation type: ${opType}`);
+  }
+}
+
+/**
  * Build an UPDATE SQL for a column operation, optionally scoped by filters.
  */
 export function buildColOpUpdateSQL(
@@ -33,70 +90,9 @@ export function buildColOpUpdateSQL(
   filters: FilterGroup,
   targetColumn?: string
 ): string {
-  const col = escapeIdent(column);
   const table = escapeIdent(tableName);
-  const targetCol = targetColumn ? escapeIdent(targetColumn) : col;
-  let setExpr: string;
-
-  switch (opType) {
-    case "assign_value": {
-      const val = params.value?.replace(/'/g, "''") ?? "";
-      setExpr = `'${val}'`;
-      break;
-    }
-    case "find_replace": {
-      const useRegex = params.useRegex === "true";
-      const pattern = useRegex
-        ? params.pattern?.replace(/'/g, "''") ?? ""
-        : escapeRegexMeta(params.pattern ?? "").replace(/'/g, "''");
-      const replacement = params.replacement?.replace(/'/g, "''") ?? "";
-      setExpr = `regexp_replace(CAST(${col} AS VARCHAR), '${pattern}', '${replacement}', 'g')`;
-      break;
-    }
-    case "regex_extract": {
-      const pattern = (params.pattern ?? "").replace(/'/g, "''");
-      const groupIdx = params.groupIndex ?? "1";
-      if (params.allMatches === "true") {
-        setExpr = buildAllMatchesExtractExpr(
-          `CAST(${col} AS VARCHAR)`,
-          pattern,
-          groupIdx,
-          params.separator ?? ""
-        );
-      } else {
-        setExpr = `regexp_extract(CAST(${col} AS VARCHAR), '${pattern}', ${groupIdx})`;
-      }
-      break;
-    }
-    case "extract_numbers": {
-      setExpr = `regexp_extract(CAST(${col} AS VARCHAR), '(-?[0-9]+\\.?[0-9]*)', 1)`;
-      break;
-    }
-    case "trim": {
-      setExpr = `TRIM(CAST(${col} AS VARCHAR))`;
-      break;
-    }
-    case "upper": {
-      setExpr = `UPPER(CAST(${col} AS VARCHAR))`;
-      break;
-    }
-    case "lower": {
-      setExpr = `LOWER(CAST(${col} AS VARCHAR))`;
-      break;
-    }
-    case "clear_null": {
-      setExpr = "NULL";
-      break;
-    }
-    case "prefix_suffix": {
-      const prefix = params.prefix?.replace(/'/g, "''") ?? "";
-      const suffix = params.suffix?.replace(/'/g, "''") ?? "";
-      setExpr = `'${prefix}' || CAST(${col} AS VARCHAR) || '${suffix}'`;
-      break;
-    }
-    default:
-      throw new Error(`Unknown column operation type: ${opType}`);
-  }
+  const targetCol = targetColumn ? escapeIdent(targetColumn) : escapeIdent(column);
+  const setExpr = buildColOpExpr(column, opType, params);
 
   let sql = `UPDATE ${table} SET ${targetCol} = ${setExpr}`;
 

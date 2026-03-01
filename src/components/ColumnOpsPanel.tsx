@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   Button,
   Callout,
@@ -10,6 +10,7 @@ import {
   Icon,
 } from "@blueprintjs/core";
 import { ColumnInfo, ColOpType, ColOpStep, UndoStrategy, FilterGroup, ColOpTargetMode } from "../types";
+import { buildColOpExpr } from "../utils/colOpsSQL";
 import { RegexPatternPicker } from "./RegexPatternPicker";
 import { RegexPatternManagerDialog } from "./RegexPatternManagerDialog";
 import { SearchableColumnSelect } from "./SearchableColumnSelect";
@@ -29,8 +30,8 @@ const OP_OPTIONS: { value: ColOpType; label: string }[] = [
 // Operations that need no extra params — just column + apply
 const NO_PARAM_OPS = new Set<ColOpType>(["trim", "upper", "lower", "clear_null", "extract_numbers"]);
 
-// Operations that support writing to a different target column (extract-type ops)
-const TARGET_MODE_OPS = new Set<ColOpType>(["regex_extract", "extract_numbers"]);
+// Operations that support writing to a different target column
+const TARGET_MODE_OPS = new Set<ColOpType>(["regex_extract"]);
 
 interface ColumnOpsPanelProps {
   columns: ColumnInfo[];
@@ -73,10 +74,56 @@ export function ColumnOpsPanel({
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
   const [patternManagerOpen, setPatternManagerOpen] = useState(false);
   const [patternRefreshKey, setPatternRefreshKey] = useState(0);
+  const [previews, setPreviews] = useState<Array<{ original: string; result: string }>>([]);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const handlePatternsChanged = useCallback(() => {
     setPatternRefreshKey((k) => k + 1);
   }, []);
+
+  // Live preview: debounced query for 3 sample rows showing before/after
+  useEffect(() => {
+    if (!activeTable || !selectedColumn || !visible) {
+      setPreviews([]);
+      setPreviewError(null);
+      return;
+    }
+
+    // clear_null has no meaningful preview
+    if (opType === "clear_null") {
+      setPreviews([]);
+      setPreviewError(null);
+      return;
+    }
+
+    // For ops with required params, skip preview until params are filled
+    if (opType === "assign_value" && !params.value) { setPreviews([]); setPreviewError(null); return; }
+    if (opType === "find_replace" && !params.pattern) { setPreviews([]); setPreviewError(null); return; }
+    if (opType === "regex_extract" && !params.pattern) { setPreviews([]); setPreviewError(null); return; }
+    if (opType === "prefix_suffix" && !params.prefix && !params.suffix) { setPreviews([]); setPreviewError(null); return; }
+
+    let expr: string;
+    try {
+      expr = buildColOpExpr(selectedColumn, opType, params);
+    } catch {
+      setPreviews([]);
+      setPreviewError(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const sql = `SELECT DISTINCT CAST("${selectedColumn}" AS VARCHAR) AS "original", CAST(${expr} AS VARCHAR) AS "result" FROM "${activeTable}" WHERE "${selectedColumn}" IS NOT NULL LIMIT 3`;
+        const rows = await window.api.query(sql);
+        setPreviews(rows.map((r: any) => ({ original: String(r.original ?? ""), result: String(r.result ?? "") })));
+        setPreviewError(null);
+      } catch (e: any) {
+        setPreviews([]);
+        setPreviewError(e.message || "Preview failed");
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [activeTable, selectedColumn, opType, params, visible]);
 
   const hasFilter = unfilteredRows !== null;
   const isFiltered = hasFilter && totalRows !== unfilteredRows;
@@ -102,6 +149,8 @@ export function ColumnOpsPanel({
       setParams({});
       setTargetMode("replace");
       setTargetColumn("");
+      setPreviews([]);
+      setPreviewError(null);
       // Show success flash
       const targetLabel = effectiveTargetMode === "new_column" ? ` → new "${effectiveTargetCol}"`
         : effectiveTargetMode === "existing_column" ? ` → "${effectiveTargetCol}"`
@@ -389,6 +438,26 @@ export function ColumnOpsPanel({
             </span>
           )}
         </div>
+
+        {/* Live preview */}
+        {(previews.length > 0 || previewError) && (
+          <div className="colops-preview">
+            {previewError ? (
+              <span className="colops-preview-error">{previewError}</span>
+            ) : (
+              <table className="colops-preview-table">
+                <thead>
+                  <tr><th>Original</th><th>Result</th></tr>
+                </thead>
+                <tbody>
+                  {previews.map((p, i) => (
+                    <tr key={i}><td>{p.original}</td><td>{p.result}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Step history */}
