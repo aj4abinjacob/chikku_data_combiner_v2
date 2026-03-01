@@ -29,6 +29,9 @@ const OP_OPTIONS: { value: ColOpType; label: string }[] = [
 // Operations that need no extra params — just column + apply
 const NO_PARAM_OPS = new Set<ColOpType>(["trim", "upper", "lower", "clear_null", "extract_numbers"]);
 
+// Operations that support writing to a different target column (extract-type ops)
+const TARGET_MODE_OPS = new Set<ColOpType>(["regex_extract", "extract_numbers"]);
+
 interface ColumnOpsPanelProps {
   columns: ColumnInfo[];
   activeTable: string | null;
@@ -80,15 +83,18 @@ export function ColumnOpsPanel({
 
   const handleApply = async () => {
     if (!selectedColumn || !activeTable) return;
-    if (targetMode === "new_column" && !targetColumn.trim()) return;
-    if (targetMode === "existing_column" && !targetColumn) return;
+    const hasTargetMode = TARGET_MODE_OPS.has(opType);
+    const effectiveTargetMode = hasTargetMode ? targetMode : "replace";
+    const effectiveTargetCol = hasTargetMode ? targetColumn : "";
+    if (effectiveTargetMode === "new_column" && !effectiveTargetCol.trim()) return;
+    if (effectiveTargetMode === "existing_column" && !effectiveTargetCol) return;
     setLoading(true);
     setError(null);
     setSuccessMsg(null);
     try {
       const appliedCol = selectedColumn;
       const appliedOp = OP_OPTIONS.find((o) => o.value === opType)?.label ?? opType;
-      const fullParams = { ...params, targetMode, targetColumn: targetColumn || "" };
+      const fullParams = { ...params, targetMode: effectiveTargetMode, targetColumn: effectiveTargetCol };
       await onApply(opType, selectedColumn, fullParams);
       // Reset form for next operation
       setSelectedColumn("");
@@ -97,8 +103,8 @@ export function ColumnOpsPanel({
       setTargetMode("replace");
       setTargetColumn("");
       // Show success flash
-      const targetLabel = targetMode === "new_column" ? ` → new "${targetColumn}"`
-        : targetMode === "existing_column" ? ` → "${targetColumn}"`
+      const targetLabel = effectiveTargetMode === "new_column" ? ` → new "${effectiveTargetCol}"`
+        : effectiveTargetMode === "existing_column" ? ` → "${effectiveTargetCol}"`
         : "";
       setSuccessMsg(`${appliedOp} applied to "${appliedCol}"${targetLabel}`);
       setTimeout(() => setSuccessMsg(null), 3000);
@@ -306,40 +312,44 @@ export function ColumnOpsPanel({
 
           {renderInlineParams()}
 
-          <Icon icon="arrow-right" className="colops-arrow-icon" />
+          {TARGET_MODE_OPS.has(opType) && (
+            <>
+              <Icon icon="arrow-right" className="colops-arrow-icon" />
 
-          <HTMLSelect
-            className="colops-target-select"
-            value={targetMode}
-            onChange={(e) => {
-              setTargetMode(e.target.value as ColOpTargetMode);
-              setTargetColumn("");
-            }}
-          >
-            <option value="replace">Source col</option>
-            <option value="new_column">New col</option>
-            <option value="existing_column">Other col</option>
-          </HTMLSelect>
+              <HTMLSelect
+                className="colops-target-select"
+                value={targetMode}
+                onChange={(e) => {
+                  setTargetMode(e.target.value as ColOpTargetMode);
+                  setTargetColumn("");
+                }}
+              >
+                <option value="replace">Source col</option>
+                <option value="new_column">New col</option>
+                <option value="existing_column">Other col</option>
+              </HTMLSelect>
 
-          {targetMode === "new_column" && (
-            <InputGroup
-              className="colops-target-input"
-              value={targetColumn}
-              onChange={(e) => setTargetColumn(e.target.value)}
-              placeholder="Column name..."
-              intent={targetColumn && columns.some((c) => c.column_name === targetColumn.trim()) ? Intent.DANGER : Intent.NONE}
-              onKeyDown={(e) => { if (e.key === "Enter") handleApply(); }}
-            />
-          )}
+              {targetMode === "new_column" && (
+                <InputGroup
+                  className="colops-target-input"
+                  value={targetColumn}
+                  onChange={(e) => setTargetColumn(e.target.value)}
+                  placeholder="Column name..."
+                  intent={targetColumn && columns.some((c) => c.column_name === targetColumn.trim()) ? Intent.DANGER : Intent.NONE}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleApply(); }}
+                />
+              )}
 
-          {targetMode === "existing_column" && (
-            <SearchableColumnSelect
-              value={targetColumn}
-              onChange={setTargetColumn}
-              columns={columns}
-              placeholder="Target col..."
-              className="colops-target-col-select"
-            />
+              {targetMode === "existing_column" && (
+                <SearchableColumnSelect
+                  value={targetColumn}
+                  onChange={setTargetColumn}
+                  columns={columns}
+                  placeholder="Target col..."
+                  className="colops-target-col-select"
+                />
+              )}
+            </>
           )}
 
           <Button
@@ -352,8 +362,8 @@ export function ColumnOpsPanel({
             loading={loading}
             disabled={
               !selectedColumn || loading
-              || (targetMode === "new_column" && (!targetColumn.trim() || columns.some((c) => c.column_name === targetColumn.trim())))
-              || (targetMode === "existing_column" && !targetColumn)
+              || (TARGET_MODE_OPS.has(opType) && targetMode === "new_column" && (!targetColumn.trim() || columns.some((c) => c.column_name === targetColumn.trim())))
+              || (TARGET_MODE_OPS.has(opType) && targetMode === "existing_column" && !targetColumn)
             }
           />
         </div>

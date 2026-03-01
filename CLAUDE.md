@@ -77,10 +77,10 @@ Virtual scrolling via `@tanstack/react-virtual`. Div-based layout. Dual-mode: fl
 Resizable (80-500px). Three tabs. Recursive AND/OR filter groups. Operators include CONTAINS (regex), IN (value picker). Draft state model with immutable updates.
 
 ### ColumnOpsPanel.tsx — Column Ops Tab
-In-place UPDATE operations scoped by active filters. 9 ops: assign_value, find_replace, regex_extract, extract_numbers, trim, upper, lower, clear_null, prefix_suffix. **Target mode selector**: "Source col" (replace), "New col" (InputGroup, validates uniqueness), "Other col" (SearchableColumnSelect). Adaptive undo (per-step/snapshot). Regex pattern picker integration.
+In-place UPDATE operations scoped by active filters. 9 ops: assign_value, find_replace, regex_extract, extract_numbers, trim, upper, lower, clear_null, prefix_suffix. **Target mode selector** (extract ops only: regex_extract, extract_numbers): "Source col" (replace), "New col" (InputGroup, validates uniqueness), "Other col" (SearchableColumnSelect). All other ops always replace source. Adaptive undo (per-step/snapshot). Regex pattern picker integration.
 
 ### DataOperationsDialog.tsx — Data Operations Modal
-16 operation types: regex_extract, trim, upper, lower, replace_regex, substring, custom_sql, create_column, delete_column, combine_columns, rename_column, sample_table, remove_duplicates, conditional_column, replace_empty_null, replace_sentinel_null. **Target mode selector** (for regex_extract/trim/upper/lower/replace_regex/substring/custom_sql): RadioGroup with "Replace source", "New column", "Existing column". Live preview. Generates `CREATE OR REPLACE TABLE ... AS SELECT` SQL.
+16 operation types: regex_extract, trim, upper, lower, replace_regex, substring, custom_sql, create_column, delete_column, combine_columns, rename_column, sample_table, remove_duplicates, conditional_column, replace_empty_null, replace_sentinel_null. **Target mode selector** (extract ops only: regex_extract, substring, custom_sql): RadioGroup with "Replace source", "New column", "Existing column". All other ops replace source or use dedicated new-column input. Live preview. Generates `CREATE OR REPLACE TABLE ... AS SELECT` SQL.
 
 ### Other Components
 - **ExportDialog.tsx**: Format selection (CSV/TSV/JSON/Excel/Parquet), table selection, view options, Excel row/col limit warnings
@@ -131,7 +131,7 @@ Key types: `ColumnInfo`, `LoadedTable`, `ViewState`, `FilterGroup`/`FilterNode`/
 - Generated tables use sequential names: `combined_N`, `sample_N`, `aggregate_N`, `pivot_N`, `merge_N`
 - Backup tables: `__colops_backup_N_table` / `__colops_snapshot_table`, `__rowops_backup_N_table` / `__rowops_snapshot_table`
 - Undo strategy chosen on first op: per-step (small tables, individual undo) vs snapshot (large tables, revert-all only)
-- Column ops target modes: "replace" (UPDATE source), "new_column" (ALTER TABLE ADD + UPDATE), "existing_column" (UPDATE different col)
+- Column ops target modes (extract ops only): "replace" (UPDATE source), "new_column" (ALTER TABLE ADD + UPDATE), "existing_column" (UPDATE different col)
 - Data operations use `CREATE OR REPLACE TABLE ... AS SELECT` pattern
 - All filter/sort state lives in `ViewState`; chunk cache auto-resets on changes
 - CSS namespaces: `.colops-*`, `.rowops-*`, `.dg-*`, `.col-select-*`, `.regex-picker-*`, `.regex-manager-*`, `.pivot-toolbar-*`, `.filter-group-*`, `.date-conv-*`, `.merge-*`

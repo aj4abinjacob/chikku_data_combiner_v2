@@ -487,16 +487,21 @@ export function DataOperationsDialog({
       const expr = buildExpression(opType, sourceCol, param1, param2);
       if (!expr) return;
 
-      if (targetMode === "new_column") {
-        if (!targetCol) return;
-        finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT *, ${expr} AS "${targetCol}" FROM "${activeTable}"`;
-      } else if (targetMode === "existing_column") {
-        if (!targetCol) return;
+      // Only extract-type ops support target mode; others always replace source
+      const hasTargetMode = opType === "regex_extract" || opType === "substring" || opType === "custom_sql";
+      const effectiveMode = hasTargetMode ? targetMode : "replace";
+      const effectiveTarget = hasTargetMode ? targetCol : "";
+
+      if (effectiveMode === "new_column") {
+        if (!effectiveTarget) return;
+        finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT *, ${expr} AS "${effectiveTarget}" FROM "${activeTable}"`;
+      } else if (effectiveMode === "existing_column") {
+        if (!effectiveTarget) return;
         // Replace existing column value in-place (preserving column position)
         const cols = schema
           .map((c) =>
-            c.column_name === targetCol
-              ? `${expr} AS "${targetCol}"`
+            c.column_name === effectiveTarget
+              ? `${expr} AS "${effectiveTarget}"`
               : `"${c.column_name}"`
           )
           .join(", ");
@@ -569,8 +574,8 @@ export function DataOperationsDialog({
             </FormGroup>
           )}
 
-          {/* Target Mode — for ops that read from a source column and write output */}
-          {(opType === "regex_extract" || opType === "trim" || opType === "upper" || opType === "lower" || opType === "replace_regex" || opType === "substring" || opType === "custom_sql") && (
+          {/* Target Mode — only for extract-type ops */}
+          {(opType === "regex_extract" || opType === "substring" || opType === "custom_sql") && (
             <FormGroup label="Write Result To">
               <RadioGroup
                 inline
@@ -1224,8 +1229,8 @@ export function DataOperationsDialog({
                   : opType === "replace_empty_null" || opType === "replace_sentinel_null"
                   ? false
                   : !sourceCol
-                    || (targetMode === "new_column" && (!targetCol.trim() || schema.some((c) => c.column_name === targetCol.trim())))
-                    || (targetMode === "existing_column" && !targetCol)
+                    || ((opType === "regex_extract" || opType === "substring" || opType === "custom_sql") && targetMode === "new_column" && (!targetCol.trim() || schema.some((c) => c.column_name === targetCol.trim())))
+                    || ((opType === "regex_extract" || opType === "substring" || opType === "custom_sql") && targetMode === "existing_column" && !targetCol)
               }
             />
           </>
