@@ -505,16 +505,16 @@ export function Sidebar({
             fill
           />
           <Button
-            icon="export"
-            text="Export"
-            onClick={onExport}
+            icon="history"
+            text="History"
+            onClick={onOpenHistory}
             small
             fill
           />
           <Button
-            icon="history"
-            text="History"
-            onClick={onOpenHistory}
+            icon="export"
+            text="Export"
+            onClick={onExport}
             small
             fill
           />
