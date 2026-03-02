@@ -434,6 +434,34 @@ ipcMain.handle("shell:open-external", (_event, url: string) => {
   }
 });
 
+// Write JSON data to a file path
+ipcMain.handle("file:write-json", async (event, filePath: string, data: any) => {
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
+  return true;
+});
+
+// Open file dialog and read+parse JSON
+ipcMain.handle("file:read-json", async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return null;
+  const result = await dialog.showOpenDialog(win, {
+    filters: [{ name: "JSON Files", extensions: ["json"] }],
+    properties: ["openFile"],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  try {
+    const data = fs.readFileSync(result.filePaths[0], "utf-8");
+    return JSON.parse(data);
+  } catch (err) {
+    return { error: (err as Error).message };
+  }
+});
+
+// Check if a file exists
+ipcMain.handle("file:exists", async (_event, filePath: string) => {
+  return fs.existsSync(filePath);
+});
+
 // ── Regex Pattern Library ──
 
 interface RegexPattern {

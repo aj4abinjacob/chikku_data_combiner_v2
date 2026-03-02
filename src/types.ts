@@ -20,6 +20,7 @@ export interface LoadedTable {
   filePath: string;
   schema: ColumnInfo[];
   rowCount: number;
+  importOptions?: ImportOptions;
 }
 
 export interface ColumnOperation {
@@ -170,6 +171,36 @@ export interface SavedView {
   viewState: ViewState;
   createdAt: number;
   updatedAt: number;
+}
+
+export type HistoryOpSource = "col_op" | "row_op" | "data_op";
+
+export interface HistoryEntry {
+  id: number;
+  source: HistoryOpSource;
+  description: string;
+  timestamp: number;
+  sqlStatements: string[];
+}
+
+export interface TableSourceInfo {
+  filePath: string;
+  importOptions?: ImportOptions;
+  isGenerated: boolean;
+}
+
+export interface TableHistory {
+  tableName: string;
+  sourceInfo: TableSourceInfo;
+  initialSchema: ColumnInfo[];
+  entries: HistoryEntry[];
+  nextEntryId: number;
+}
+
+export interface HistoryExportData {
+  version: 1;
+  exportedAt: number;
+  tables: TableHistory[];
 }
 
 export const EXCEL_MAX_ROWS = 1_048_576;

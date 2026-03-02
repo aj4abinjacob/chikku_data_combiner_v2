@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Button } from "@blueprintjs/core";
-import { LoadedTable, ViewState, ColumnInfo, FilterGroup, SheetInfo, hasActiveFilters, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView } from "../types";
+import { LoadedTable, ViewState, ColumnInfo, FilterGroup, SheetInfo, hasActiveFilters, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions } from "../types";
 import { Sidebar } from "./Sidebar";
 import { DataGrid } from "./DataGrid";
 import { FilterPanel } from "./FilterPanel";
@@ -10,6 +10,7 @@ import { CombineDialog } from "./CombineDialog";
 import { ExcelSheetPickerDialog } from "./ExcelSheetPickerDialog";
 import { ImportRetryDialog } from "./ImportRetryDialog";
 import { ExportDialog } from "./ExportDialog";
+import { HistoryDialog } from "./HistoryDialog";
 import { buildCombineQuery } from "../utils/sqlBuilder";
 import { buildColOpUpdateSQL, buildStepDescription } from "../utils/colOpsSQL";
 import { buildRowOpSQL, buildRowOpStepDescription } from "../utils/rowOpsSQL";
@@ -113,12 +114,16 @@ export function App(): React.ReactElement {
   });
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [savedViewNextId, setSavedViewNextId] = useState(1);
+  const [tableHistories, setTableHistories] = useState<Map<string, TableHistory>>(new Map());
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
 
   // Use refs so IPC callbacks always see latest state
   const tablesRef = useRef(tables);
   tablesRef.current = tables;
   const activeTableRef = useRef(activeTable);
   activeTableRef.current = activeTable;
+  const tableHistoriesRef = useRef(tableHistories);
+  tableHistoriesRef.current = tableHistories;
 
   // Determine if pivot mode is active
   const pivotActive = !!viewState.pivotConfig && viewState.pivotConfig.groupColumns.length > 0;
@@ -153,6 +158,56 @@ export function App(): React.ReactElement {
     enabled: viewState.visibleColumns.length > 0 && pivotActive,
   });
 
+  // ── History helpers ──
+
+  const getSourceInfoForTable = useCallback((table: LoadedTable): TableSourceInfo => {
+    const isGenerated = table.filePath.startsWith("(");
+    return {
+      filePath: table.filePath,
+      importOptions: table.importOptions,
+      isGenerated,
+    };
+  }, []);
+
+  const initializeTableHistory = useCallback((table: LoadedTable) => {
+    const history: TableHistory = {
+      tableName: table.tableName,
+      sourceInfo: getSourceInfoForTable(table),
+      initialSchema: [...table.schema],
+      entries: [],
+      nextEntryId: 1,
+    };
+    setTableHistories((prev) => {
+      const next = new Map(prev);
+      next.set(table.tableName, history);
+      return next;
+    });
+  }, [getSourceInfoForTable]);
+
+  const recordHistoryEntry = useCallback(
+    (tableName: string, source: HistoryOpSource, description: string, sqlStatements: string[]) => {
+      setTableHistories((prev) => {
+        const history = prev.get(tableName);
+        if (!history) return prev;
+        const entry: HistoryEntry = {
+          id: history.nextEntryId,
+          source,
+          description,
+          timestamp: Date.now(),
+          sqlStatements,
+        };
+        const next = new Map(prev);
+        next.set(tableName, {
+          ...history,
+          entries: [...history.entries, entry],
+          nextEntryId: history.nextEntryId + 1,
+        });
+        return next;
+      });
+    },
+    []
+  );
+
   // Load a single file into DuckDB (handles all formats)
   const loadSingleFile = useCallback(
     async (
@@ -170,6 +225,7 @@ export function App(): React.ReactElement {
           filePath: fp,
           schema: result.schema,
           rowCount: result.rowCount,
+          importOptions: options,
         };
       } catch (err) {
         console.error(`Failed to load ${fp}:`, err);
@@ -245,6 +301,13 @@ export function App(): React.ReactElement {
 
       setTables(newTables);
 
+      // Initialize history for newly loaded tables
+      for (const t of newTables) {
+        if (!tableHistoriesRef.current.has(t.tableName)) {
+          initializeTableHistory(t);
+        }
+      }
+
       if (newTables.length > 0) {
         setActiveTable(newTables[0].tableName);
         setViewState((prev) => ({ ...prev, filters: { logic: "AND", children: [] } }));
@@ -252,7 +315,7 @@ export function App(): React.ReactElement {
         setFilterPanelOpen(false);
       }
     },
-    [loadSingleFile]
+    [loadSingleFile, initializeTableHistory]
   );
 
   // Handle Excel sheet picker result
@@ -278,6 +341,12 @@ export function App(): React.ReactElement {
         await loadFiles(remainingFiles, false, newTables);
       } else {
         setTables(newTables);
+        // Initialize history for newly loaded tables
+        for (const t of newTables) {
+          if (!tableHistoriesRef.current.has(t.tableName)) {
+            initializeTableHistory(t);
+          }
+        }
         if (newTables.length > 0) {
           setActiveTable(newTables[replace ? 0 : newTables.length - selectedSheets.length].tableName);
           setViewState((prev) => ({ ...prev, filters: { logic: "AND", children: [] } }));
@@ -286,7 +355,7 @@ export function App(): React.ReactElement {
         }
       }
     },
-    [pendingExcelImport, loadSingleFile, loadFiles]
+    [pendingExcelImport, loadSingleFile, loadFiles, initializeTableHistory]
   );
 
   // Handle CSV retry
@@ -312,6 +381,12 @@ export function App(): React.ReactElement {
         await loadFiles(remainingFiles, false, newTables);
       } else {
         setTables(newTables);
+        // Initialize history for newly loaded tables
+        for (const t of newTables) {
+          if (!tableHistoriesRef.current.has(t.tableName)) {
+            initializeTableHistory(t);
+          }
+        }
         if (newTables.length > 0) {
           setActiveTable(newTables[newTables.length - 1].tableName);
           setViewState((prev) => ({ ...prev, filters: { logic: "AND", children: [] } }));
@@ -320,7 +395,7 @@ export function App(): React.ReactElement {
         }
       }
     },
-    [pendingRetry, loadSingleFile, loadFiles]
+    [pendingRetry, loadSingleFile, loadFiles, initializeTableHistory]
   );
 
   // Register IPC listeners once on mount
@@ -413,6 +488,12 @@ export function App(): React.ReactElement {
       }
       return remaining;
     });
+    // Remove history for the deleted table
+    setTableHistories((prev) => {
+      const next = new Map(prev);
+      next.delete(tableName);
+      return next;
+    });
   }, []);
 
   // Open the column mapping dialog with selected tables
@@ -443,6 +524,7 @@ export function App(): React.ReactElement {
       };
 
       setTables((prev) => [...prev, combinedTable]);
+      initializeTableHistory(combinedTable);
       setActiveTable(combinedName);
       setViewState((prev) => ({
         ...prev,
@@ -456,7 +538,7 @@ export function App(): React.ReactElement {
     } catch (err) {
       console.error("Combine error:", err);
     }
-  }, []);
+  }, [initializeTableHistory]);
 
   // Column visibility toggle
   const toggleColumn = useCallback(
@@ -688,17 +770,18 @@ export function App(): React.ReactElement {
 
   // Data operation: run SQL to transform columns/rows
   const handleDataOperation = useCallback(
-    async (sql: string) => {
+    async (sql: string, description?: string) => {
       if (!activeTable) return;
       try {
         await window.api.exec(sql);
+        recordHistoryEntry(activeTable, "data_op", description || "Data operation", [sql]);
         setSchemaVersion((v) => v + 1);
         setResetKey((k) => k + 1);
       } catch (err) {
         console.error("Data operation error:", err);
       }
     },
-    [activeTable]
+    [activeTable, recordHistoryEntry]
   );
 
   // Sample table: create a new table with a random sample of rows
@@ -724,6 +807,7 @@ export function App(): React.ReactElement {
         };
 
         setTables((prev) => [...prev, sampleTable]);
+        initializeTableHistory(sampleTable);
         setActiveTable(sampleName);
         setViewState((prev) => ({
           ...prev,
@@ -737,7 +821,7 @@ export function App(): React.ReactElement {
         console.error("Sample table error:", err);
       }
     },
-    [activeTable]
+    [activeTable, initializeTableHistory]
   );
 
   // Create aggregate table from a SELECT SQL
@@ -762,6 +846,7 @@ export function App(): React.ReactElement {
         };
 
         setTables((prev) => [...prev, aggTable]);
+        initializeTableHistory(aggTable);
         setActiveTable(aggName);
         setViewState((prev) => ({
           ...prev,
@@ -775,7 +860,7 @@ export function App(): React.ReactElement {
         console.error("Aggregate table error:", err);
       }
     },
-    []
+    [initializeTableHistory]
   );
 
   // Create pivot table from a PIVOT SQL
@@ -800,6 +885,7 @@ export function App(): React.ReactElement {
         };
 
         setTables((prev) => [...prev, pivotTable]);
+        initializeTableHistory(pivotTable);
         setActiveTable(pivotName);
         setViewState((prev) => ({
           ...prev,
@@ -813,7 +899,7 @@ export function App(): React.ReactElement {
         console.error("Pivot table error:", err);
       }
     },
-    []
+    [initializeTableHistory]
   );
 
   // Lookup merge: join data from another table into the active table
@@ -822,9 +908,9 @@ export function App(): React.ReactElement {
       if (!activeTable) return;
       try {
         if (options.replaceActive) {
-          await window.api.exec(
-            `CREATE OR REPLACE TABLE ${escapeIdent(activeTable)} AS (${sql})`
-          );
+          const execSql = `CREATE OR REPLACE TABLE ${escapeIdent(activeTable)} AS (${sql})`;
+          await window.api.exec(execSql);
+          recordHistoryEntry(activeTable, "data_op", "Lookup merge (replace active)", [execSql]);
           const countResult = await window.api.query(
             `SELECT COUNT(*) as count FROM ${escapeIdent(activeTable)}`
           );
@@ -854,6 +940,7 @@ export function App(): React.ReactElement {
             rowCount: Number(countResult[0].count),
           };
           setTables((prev) => [...prev, mergeTable]);
+          initializeTableHistory(mergeTable);
           setActiveTable(mergeName);
           setViewState((prev) => ({
             ...prev,
@@ -869,7 +956,7 @@ export function App(): React.ReactElement {
         throw err;
       }
     },
-    [activeTable]
+    [activeTable, initializeTableHistory, recordHistoryEntry]
   );
 
   // ── Column Ops handlers ──
@@ -923,11 +1010,14 @@ export function App(): React.ReactElement {
         const targetMode = (params.targetMode as "replace" | "new_column" | "existing_column") || "replace";
         const targetColumn = targetMode === "replace" ? undefined : params.targetColumn;
 
+        // Collect SQL statements for history
+        const executedSql: string[] = [];
+
         // For "new_column" mode, add the column first
         if (targetMode === "new_column" && targetColumn) {
-          await window.api.exec(
-            `ALTER TABLE "${currentTable}" ADD COLUMN "${targetColumn}" VARCHAR`
-          );
+          const addColSql = `ALTER TABLE "${currentTable}" ADD COLUMN "${targetColumn}" VARCHAR`;
+          await window.api.exec(addColSql);
+          executedSql.push(addColSql);
         }
 
         // If the operation produces string output, ensure the target column is VARCHAR
@@ -941,15 +1031,16 @@ export function App(): React.ReactElement {
           const colType = colInfo?.column_type?.toUpperCase() ?? "";
           // Skip promotion for new_column (already VARCHAR)
           if (targetMode !== "new_column" && colType && !colType.startsWith("VARCHAR") && colType !== "TEXT" && colType !== "STRING") {
-            await window.api.exec(
-              `ALTER TABLE "${currentTable}" ALTER COLUMN "${colToPromote}" TYPE VARCHAR`
-            );
+            const alterSql = `ALTER TABLE "${currentTable}" ALTER COLUMN "${colToPromote}" TYPE VARCHAR`;
+            await window.api.exec(alterSql);
+            executedSql.push(alterSql);
           }
         }
 
         // Execute the UPDATE
         const sql = buildColOpUpdateSQL(currentTable, column, opType, params, viewState.filters, targetColumn);
         await window.api.exec(sql);
+        executedSql.push(sql);
 
         // Record step
         const description = buildStepDescription(opType, column, params, targetColumn);
@@ -966,6 +1057,9 @@ export function App(): React.ReactElement {
         setColOpsNextId((prev) => prev + 1);
         setDataVersion((v) => v + 1);
         setResetKey((k) => k + 1);
+
+        // Record in global history
+        recordHistoryEntry(currentTable, "col_op", description, executedSql);
 
         // Refresh schema (column type may have changed from ALTER)
         const newSchema = await window.api.describe(currentTable);
@@ -990,7 +1084,7 @@ export function App(): React.ReactElement {
         throw err;
       }
     },
-    [activeTable, colOpsSteps, undoStrategy, colOpsNextId, viewState.filters, tables, schema, chooseUndoStrategy]
+    [activeTable, colOpsSteps, undoStrategy, colOpsNextId, viewState.filters, tables, schema, chooseUndoStrategy, recordHistoryEntry]
   );
 
   const handleColOpUndo = useCallback(
@@ -1126,6 +1220,9 @@ export function App(): React.ReactElement {
         setDataVersion((v) => v + 1);
         setResetKey((k) => k + 1);
 
+        // Record in global history
+        recordHistoryEntry(currentTable, "row_op", description, [sql]);
+
         // Refresh schema (remove_duplicates uses CREATE OR REPLACE)
         const newSchema = await window.api.describe(currentTable);
         setSchema(newSchema);
@@ -1149,7 +1246,7 @@ export function App(): React.ReactElement {
         throw err;
       }
     },
-    [activeTable, rowOpsSteps, rowOpsUndoStrategy, rowOpsNextId, viewState.filters, tables, schema, chooseUndoStrategy]
+    [activeTable, rowOpsSteps, rowOpsUndoStrategy, rowOpsNextId, viewState.filters, tables, schema, chooseUndoStrategy, recordHistoryEntry]
   );
 
   const handleRowOpUndo = useCallback(
@@ -1231,6 +1328,140 @@ export function App(): React.ReactElement {
     [activeTable, rowOpsSteps]
   );
 
+  // ── History revert / export / import ──
+
+  const handleRevertToEntry = useCallback(
+    async (tableName: string, entryId: number, onProgress?: (step: number, total: number, description: string) => void) => {
+      const history = tableHistoriesRef.current.get(tableName);
+      if (!history) throw new Error("No history for this table");
+      if (history.sourceInfo.isGenerated) throw new Error("Cannot revert generated tables");
+
+      const { filePath, importOptions } = history.sourceInfo;
+
+      // Check file exists
+      const exists = await window.api.fileExists(filePath);
+      if (!exists) throw new Error(`Source file not found at "${filePath}"`);
+
+      onProgress?.(0, 0, "Re-reading source file...");
+
+      // Drop current table
+      await window.api.exec(`DROP TABLE IF EXISTS "${tableName}"`);
+
+      // Re-read the file
+      const result = await window.api.loadFile(filePath, tableName, importOptions);
+      if (result.error) throw new Error(`Failed to re-load file: ${result.error}`);
+
+      // Validate schema: check that all initial columns are present
+      const loadedColNames = new Set((result.schema as ColumnInfo[]).map((c: ColumnInfo) => c.column_name));
+      const missingCols = history.initialSchema
+        .map((c) => c.column_name)
+        .filter((name) => !loadedColNames.has(name));
+      if (missingCols.length > 0) {
+        throw new Error(`Source file schema changed. Missing columns: ${missingCols.join(", ")}`);
+      }
+
+      // Determine which entries to replay
+      const entriesToReplay = entryId === -1
+        ? [] // revert to original = no replay
+        : history.entries.filter((e) => e.id <= entryId);
+
+      // Replay SQL statements in order
+      for (let i = 0; i < entriesToReplay.length; i++) {
+        const entry = entriesToReplay[i];
+        onProgress?.(i + 1, entriesToReplay.length, entry.description);
+        for (const sql of entry.sqlStatements) {
+          try {
+            await window.api.exec(sql);
+          } catch (err) {
+            throw new Error(`Replay failed at step ${i + 1} ("${entry.description}"): ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      }
+
+      // Trim history entries after the revert point, update timestamps to now
+      const now = Date.now();
+      setTableHistories((prev) => {
+        const h = prev.get(tableName);
+        if (!h) return prev;
+        const next = new Map(prev);
+        const kept = entryId === -1
+          ? []
+          : h.entries
+              .filter((e) => e.id <= entryId)
+              .map((e) => ({ ...e, timestamp: now }));
+        next.set(tableName, {
+          ...h,
+          entries: kept,
+          nextEntryId: entryId === -1 ? 1 : entryId + 1,
+        });
+        return next;
+      });
+
+      // Clear existing undo state (backup tables are gone)
+      setColOpsSteps([]);
+      setColOpsNextId(1);
+      setUndoStrategy("per-step");
+      setRowOpsSteps([]);
+      setRowOpsNextId(1);
+      setRowOpsUndoStrategy("per-step");
+
+      // Refresh schema and data
+      setSchemaVersion((v) => v + 1);
+      setDataVersion((v) => v + 1);
+      setResetKey((k) => k + 1);
+
+      // Update row count
+      const countResult = await window.api.query(
+        `SELECT COUNT(*) as count FROM "${tableName}"`
+      );
+      setTables((prev) =>
+        prev.map((t) =>
+          t.tableName === tableName
+            ? { ...t, rowCount: Number(countResult[0].count) }
+            : t
+        )
+      );
+    },
+    []
+  );
+
+  const handleExportHistory = useCallback(async () => {
+    const filePath = await window.api.saveFileDialog("json");
+    if (!filePath) return;
+    const exportData: HistoryExportData = {
+      version: 1,
+      exportedAt: Date.now(),
+      tables: Array.from(tableHistoriesRef.current.values()),
+    };
+    await window.api.writeJsonFile(filePath, exportData);
+  }, []);
+
+  const handleImportHistory = useCallback(async () => {
+    const data = await window.api.readJsonFile();
+    if (!data || data.error) return;
+    const imported = data as HistoryExportData;
+    if (imported.version !== 1 || !Array.isArray(imported.tables)) return;
+
+    const currentTableNames = new Set(tablesRef.current.map((t) => t.tableName));
+    let merged = 0;
+    let skipped = 0;
+
+    setTableHistories((prev) => {
+      const next = new Map(prev);
+      for (const th of imported.tables) {
+        if (currentTableNames.has(th.tableName)) {
+          next.set(th.tableName, th);
+          merged++;
+        } else {
+          skipped++;
+        }
+      }
+      return next;
+    });
+
+    console.log(`History import: ${merged} table(s) merged, ${skipped} skipped (tables not found)`);
+  }, []);
+
   const hasData = tables.length > 0;
 
   return (
@@ -1275,6 +1506,7 @@ export function App(): React.ReactElement {
             onCreatePivotTable={handleCreatePivotTable}
             onLookupMerge={handleLookupMerge}
             onExport={() => setExportDialogOpen(true)}
+            onOpenHistory={() => setHistoryDialogOpen(true)}
             onHide={() => setSidebarVisible(false)}
             filterPanelOpen={filterPanelOpen}
             onToggleFilterPanel={() => setFilterPanelOpen((v) => !v)}
@@ -1389,6 +1621,16 @@ export function App(): React.ReactElement {
         activeTable={activeTable}
         viewState={viewState}
         schema={schema}
+      />
+      <HistoryDialog
+        isOpen={historyDialogOpen}
+        onClose={() => setHistoryDialogOpen(false)}
+        tables={tables}
+        activeTable={activeTable}
+        histories={tableHistories}
+        onRevertToEntry={handleRevertToEntry}
+        onExportHistory={handleExportHistory}
+        onImportHistory={handleImportHistory}
       />
       {pendingExcelImport && (
         <ExcelSheetPickerDialog

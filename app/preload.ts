@@ -29,6 +29,9 @@ export interface DbApi {
   exportPatterns: () => Promise<boolean>;
   importPatterns: () => Promise<{ imported: number; error?: string }>;
   openExternal: (url: string) => Promise<void>;
+  writeJsonFile: (filePath: string, data: any) => Promise<boolean>;
+  readJsonFile: () => Promise<any | null>;
+  fileExists: (filePath: string) => Promise<boolean>;
   onOpenFiles: (callback: (filePaths: string[]) => void) => void;
   onAddFiles: (callback: (filePaths: string[]) => void) => void;
   onExportCSV: (callback: () => void) => void;
@@ -69,6 +72,11 @@ contextBridge.exposeInMainWorld("api", {
 
   // Shell
   openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
+
+  // File operations
+  writeJsonFile: (filePath: string, data: any) => ipcRenderer.invoke("file:write-json", filePath, data),
+  readJsonFile: () => ipcRenderer.invoke("file:read-json"),
+  fileExists: (filePath: string) => ipcRenderer.invoke("file:exists", filePath),
 
   // Menu events from main process
   onOpenFiles: (callback: (filePaths: string[]) => void) => {

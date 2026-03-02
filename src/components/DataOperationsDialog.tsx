@@ -69,7 +69,7 @@ interface DataOperationsDialogProps {
   onClose: () => void;
   activeTable: string | null;
   schema: ColumnInfo[];
-  onApply: (sql: string) => void;
+  onApply: (sql: string, description?: string) => void;
   onSampleTable: (n: number, isPercent: boolean) => void;
 }
 
@@ -396,7 +396,7 @@ export function DataOperationsDialog({
         return isVarchar ? `NULLIF("${col}", '')` : `"${col}"`;
       }).join(", ");
       const finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS WITH cleaned AS (SELECT ${cleanedCols} FROM "${activeTable}") SELECT * FROM cleaned QUALIFY row_number() OVER (PARTITION BY ${partitionCols}) = 1`;
-      onApply(finalSql);
+      onApply(finalSql, `${OP_LABELS[opType]} on ${dedupColumns.map(c => `"${c}"`).join(", ")}`);
       onClose();
       resetForm();
       return;
@@ -419,7 +419,7 @@ export function DataOperationsDialog({
         return `"${col.column_name}"`;
       }).join(", ");
       const finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT ${cols} FROM "${activeTable}"`;
-      onApply(finalSql);
+      onApply(finalSql, `${OP_LABELS[opType]} on ${targetCols.length} column(s)`);
       onClose();
       resetForm();
       return;
@@ -443,13 +443,14 @@ export function DataOperationsDialog({
         return `"${col.column_name}"`;
       }).join(", ");
       const finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT ${cols} FROM "${activeTable}"`;
-      onApply(finalSql);
+      onApply(finalSql, `${OP_LABELS[opType]} on ${targetCols.length} column(s)`);
       onClose();
       resetForm();
       return;
     }
 
     let finalSql: string;
+    let description: string | undefined;
 
     if (opType === "rename_column") {
       const validRows = renameRows.filter((r) => r.sourceCol && r.newName.trim());
@@ -462,6 +463,7 @@ export function DataOperationsDialog({
         })
         .join(", ");
       finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT ${cols} FROM "${activeTable}"`;
+      description = `${OP_LABELS[opType]}: ${validRows.map(r => `"${r.sourceCol}" → "${r.newName.trim()}"`).join(", ")}`;
     } else if (opType === "delete_column") {
       if (deleteColumns.length === 0 || deleteColumns.length >= schema.length) return;
       const otherCols = schema
@@ -469,19 +471,23 @@ export function DataOperationsDialog({
         .map((c) => `"${c.column_name}"`)
         .join(", ");
       finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT ${otherCols} FROM "${activeTable}"`;
+      description = `${OP_LABELS[opType]}: ${deleteColumns.map(c => `"${c}"`).join(", ")}`;
     } else if (opType === "create_column") {
       if (!targetCol) return;
       const valueExpr = param1 || "NULL";
       finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT *, ${valueExpr} AS "${targetCol}" FROM "${activeTable}"`;
+      description = `${OP_LABELS[opType]} "${targetCol}"`;
     } else if (opType === "combine_columns") {
       if (combineSourceCols.length < 2 || !targetCol) return;
       const concatExpr = buildCombineExpression(combineSourceCols, param1);
       finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT *, ${concatExpr} AS "${targetCol}" FROM "${activeTable}"`;
+      description = `${OP_LABELS[opType]} → "${targetCol}"`;
     } else if (opType === "conditional_column") {
       if (!targetCol) return;
       const caseExpr = buildCaseExpression(caseConditions, caseDefault);
       if (!caseExpr) return;
       finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT *, ${caseExpr} AS "${targetCol}" FROM "${activeTable}"`;
+      description = `${OP_LABELS[opType]} "${targetCol}"`;
     } else {
       if (!sourceCol) return;
       const expr = buildExpression(opType, sourceCol, param1, param2);
@@ -514,9 +520,10 @@ export function DataOperationsDialog({
           .join(", ");
         finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT ${otherCols}, ${expr} AS "${sourceCol}" FROM "${activeTable}"`;
       }
+      description = `${OP_LABELS[opType]} on "${sourceCol}"${effectiveTarget ? ` → "${effectiveTarget}"` : ""}`;
     }
 
-    onApply(finalSql);
+    onApply(finalSql, description);
     onClose();
     resetForm();
   };

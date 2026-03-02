@@ -3650,3 +3650,237 @@ html, body, #root {
   }
 }
 
+/* ── Global History Dialog (.ghist-*) ── */
+
+.ghist-body {
+  display: flex;
+  min-height: 360px;
+  gap: 0;
+}
+
+.ghist-table-list {
+  width: 180px;
+  min-width: 180px;
+  border-right: 1px solid #d8e1e8;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.ghist-table-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  border-left: 3px solid transparent;
+  transition: background-color 0.1s;
+
+  &:hover {
+    background-color: rgba(19, 124, 189, 0.08);
+  }
+
+  &.active {
+    background-color: rgba(19, 124, 189, 0.12);
+    border-left-color: #137cbd;
+    font-weight: 600;
+  }
+}
+
+.ghist-table-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.ghist-table-count {
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+
+.ghist-empty-tables,
+.ghist-empty-state {
+  color: #5c7080;
+  font-size: 12px;
+  padding: 20px;
+  text-align: center;
+}
+
+.ghist-timeline-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  min-width: 0;
+}
+
+.ghist-generated-warning {
+  margin-bottom: 10px;
+}
+
+.ghist-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ghist-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 3px;
+  transition: background-color 0.1s;
+
+  &:hover {
+    background-color: rgba(19, 124, 189, 0.06);
+
+    .ghist-revert-btn {
+      opacity: 1;
+    }
+  }
+}
+
+.ghist-entry-initial {
+  background-color: rgba(15, 153, 96, 0.06);
+  border-left: 3px solid #0f9960;
+}
+
+.ghist-entry-step {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #e1e8ed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #5c7080;
+  flex-shrink: 0;
+}
+
+.ghist-entry-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.ghist-entry-badge {
+  flex-shrink: 0;
+  font-size: 10px !important;
+}
+
+.ghist-entry-desc {
+  font-size: 12px;
+  color: #182026;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.ghist-entry-meta {
+  font-size: 11px;
+  color: #8a9ba8;
+}
+
+.ghist-entry-time {
+  font-size: 10px;
+  color: #8a9ba8;
+  flex-shrink: 0;
+}
+
+.ghist-revert-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.ghist-entry-active {
+  background-color: rgba(19, 124, 189, 0.1) !important;
+  border-left: 3px solid #137cbd;
+
+  .ghist-entry-desc {
+    font-weight: 600;
+  }
+}
+
+.ghist-entry-done {
+  opacity: 0.65;
+
+  .ghist-entry-step {
+    background: #0f9960;
+    color: #fff;
+  }
+}
+
+.ghist-replay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #e1e8ed;
+}
+
+.ghist-replay-label {
+  font-size: 12px;
+  color: #5c7080;
+  font-weight: 500;
+}
+
+.ghist-progress-bar-area {
+  padding: 10px 8px;
+  border-top: 1px solid #e1e8ed;
+  margin-top: 6px;
+
+  .bp4-progress-bar {
+    height: 6px;
+    border-radius: 3px;
+  }
+}
+
+.ghist-progress-text {
+  display: block;
+  font-size: 11px;
+  color: #5c7080;
+  margin-top: 6px;
+}
+
+.ghist-replay-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px;
+  font-size: 12px;
+  color: #5c7080;
+  border-top: 1px solid #e1e8ed;
+  margin-top: 6px;
+}
+
+.ghist-success-msg {
+  margin-top: 10px;
+}
+
+.ghist-error-msg {
+  margin-top: 10px;
+}
+
+.ghist-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.ghist-footer-left {
+  display: flex;
+  gap: 6px;
+}
+

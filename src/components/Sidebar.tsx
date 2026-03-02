@@ -31,7 +31,7 @@ interface SidebarProps {
   pivotConfig: PivotViewConfig | null;
   onPivotGroup: (column: string, addLevel: boolean) => void;
   onClearPivotGroups: () => void;
-  onDataOperation: (sql: string) => void;
+  onDataOperation: (sql: string, description?: string) => void;
   onSampleTable: (n: number, isPercent: boolean) => void;
   onDeleteTable: (tableName: string) => void;
   onCombine: (selectedNames: string[]) => void;
@@ -39,6 +39,7 @@ interface SidebarProps {
   onCreatePivotTable: (sql: string) => void;
   onLookupMerge: (sql: string, options: { replaceActive: boolean }) => void;
   onExport: () => void;
+  onOpenHistory: () => void;
   onHide: () => void;
   onToggleFilterPanel: () => void;
 }
@@ -68,6 +69,7 @@ export function Sidebar({
   onCreatePivotTable,
   onLookupMerge,
   onExport,
+  onOpenHistory,
   onHide,
   onToggleFilterPanel,
 }: SidebarProps): React.ReactElement {
@@ -506,6 +508,13 @@ export function Sidebar({
             icon="export"
             text="Export"
             onClick={onExport}
+            small
+            fill
+          />
+          <Button
+            icon="history"
+            text="History"
+            onClick={onOpenHistory}
             small
             fill
           />

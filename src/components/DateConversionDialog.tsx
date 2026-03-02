@@ -54,7 +54,7 @@ interface DateConversionDialogProps {
   activeTable: string | null;
   schema: ColumnInfo[];
   tables: LoadedTable[];
-  onApply: (sql: string) => void;
+  onApply: (sql: string, description?: string) => void;
 }
 
 const MAX_DISPLAY_GROUPS = 50;
@@ -359,7 +359,8 @@ export function DateConversionDialog({
     setError(null);
 
     try {
-      onApply(sql);
+      const targetName = resultMode === "new" ? (newColumnName.trim() || `${dateColumn}_converted`) : dateColumn;
+      onApply(sql, `Date conversion on "${dateColumn}"${resultMode === "new" ? ` → "${targetName}"` : ""}`);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
