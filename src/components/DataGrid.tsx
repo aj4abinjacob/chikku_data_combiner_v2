@@ -58,22 +58,70 @@ export function DataGrid({
     text: string;
     x: number;
     y: number;
+    cellHeight: number;
   } | null>(null);
   const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tooltipDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tooltipHovered = useRef(false);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
+  const [tooltipFlipped, setTooltipFlipped] = useState(false);
+
+  /** Returns true if user has selected text inside the tooltip */
+  const hasTooltipSelection = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.toString()) return false;
+    if (!tooltipRef.current) return false;
+    return tooltipRef.current.contains(sel.anchorNode);
+  }, []);
+
+  // After tooltip renders, check if it overflows viewport and adjust
+  useEffect(() => {
+    if (!tooltip || !tooltipRef.current) { setTooltipFlipped(false); return; }
+    const el = tooltipRef.current;
+    const rect = el.getBoundingClientRect();
+    // If top edge is above viewport, flip to below cell
+    setTooltipFlipped(rect.top < 0);
+    // Clamp horizontal position so it doesn't overflow right edge
+    const overflowRight = rect.right - window.innerWidth + 8;
+    if (overflowRight > 0) {
+      el.style.left = `${tooltip.x - overflowRight}px`;
+    }
+  }, [tooltip]);
+
+  const clearDismissTimer = useCallback(() => {
+    if (tooltipDismissTimer.current) {
+      clearTimeout(tooltipDismissTimer.current);
+      tooltipDismissTimer.current = null;
+    }
+  }, []);
+
+  const scheduleDismiss = useCallback((delay: number) => {
+    clearDismissTimer();
+    tooltipDismissTimer.current = setTimeout(() => {
+      // Don't dismiss if user is hovering the tooltip or has text selected in it
+      if (tooltipHovered.current || hasTooltipSelection()) return;
+      setTooltip(null);
+      setCopied(false);
+    }, delay);
+  }, [clearDismissTimer, hasTooltipSelection]);
 
   const handleCellMouseEnter = useCallback(
     (e: React.MouseEvent, value: string) => {
       if (!value) return;
+      // Cancel any pending dismiss when entering a new cell
+      clearDismissTimer();
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       tooltipTimer.current = setTimeout(() => {
         setTooltip({
           text: value,
           x: rect.left,
           y: rect.top,
+          cellHeight: rect.height,
         });
       }, TOOLTIP_DELAY);
     },
-    []
+    [clearDismissTimer]
   );
 
   const handleCellMouseLeave = useCallback(() => {
@@ -81,13 +129,41 @@ export function DataGrid({
       clearTimeout(tooltipTimer.current);
       tooltipTimer.current = null;
     }
-    setTooltip(null);
-  }, []);
+    // Delay dismiss so user can move cursor into tooltip
+    scheduleDismiss(200);
+  }, [scheduleDismiss]);
 
-  // Clean up timer on unmount
+  const handleTooltipMouseEnter = useCallback(() => {
+    tooltipHovered.current = true;
+    clearDismissTimer();
+  }, [clearDismissTimer]);
+
+  const handleTooltipMouseLeave = useCallback(() => {
+    tooltipHovered.current = false;
+    const hadSelection = hasTooltipSelection();
+    // Clear selection so it doesn't bleed into grid cells
+    if (hadSelection) window.getSelection()?.removeAllRanges();
+    // If text was selected, keep tooltip visible longer
+    if (hadSelection) {
+      scheduleDismiss(2000);
+    } else {
+      scheduleDismiss(150);
+    }
+  }, [hasTooltipSelection, scheduleDismiss]);
+
+  const handleCopyTooltip = useCallback(() => {
+    if (!tooltip) return;
+    navigator.clipboard.writeText(tooltip.text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [tooltip]);
+
+  // Clean up timers on unmount
   useEffect(() => {
     return () => {
       if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+      if (tooltipDismissTimer.current) clearTimeout(tooltipDismissTimer.current);
     };
   }, []);
 
@@ -741,13 +817,25 @@ export function DataGrid({
       </div>
       {tooltip && (
         <div
-          className="dg-tooltip"
+          ref={tooltipRef}
+          className={`dg-tooltip${tooltipFlipped ? " dg-tooltip-below" : ""}`}
           style={{
             left: tooltip.x,
-            top: tooltip.y,
+            top: tooltipFlipped ? tooltip.y + tooltip.cellHeight : tooltip.y,
           }}
+          onMouseEnter={handleTooltipMouseEnter}
+          onMouseLeave={handleTooltipMouseLeave}
         >
-          {tooltip.text}
+          <div className="dg-tooltip-body">
+            <TooltipContent text={tooltip.text} />
+          </div>
+          <button
+            className={`dg-tooltip-copy${copied ? " copied" : ""}`}
+            onClick={handleCopyTooltip}
+            title="Copy to clipboard"
+          >
+            <Icon icon={copied ? "tick" : "clipboard"} size={12} />
+          </button>
         </div>
       )}
     </div>
@@ -760,4 +848,38 @@ function formatCell(value: any): string {
     return Number.isInteger(value) ? value.toString() : value.toFixed(4);
   }
   return String(value);
+}
+
+// URL regex for detecting links in tooltip text
+const URL_RE = /https?:\/\/[^\s<>"'`,;)}\]]+/g;
+
+function TooltipContent({ text }: { text: string }): React.ReactElement {
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  URL_RE.lastIndex = 0;
+  while ((match = URL_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    const url = match[0];
+    parts.push(
+      <a
+        key={match.index}
+        className="dg-tooltip-link"
+        href="#"
+        onClick={(e) => {
+          e.preventDefault();
+          (window as any).api.openExternal(url);
+        }}
+      >
+        {url}
+      </a>
+    );
+    lastIndex = URL_RE.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  return <>{parts}</>;
 }

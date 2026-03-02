@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell } from "electron";
 import path from "path";
 import fs from "fs";
 import os from "os";
@@ -426,6 +426,13 @@ ipcMain.handle(
 
 // Return free system memory in bytes
 ipcMain.handle("system:free-memory", () => os.freemem());
+
+ipcMain.handle("shell:open-external", (_event, url: string) => {
+  // Only allow http/https URLs
+  if (/^https?:\/\//i.test(url)) {
+    return shell.openExternal(url);
+  }
+});
 
 // ── Regex Pattern Library ──
 

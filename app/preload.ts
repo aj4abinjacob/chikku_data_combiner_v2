@@ -28,6 +28,7 @@ export interface DbApi {
   deleteUserPattern: (patternId: string) => Promise<boolean>;
   exportPatterns: () => Promise<boolean>;
   importPatterns: () => Promise<{ imported: number; error?: string }>;
+  openExternal: (url: string) => Promise<void>;
   onOpenFiles: (callback: (filePaths: string[]) => void) => void;
   onAddFiles: (callback: (filePaths: string[]) => void) => void;
   onExportCSV: (callback: () => void) => void;
@@ -65,6 +66,9 @@ contextBridge.exposeInMainWorld("api", {
   deleteUserPattern: (patternId: string) => ipcRenderer.invoke("patterns:delete-user", patternId),
   exportPatterns: () => ipcRenderer.invoke("patterns:export"),
   importPatterns: () => ipcRenderer.invoke("patterns:import"),
+
+  // Shell
+  openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
 
   // Menu events from main process
   onOpenFiles: (callback: (filePaths: string[]) => void) => {
