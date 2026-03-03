@@ -631,6 +631,7 @@ interface FilterPanelProps {
   onUpdateView: (viewId: string) => void;
   onDeleteView: (viewId: string) => void;
   onRenameView: (viewId: string, newName: string) => void;
+  onClose: () => void;
 }
 
 export function FilterPanel({
@@ -659,6 +660,7 @@ export function FilterPanel({
   onUpdateView,
   onDeleteView,
   onRenameView,
+  onClose,
 }: FilterPanelProps): React.ReactElement {
   const [draftRoot, setDraftRoot] = useState<DraftFilterGroup>(() =>
     convertToDraft(activeFilters)
@@ -675,6 +677,16 @@ export function FilterPanel({
   useEffect(() => {
     setDraftRoot(convertToDraft(activeFilters));
   }, [activeFilters]);
+
+  // Header + resize handle take ~36px; content gets the rest
+  const PANEL_CHROME_HEIGHT = 42;
+
+  // Called by child panels when their content height changes
+  const handleContentHeightChange = useCallback((contentHeight: number) => {
+    const needed = contentHeight + PANEL_CHROME_HEIGHT;
+    const clamped = Math.min(MAX_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, needed));
+    setPanelHeight((prev) => Math.max(prev, clamped));
+  }, []);
 
   // ── Resize drag handlers ──
   const onMouseDown = useCallback(
@@ -754,7 +766,7 @@ export function FilterPanel({
               small
               minimal
               active={activeTab === "filters"}
-              onClick={() => setActiveTab("filters")}
+              onClick={() => activeTab === "filters" ? onClose() : setActiveTab("filters")}
               text="Filters"
             />
             {activeCount > 0 && activeTab !== "filters" && (
@@ -905,6 +917,7 @@ export function FilterPanel({
         totalRows={totalRows}
         unfilteredRows={unfilteredRows}
         visible={activeTab === "colops"}
+        onContentHeightChange={handleContentHeightChange}
       />
       <RowOpsPanel
         columns={columns}

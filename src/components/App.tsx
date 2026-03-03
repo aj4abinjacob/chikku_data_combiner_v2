@@ -1581,6 +1581,7 @@ export function App(): React.ReactElement {
                   onUpdateView={handleUpdateView}
                   onDeleteView={handleDeleteView}
                   onRenameView={handleRenameView}
+                  onClose={() => setFilterPanelOpen(false)}
                 />
               )}
             </>
