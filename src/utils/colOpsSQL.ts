@@ -69,7 +69,7 @@ export function buildColOpExpr(
           ? "(-?[0-9]+\\.[0-9]+)"
           : "(-?[0-9]+\\.?[0-9]*)";
       if (numMode === "all") {
-        const sep = (params.separator ?? ",").replace(/'/g, "''");
+        const sep = (params.separator ?? "").replace(/'/g, "''");
         return `array_to_string(regexp_extract_all(CAST(${col} AS VARCHAR), '${numPattern}', 1), '${sep}')`;
       }
       const baseExpr = `regexp_extract(CAST(${col} AS VARCHAR), '${numPattern}', 1)`;

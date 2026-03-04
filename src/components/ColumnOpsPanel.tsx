@@ -98,7 +98,6 @@ export function ColumnOpsPanel({
   const [patternRefreshKey, setPatternRefreshKey] = useState(0);
   const [previews, setPreviews] = useState<Array<{ original: string; result: string }>>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [lastAppliedKey, setLastAppliedKey] = useState<string | null>(null);
   const configRef = useRef<HTMLDivElement>(null);
 
@@ -108,7 +107,7 @@ export function ColumnOpsPanel({
     const el = configRef.current;
     // scrollHeight = full content height the config panel needs
     onContentHeightChange(el.scrollHeight + 20);
-  }, [visible, opType, targetMode, selectedColumn, historyExpanded, colOpsSteps.length, onContentHeightChange]);
+  }, [visible, opType, targetMode, selectedColumn, colOpsSteps.length, onContentHeightChange]);
 
   const handlePatternsChanged = useCallback(() => {
     setPatternRefreshKey((k) => k + 1);
@@ -383,9 +382,9 @@ export function ColumnOpsPanel({
               <div className="colops-field">
                 <label>Separator</label>
                 <InputGroup
-                  value={params.separator ?? ","}
+                  value={params.separator ?? ""}
                   onChange={(e) => updateParam("separator", e.target.value)}
-                  placeholder=","
+                  placeholder=""
                   fill
                 />
               </div>
@@ -517,7 +516,7 @@ export function ColumnOpsPanel({
             </span>
           </div>
 
-          {/* Apply button + history toggle */}
+          {/* Apply button */}
           <div className="colops-actions">
             <Button
               intent={Intent.PRIMARY}
@@ -528,16 +527,6 @@ export function ColumnOpsPanel({
               disabled={applyDisabled}
               fill
             />
-            {colOpsSteps.length > 0 && (
-              <Button
-                minimal
-                small
-                rightIcon={historyExpanded ? "chevron-up" : "chevron-down"}
-                text={`History (${colOpsSteps.length})`}
-                onClick={() => setHistoryExpanded(!historyExpanded)}
-                className="colops-history-toggle"
-              />
-            )}
           </div>
 
           {/* Success / error messages */}
@@ -553,12 +542,36 @@ export function ColumnOpsPanel({
               {error}
             </span>
           )}
+        </div>
 
-          {/* Collapsible history */}
-          {colOpsSteps.length > 0 && historyExpanded && (
-            <div className="colops-history-expanded">
+        {/* Center panel: preview */}
+        <div className="colops-preview-panel">
+          {previewError ? (
+            <span className="colops-preview-error">{previewError}</span>
+          ) : previews.length > 0 ? (
+            <table className="colops-preview-table">
+              <thead>
+                <tr><th>Before</th><th>After</th></tr>
+              </thead>
+              <tbody>
+                {previews.map((p, i) => (
+                  <tr key={i}><td>{p.original}</td><td>{p.result}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="colops-preview-empty">
+              Select a column and action to see preview
+            </div>
+          )}
+        </div>
+
+        {/* Right panel: history */}
+        <div className="colops-history-panel">
+          {colOpsSteps.length > 0 ? (
+            <>
               <div className="colops-steps-header">
-                <span className="colops-steps-title">Steps</span>
+                <span className="colops-steps-title">History ({colOpsSteps.length})</span>
                 <div className="colops-steps-actions">
                   {undoStrategy === "per-step" && (
                     <Button
@@ -600,29 +613,9 @@ export function ColumnOpsPanel({
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* Right panel: preview */}
-        <div className="colops-preview-panel">
-          {previewError ? (
-            <span className="colops-preview-error">{previewError}</span>
-          ) : previews.length > 0 ? (
-            <table className="colops-preview-table">
-              <thead>
-                <tr><th>Before</th><th>After</th></tr>
-              </thead>
-              <tbody>
-                {previews.map((p, i) => (
-                  <tr key={i}><td>{p.original}</td><td>{p.result}</td></tr>
-                ))}
-              </tbody>
-            </table>
+            </>
           ) : (
-            <div className="colops-preview-empty">
-              Select a column and action to see preview
-            </div>
+            <div className="colops-history-empty">No steps yet</div>
           )}
         </div>
       </div>

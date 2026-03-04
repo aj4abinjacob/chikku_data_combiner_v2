@@ -2099,7 +2099,7 @@ html, body, #root {
 
 // Left panel: configuration form
 .colops-config {
-  width: 380px;
+  width: 300px;
   flex-shrink: 0;
   overflow-y: auto;
   display: flex;
@@ -2216,10 +2216,6 @@ html, body, #root {
   padding-top: 4px;
 }
 
-.colops-history-toggle {
-  font-size: 11px;
-  color: #5c7080;
-}
 
 // Success / error messages
 .colops-inline-success {
@@ -2249,17 +2245,28 @@ html, body, #root {
   white-space: nowrap;
 }
 
-// ── Collapsible history ──
+// ── History panel (right column) ──
 
-.colops-history-expanded {
-  border-top: 1px solid #e1e8ed;
-  padding-top: 6px;
-  margin-top: 2px;
+.colops-history-panel {
+  width: 240px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 150px;
+  border-left: 1px solid #e1e8ed;
+  padding-left: 12px;
   overflow: hidden;
+}
+
+.colops-history-empty {
+  color: #8a9ba8;
+  font-size: 12px;
+  text-align: center;
+  padding: 24px 16px;
+  align-self: center;
+  flex: 1;
+  display: flex;
+  align-items: center;
 }
 
 .colops-steps-header {
@@ -2340,7 +2347,7 @@ html, body, #root {
   font-size: 12px;
 }
 
-// ── Preview panel (right side) ──
+// ── Preview panel (center) ──
 
 .colops-preview-panel {
   flex: 1;
@@ -2350,7 +2357,7 @@ html, body, #root {
   justify-content: center;
   overflow: auto;
   border-left: 1px solid #e1e8ed;
-  padding-left: 12px;
+  padding: 0 12px;
 }
 
 .colops-preview-empty {
