@@ -470,6 +470,7 @@ interface FilterGroupRendererProps {
   isRoot: boolean;
   onUpdateRoot: (updater: (root: DraftFilterGroup) => DraftFilterGroup) => void;
   onApply: () => void;
+  scrollContainerRef?: React.RefObject<HTMLDivElement>;
 }
 
 function FilterGroupRenderer({
@@ -480,6 +481,7 @@ function FilterGroupRenderer({
   isRoot,
   onUpdateRoot,
   onApply,
+  scrollContainerRef,
 }: FilterGroupRendererProps): React.ReactElement {
   const depthIndex = depth % 4;
 
@@ -492,6 +494,14 @@ function FilterGroupRenderer({
     );
   };
 
+  const scrollToBottom = () => {
+    if (scrollContainerRef?.current) {
+      requestAnimationFrame(() => {
+        scrollContainerRef.current?.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: "smooth" });
+      });
+    }
+  };
+
   const handleAddCondition = () => {
     const col = columns.length > 0 ? columns[0].column_name : "";
     const newCond: DraftFilterCondition = {
@@ -501,6 +511,7 @@ function FilterGroupRenderer({
       value: "",
     };
     onUpdateRoot((root) => addChildToGroup(root, group.id, newCond));
+    scrollToBottom();
   };
 
   const handleAddSubGroup = () => {
@@ -510,6 +521,7 @@ function FilterGroupRenderer({
       children: [],
     };
     onUpdateRoot((root) => addChildToGroup(root, group.id, newGroup));
+    scrollToBottom();
   };
 
   const handleRemoveChild = (childId: string) => {
@@ -566,6 +578,7 @@ function FilterGroupRenderer({
                 isRoot={false}
                 onUpdateRoot={onUpdateRoot}
                 onApply={onApply}
+                scrollContainerRef={scrollContainerRef}
               />
             );
           }
@@ -672,6 +685,7 @@ export function FilterPanel({
   const splitStartX = useRef(0);
   const splitStartPercent = useRef(0);
   const splitContainerRef = useRef<HTMLDivElement>(null);
+  const filterScrollRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
   const startY = useRef(0);
   const startHeight = useRef(0);
@@ -872,7 +886,7 @@ export function FilterPanel({
         ref={splitContainerRef}
         style={{ display: activeTab === "filters" ? "flex" : "none" }}
       >
-        <div className="filter-views-left" style={{ width: `${splitPercent}%` }}>
+        <div className="filter-views-left" ref={filterScrollRef} style={{ width: `${splitPercent}%` }}>
           <FilterGroupRenderer
             group={draftRoot}
             columns={columns}
@@ -881,6 +895,7 @@ export function FilterPanel({
             isRoot={true}
             onUpdateRoot={handleUpdateRoot}
             onApply={applyFilters}
+            scrollContainerRef={filterScrollRef}
           />
         </div>
         <div className="filter-views-divider" onMouseDown={onSplitMouseDown}>
