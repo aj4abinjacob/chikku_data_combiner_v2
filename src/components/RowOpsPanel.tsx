@@ -7,6 +7,8 @@ import {
   Intent,
   Alert,
   Icon,
+  RadioGroup,
+  Radio,
 } from "@blueprintjs/core";
 import { ColumnInfo, RowOpType, RowOpStep, UndoStrategy, FilterGroup, hasActiveFilters } from "../types";
 
@@ -52,6 +54,7 @@ export function RowOpsPanel({
   const [opType, setOpType] = useState<RowOpType>("delete_filtered");
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(new Set());
   const [colSearch, setColSearch] = useState("");
+  const [emptyMode, setEmptyMode] = useState<"all" | "any">("any");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -71,6 +74,7 @@ export function RowOpsPanel({
   useEffect(() => {
     setSelectedColumns(new Set());
     setColSearch("");
+    setEmptyMode("any");
     setPreviewCount(null);
   }, [opType]);
 
@@ -107,8 +111,9 @@ export function RowOpsPanel({
             }
             return `${ident} IS NULL`;
           });
+          const joiner = emptyMode === "any" ? " OR " : " AND ";
           const escapedTable = `"${activeTable.replace(/"/g, '""')}"`;
-          const sql = `SELECT COUNT(*) as cnt FROM ${escapedTable} WHERE ${conditions.join(" AND ")}`;
+          const sql = `SELECT COUNT(*) as cnt FROM ${escapedTable} WHERE ${conditions.join(joiner)}`;
           const rows = await window.api.query(sql);
           setPreviewCount(Number(rows[0]?.cnt ?? 0));
         } else if (opType === "remove_duplicates") {
@@ -131,7 +136,7 @@ export function RowOpsPanel({
     return () => {
       if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
     };
-  }, [opType, activeTable, totalRows, unfilteredRows, hasFilter, selectedColumns, columns, visible, isDisabled]);
+  }, [opType, activeTable, totalRows, unfilteredRows, hasFilter, selectedColumns, columns, visible, isDisabled, emptyMode]);
 
   const handleApply = async () => {
     setConfirmOpen(false);
@@ -142,6 +147,9 @@ export function RowOpsPanel({
       const params: Record<string, string> = {};
       if (needsColumns && selectedColumns.size > 0) {
         params.columns = JSON.stringify(Array.from(selectedColumns));
+      }
+      if (opType === "remove_empty") {
+        params.emptyMode = emptyMode;
       }
       const appliedOp = OP_OPTIONS.find((o) => o.value === opType)?.label ?? opType;
       await onApply(opType, params);
@@ -273,6 +281,19 @@ export function RowOpsPanel({
           </div>
         )}
 
+        {/* All/Any mode toggle for remove_empty */}
+        {opType === "remove_empty" && (
+          <RadioGroup
+            className="rowops-empty-mode"
+            inline
+            selectedValue={emptyMode}
+            onChange={(e) => setEmptyMode((e.target as HTMLInputElement).value as "all" | "any")}
+          >
+            <Radio label="Any column empty" value="any" />
+            <Radio label="All columns empty" value="all" />
+          </RadioGroup>
+        )}
+
         {/* Column selector for remove_empty and remove_duplicates */}
         {needsColumns && (
           <div className="rowops-col-selector">
@@ -401,7 +422,7 @@ export function RowOpsPanel({
         <p>
           {opType === "delete_filtered" && `Delete ${totalRows.toLocaleString()} filtered rows? This modifies the table data.`}
           {opType === "keep_filtered" && `Delete all rows NOT matching the current filter? This modifies the table data.`}
-          {opType === "remove_empty" && `Remove rows where ${selectedColumns.size === 0 ? "all" : selectedColumns.size} column${selectedColumns.size !== 1 ? "s are" : " is"} empty? ${previewCount !== null ? `(${previewCount.toLocaleString()} rows)` : ""}`}
+          {opType === "remove_empty" && `Remove rows where ${emptyMode === "any" ? "any" : "all"} of ${selectedColumns.size === 0 ? "all" : selectedColumns.size} column${selectedColumns.size !== 1 ? "s are" : " is"} empty? ${previewCount !== null ? `(${previewCount.toLocaleString()} rows)` : ""}`}
           {opType === "remove_duplicates" && `Remove duplicate rows based on ${selectedColumns.size === 0 ? "all" : selectedColumns.size} column${selectedColumns.size !== 1 ? "s" : ""}? ${previewCount !== null ? `(${previewCount.toLocaleString()} rows)` : ""}`}
         </p>
       </Alert>

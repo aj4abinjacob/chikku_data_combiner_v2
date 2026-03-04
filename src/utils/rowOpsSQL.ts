@@ -28,8 +28,9 @@ export function buildRowOpSQL(
     }
 
     case "remove_empty": {
-      // Delete rows where all selected columns are NULL/empty
+      // Delete rows where all/any selected columns are NULL/empty
       const columns: string[] = params.columns ? JSON.parse(params.columns) : [];
+      const emptyMode = params.emptyMode === "any" ? "any" : "all";
       const cols = columns.length > 0
         ? columns.map((c) => schema.find((s) => s.column_name === c)).filter(Boolean) as ColumnInfo[]
         : schema;
@@ -46,11 +47,12 @@ export function buildRowOpSQL(
         return `${ident} IS NULL`;
       });
 
-      let sql = `DELETE FROM ${table} WHERE ${conditions.join(" AND ")}`;
+      const joiner = emptyMode === "any" ? " OR " : " AND ";
+      let sql = `DELETE FROM ${table} WHERE ${conditions.join(joiner)}`;
 
       // Scope by active filter if present
       if (filterClause) {
-        sql = `DELETE FROM ${table} WHERE (${filterClause}) AND (${conditions.join(" AND ")})`;
+        sql = `DELETE FROM ${table} WHERE (${filterClause}) AND (${conditions.join(joiner)})`;
       }
 
       return sql;
@@ -103,9 +105,11 @@ export function buildRowOpStepDescription(
       return "Kept only filtered rows";
     case "remove_empty": {
       const columns: string[] = params.columns ? JSON.parse(params.columns) : [];
-      if (columns.length === 0) return "Removed empty rows (all columns)";
-      if (columns.length <= 3) return `Removed empty rows (${columns.join(", ")})`;
-      return `Removed empty rows (${columns.length} columns)`;
+      const mode = params.emptyMode === "any" ? "any" : "all";
+      const modeLabel = mode === "any" ? "any" : "all";
+      if (columns.length === 0) return `Removed empty rows (${modeLabel} columns)`;
+      if (columns.length <= 3) return `Removed empty rows [${modeLabel}] (${columns.join(", ")})`;
+      return `Removed empty rows [${modeLabel}] (${columns.length} columns)`;
     }
     case "remove_duplicates": {
       const columns: string[] = params.columns ? JSON.parse(params.columns) : [];

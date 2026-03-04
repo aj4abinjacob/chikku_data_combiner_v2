@@ -32,6 +32,7 @@ type OpType =
   | "rename_column"
   | "sample_table"
   | "remove_duplicates"
+  | "remove_empty_rows"
   | "conditional_column"
   | "replace_empty_null"
   | "replace_sentinel_null";
@@ -59,6 +60,7 @@ const OP_LABELS: Record<OpType, string> = {
   rename_column: "Rename Column",
   sample_table: "Sample Table",
   remove_duplicates: "Remove Duplicates",
+  remove_empty_rows: "Remove Empty Rows",
   conditional_column: "Conditional Column (IF/CASE)",
   replace_empty_null: "Replace Empty with NULL",
   replace_sentinel_null: "Replace None/NaN with NULL",
@@ -96,6 +98,10 @@ export function DataOperationsDialog({
   const [emptyNullSearch, setEmptyNullSearch] = useState("");
   const [sentinelNullColumns, setSentinelNullColumns] = useState<string[]>([]);
   const [sentinelNullSearch, setSentinelNullSearch] = useState("");
+  const [removeEmptyColumns, setRemoveEmptyColumns] = useState<string[]>([]);
+  const [removeEmptySearch, setRemoveEmptySearch] = useState("");
+  const [removeEmptyMode, setRemoveEmptyMode] = useState<"all" | "any">("any");
+  const [removeEmptyPreview, setRemoveEmptyPreview] = useState<{ before: number; after: number } | null>(null);
   const [sampleMode, setSampleMode] = useState<"rows" | "percent">("rows");
   const [caseConditions, setCaseConditions] = useState<CaseCondition[]>([{ column: "", operator: "=", value: "", result: "" }]);
   const [caseDefault, setCaseDefault] = useState("");
@@ -160,6 +166,8 @@ export function DataOperationsDialog({
       case "rename_column":
         return null; // handled separately in handleApply
       case "conditional_column":
+        return null; // handled separately
+      case "remove_empty_rows":
         return null; // handled separately
       case "replace_empty_null":
         return null; // handled separately
@@ -231,6 +239,44 @@ export function DataOperationsDialog({
       setPreviews([]);
       setPreviewError(null);
       return;
+    }
+
+    // remove_empty_rows: show row count before/after
+    if (opType === "remove_empty_rows") {
+      setPreviews([]);
+      setPreviewError(null);
+      const cols = removeEmptyColumns.length > 0
+        ? removeEmptyColumns
+        : schema.map((c) => c.column_name);
+      const timer = setTimeout(async () => {
+        try {
+          const conditions = cols.map((colName) => {
+            const colType = colTypeMap.get(colName) || "";
+            const isVarchar = /^(VARCHAR|TEXT|STRING|CHAR)/i.test(colType);
+            const ident = `"${colName}"`;
+            if (isVarchar) {
+              return `(${ident} IS NULL OR TRIM(CAST(${ident} AS VARCHAR)) = '')`;
+            }
+            return `${ident} IS NULL`;
+          });
+          const joiner = removeEmptyMode === "any" ? " OR " : " AND ";
+          const beforeSql = `SELECT COUNT(*) AS cnt FROM "${activeTable}"`;
+          const afterSql = `SELECT COUNT(*) AS cnt FROM "${activeTable}" WHERE NOT (${conditions.join(joiner)})`;
+          const [beforeResult, afterResult] = await Promise.all([
+            window.api.query(beforeSql),
+            window.api.query(afterSql),
+          ]);
+          setRemoveEmptyPreview({
+            before: Number(beforeResult[0].cnt),
+            after: Number(afterResult[0].cnt),
+          });
+          setPreviewError(null);
+        } catch (e: any) {
+          setRemoveEmptyPreview(null);
+          setPreviewError(e.message || "Preview failed");
+        }
+      }, 300);
+      return () => clearTimeout(timer);
     }
 
     // remove_duplicates: show row count before/after
@@ -336,7 +382,7 @@ export function DataOperationsDialog({
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [isOpen, activeTable, sourceCol, opType, param1, param2, extractAllMatches, extractSeparator, combineSourceCols, dedupColumns, caseConditions, caseDefault]);
+  }, [isOpen, activeTable, sourceCol, opType, param1, param2, extractAllMatches, extractSeparator, combineSourceCols, dedupColumns, removeEmptyColumns, removeEmptyMode, caseConditions, caseDefault]);
 
   const resetForm = () => {
     setSourceCol("");
@@ -349,6 +395,10 @@ export function DataOperationsDialog({
     setDeleteColumns([]);
     setDedupColumns([]);
     setDedupSearch("");
+    setRemoveEmptyColumns([]);
+    setRemoveEmptySearch("");
+    setRemoveEmptyMode("any");
+    setRemoveEmptyPreview(null);
     setEmptyNullColumns([]);
     setEmptyNullSearch("");
     setSentinelNullColumns([]);
@@ -397,6 +447,31 @@ export function DataOperationsDialog({
       }).join(", ");
       const finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS WITH cleaned AS (SELECT ${cleanedCols} FROM "${activeTable}") SELECT * FROM cleaned QUALIFY row_number() OVER (PARTITION BY ${partitionCols}) = 1`;
       onApply(finalSql, `${OP_LABELS[opType]} on ${dedupColumns.map(c => `"${c}"`).join(", ")}`);
+      onClose();
+      resetForm();
+      return;
+    }
+
+    // remove_empty_rows: delete rows where all/any selected columns are empty
+    if (opType === "remove_empty_rows") {
+      const cols = removeEmptyColumns.length > 0
+        ? removeEmptyColumns
+        : schema.map((c) => c.column_name);
+      const conditions = cols.map((colName) => {
+        const colType = colTypeMap.get(colName) || "";
+        const isVarchar = /^(VARCHAR|TEXT|STRING|CHAR)/i.test(colType);
+        const ident = `"${colName}"`;
+        if (isVarchar) {
+          return `(${ident} IS NULL OR TRIM(CAST(${ident} AS VARCHAR)) = '')`;
+        }
+        return `${ident} IS NULL`;
+      });
+      const joiner = removeEmptyMode === "any" ? " OR " : " AND ";
+      const whereClause = `WHERE NOT (${conditions.join(joiner)})`;
+      const allCols = schema.map((c) => `"${c.column_name}"`).join(", ");
+      const finalSql = `CREATE OR REPLACE TABLE "${activeTable}" AS SELECT ${allCols} FROM "${activeTable}" ${whereClause}`;
+      const modeLabel = removeEmptyMode === "any" ? "any" : "all";
+      onApply(finalSql, `${OP_LABELS[opType]} [${modeLabel}] on ${cols.length} column(s)`);
       onClose();
       resetForm();
       return;
@@ -556,8 +631,8 @@ export function DataOperationsDialog({
             </HTMLSelect>
           </FormGroup>
 
-          {/* Source Column — hidden for create_column, combine_columns, rename_column, delete_column, sample_table, remove_duplicates, conditional_column, replace_empty_null, replace_sentinel_null */}
-          {opType !== "create_column" && opType !== "combine_columns" && opType !== "rename_column" && opType !== "delete_column" && opType !== "sample_table" && opType !== "remove_duplicates" && opType !== "conditional_column" && opType !== "replace_empty_null" && opType !== "replace_sentinel_null" && (
+          {/* Source Column — hidden for create_column, combine_columns, rename_column, delete_column, sample_table, remove_duplicates, remove_empty_rows, conditional_column, replace_empty_null, replace_sentinel_null */}
+          {opType !== "create_column" && opType !== "combine_columns" && opType !== "rename_column" && opType !== "delete_column" && opType !== "sample_table" && opType !== "remove_duplicates" && opType !== "remove_empty_rows" && opType !== "conditional_column" && opType !== "replace_empty_null" && opType !== "replace_sentinel_null" && (
             <FormGroup label="Source Column">
               <SearchableColumnSelect
                 value={sourceCol}
@@ -880,6 +955,80 @@ export function DataOperationsDialog({
             </>
           )}
 
+          {/* remove_empty_rows: column selector + all/any mode */}
+          {opType === "remove_empty_rows" && (
+            <>
+              <FormGroup label="Mode" helperText="Any: remove rows where at least one selected column is empty. All: remove rows where every selected column is empty.">
+                <RadioGroup
+                  inline
+                  selectedValue={removeEmptyMode}
+                  onChange={(e) => setRemoveEmptyMode((e.target as HTMLInputElement).value as "all" | "any")}
+                >
+                  <Radio label="Any column empty" value="any" />
+                  <Radio label="All columns empty" value="all" />
+                </RadioGroup>
+              </FormGroup>
+              <FormGroup label="Columns" helperText="Select columns to check for empty values, or leave empty to check all columns.">
+                <div className="combine-col-list">
+                  <div className="combine-col-search" style={{ display: "flex", gap: 4 }}>
+                    <InputGroup
+                      leftIcon="search"
+                      placeholder="Search columns..."
+                      value={removeEmptySearch}
+                      onChange={(e) => setRemoveEmptySearch(e.target.value)}
+                      small
+                      style={{ flex: 1 }}
+                    />
+                    <Button
+                      small
+                      minimal
+                      text={removeEmptyColumns.length === schema.length ? "Deselect All" : "Select All"}
+                      onClick={() => {
+                        if (removeEmptyColumns.length === schema.length) {
+                          setRemoveEmptyColumns([]);
+                        } else {
+                          setRemoveEmptyColumns(schema.map((c) => c.column_name));
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="combine-col-items">
+                    {[...schema]
+                      .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }))
+                      .filter((col) => col.column_name.toLowerCase().includes(removeEmptySearch.toLowerCase()))
+                      .map((col) => {
+                        const isSelected = removeEmptyColumns.includes(col.column_name);
+                        return (
+                          <div key={col.column_name} className={`combine-col-item${isSelected ? " selected" : ""}`}>
+                            <Checkbox
+                              checked={isSelected}
+                              onChange={() => {
+                                if (isSelected) {
+                                  setRemoveEmptyColumns((prev) => prev.filter((c) => c !== col.column_name));
+                                } else {
+                                  setRemoveEmptyColumns((prev) => [...prev, col.column_name]);
+                                }
+                              }}
+                              style={{ marginBottom: 0 }}
+                            />
+                            <span className="combine-col-name">{col.column_name}</span>
+                            <span className="column-type">{col.column_type}</span>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              </FormGroup>
+              {removeEmptyPreview && (
+                <div className="bp4-callout bp4-intent-primary" style={{ marginBottom: 10 }}>
+                  <p style={{ margin: 0 }}>
+                    {removeEmptyPreview.before.toLocaleString()} rows → {removeEmptyPreview.after.toLocaleString()} rows ({(removeEmptyPreview.before - removeEmptyPreview.after).toLocaleString()} empty row{removeEmptyPreview.before - removeEmptyPreview.after !== 1 ? "s" : ""} will be removed)
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+
           {/* replace_empty_null: column selector */}
           {opType === "replace_empty_null" && (
             <>
@@ -1183,7 +1332,7 @@ export function DataOperationsDialog({
           )}
 
           {/* Preview — shown for operations that produce a result */}
-          {opType !== "delete_column" && opType !== "create_column" && opType !== "rename_column" && opType !== "sample_table" && opType !== "remove_duplicates" && opType !== "replace_empty_null" && opType !== "replace_sentinel_null" && (previews.length > 0 || previewError) && (
+          {opType !== "delete_column" && opType !== "create_column" && opType !== "rename_column" && opType !== "sample_table" && opType !== "remove_duplicates" && opType !== "remove_empty_rows" && opType !== "replace_empty_null" && opType !== "replace_sentinel_null" && (previews.length > 0 || previewError) && (
             <div className="op-preview">
               <div className="op-preview-header">Preview</div>
               {previewError ? (
@@ -1233,7 +1382,7 @@ export function DataOperationsDialog({
                   ? dedupColumns.length === 0
                   : opType === "conditional_column"
                   ? !targetCol || caseConditions.filter((c) => c.column && c.operator && c.result).length === 0
-                  : opType === "replace_empty_null" || opType === "replace_sentinel_null"
+                  : opType === "remove_empty_rows" || opType === "replace_empty_null" || opType === "replace_sentinel_null"
                   ? false
                   : !sourceCol
                     || ((opType === "regex_extract" || opType === "substring" || opType === "custom_sql") && targetMode === "new_column" && (!targetCol.trim() || schema.some((c) => c.column_name === targetCol.trim())))
