@@ -278,7 +278,19 @@ ipcMain.handle(
         await runPromise(db, `CREATE OR REPLACE TABLE "${safeTable}" AS SELECT * FROM read_csv_auto('${safePath}'${paramStr})`);
       }
 
-      const schema = await allPromise(db, `DESCRIBE "${safeTable}"`);
+      // Replace empty strings and whitespace-only strings with NULL on all VARCHAR columns
+      const schemaRows: any[] = await allPromise(db, `DESCRIBE "${safeTable}"`);
+      const varcharCols = schemaRows
+        .filter((c: any) => /^(VARCHAR|TEXT|STRING|CHAR)/i.test(c.column_type))
+        .map((c: any) => c.column_name);
+      if (varcharCols.length > 0) {
+        const setClauses = varcharCols
+          .map((col: string) => `"${col}" = CASE WHEN TRIM("${col}") = '' THEN NULL ELSE "${col}" END`)
+          .join(", ");
+        await runPromise(db, `UPDATE "${safeTable}" SET ${setClauses}`);
+      }
+
+      const schema = schemaRows;
       const countResult = await allPromise(db, `SELECT COUNT(*) as count FROM "${safeTable}"`);
       return {
         tableName: safeTable,
