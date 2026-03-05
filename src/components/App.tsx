@@ -1078,6 +1078,15 @@ export function App(): React.ReactElement {
         const newSchema = await window.api.describe(currentTable);
         setSchema(newSchema);
 
+        // If a new column was added, include it in visibleColumns and columnOrder
+        if (targetMode === "new_column" && targetColumn) {
+          setViewState((prev) => ({
+            ...prev,
+            visibleColumns: prev.visibleColumns.includes(targetColumn) ? prev.visibleColumns : [...prev.visibleColumns, targetColumn],
+            columnOrder: prev.columnOrder.includes(targetColumn) ? prev.columnOrder : [...prev.columnOrder, targetColumn],
+          }));
+        }
+
         // Update row count in tables state
         const countResult = await window.api.query(
           `SELECT COUNT(*) as count FROM "${currentTable}"`
