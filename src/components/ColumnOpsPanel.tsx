@@ -19,18 +19,18 @@ import { SearchableColumnSelect } from "./SearchableColumnSelect";
 // Grouped operation options for <optgroup> structure
 const OP_GROUPS: { label: string; ops: { value: ColOpType; label: string }[] }[] = [
   {
+    label: "Search",
+    ops: [
+      { value: "find_replace", label: "Find & Replace" },
+      { value: "regex_extract", label: "Regex Extract" },
+    ],
+  },
+  {
     label: "Text",
     ops: [
       { value: "trim", label: "Trim Whitespace" },
       { value: "upper", label: "UPPERCASE" },
       { value: "lower", label: "lowercase" },
-    ],
-  },
-  {
-    label: "Search",
-    ops: [
-      { value: "find_replace", label: "Find & Replace" },
-      { value: "regex_extract", label: "Regex Extract" },
     ],
   },
   {
@@ -85,7 +85,7 @@ export function ColumnOpsPanel({
   onContentHeightChange,
 }: ColumnOpsPanelProps): React.ReactElement {
   const [selectedColumn, setSelectedColumn] = useState("");
-  const [opType, setOpType] = useState<ColOpType>("trim");
+  const [opType, setOpType] = useState<ColOpType>("find_replace");
   const [params, setParams] = useState<Record<string, string>>({});
   const [targetMode, setTargetMode] = useState<ColOpTargetMode>("replace");
   const [targetColumn, setTargetColumn] = useState("");
