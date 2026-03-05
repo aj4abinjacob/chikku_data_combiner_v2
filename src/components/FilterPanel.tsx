@@ -681,6 +681,8 @@ export function FilterPanel({
   const [panelHeight, setPanelHeight] = useState(DEFAULT_PANEL_HEIGHT);
   const [activeTab, setActiveTab] = useState<"filters" | "colops" | "rowops">("filters");
   const [splitPercent, setSplitPercent] = useState(55);
+  const [showSaveInput, setShowSaveInput] = useState(false);
+  const [saveViewName, setSaveViewName] = useState("");
   const isSplitDragging = useRef(false);
   const splitStartX = useRef(0);
   const splitStartPercent = useRef(0);
@@ -800,6 +802,14 @@ export function FilterPanel({
     onApplyFilters(convertFromDraft(draftRoot));
   };
 
+  const handleSaveView = () => {
+    const trimmed = saveViewName.trim();
+    if (!trimmed) return;
+    onSaveView(trimmed);
+    setSaveViewName("");
+    setShowSaveInput(false);
+  };
+
   const isDirty =
     JSON.stringify(convertFromDraft(draftRoot)) !==
     JSON.stringify(activeFilters);
@@ -876,6 +886,49 @@ export function FilterPanel({
               />
             </>
           )}
+          {activeTab === "filters" && (
+            <>
+              <span className="filter-panel-tab-separator" />
+              {showSaveInput ? (
+                <div className="filter-panel-save-inline">
+                  <InputGroup
+                    className="filter-panel-save-input"
+                    placeholder="View name..."
+                    value={saveViewName}
+                    onChange={(e) => setSaveViewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSaveView();
+                      if (e.key === "Escape") { setShowSaveInput(false); setSaveViewName(""); }
+                    }}
+                    small
+                    autoFocus
+                  />
+                  <Button
+                    icon="tick"
+                    small
+                    minimal
+                    intent={Intent.SUCCESS}
+                    disabled={!saveViewName.trim()}
+                    onClick={handleSaveView}
+                  />
+                  <Button
+                    icon="cross"
+                    small
+                    minimal
+                    onClick={() => { setShowSaveInput(false); setSaveViewName(""); }}
+                  />
+                </div>
+              ) : (
+                <Button
+                  icon="bookmark"
+                  text="Save View"
+                  small
+                  minimal
+                  onClick={() => setShowSaveInput(true)}
+                />
+              )}
+            </>
+          )}
         </div>
         <div className="filter-panel-header-right" />
       </div>
@@ -904,9 +957,7 @@ export function FilterPanel({
         <div className="filter-views-right" style={{ width: `${100 - splitPercent}%` }}>
           <ViewsPanel
             savedViews={savedViews}
-            currentViewState={currentViewState}
             schema={columns}
-            onSaveView={onSaveView}
             onApplyView={onApplyView}
             onUpdateView={onUpdateView}
             onDeleteView={onDeleteView}

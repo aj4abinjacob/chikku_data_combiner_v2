@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { Button, InputGroup, Intent, Icon } from "@blueprintjs/core";
+import { Button, InputGroup, Intent } from "@blueprintjs/core";
 import { Tooltip2 } from "@blueprintjs/popover2";
 import {
   SavedView,
@@ -15,23 +15,11 @@ import {
 
 interface ViewsPanelProps {
   savedViews: SavedView[];
-  currentViewState: ViewState;
   schema: ColumnInfo[];
-  onSaveView: (name: string) => void;
   onApplyView: (view: SavedView) => void;
   onUpdateView: (viewId: string) => void;
   onDeleteView: (viewId: string) => void;
   onRenameView: (viewId: string, newName: string) => void;
-}
-
-function viewSummary(vs: ViewState): string {
-  const parts: string[] = [];
-  const filterCount = countConditions(vs.filters);
-  if (filterCount > 0) parts.push(`${filterCount} filter${filterCount !== 1 ? "s" : ""}`);
-  if (vs.sortColumns.length > 0) parts.push(`${vs.sortColumns.length} sort${vs.sortColumns.length !== 1 ? "s" : ""}`);
-  if (vs.pivotConfig && vs.pivotConfig.groupColumns.length > 0) parts.push("pivot");
-  if (parts.length === 0) return "default view";
-  return parts.join(" \u00B7 ");
 }
 
 /** Render compact inline detail for a view's filters/sorts/pivot */
@@ -127,15 +115,13 @@ function renderFilterPills(group: FilterGroup): React.ReactNode[] {
 
 export function ViewsPanel({
   savedViews,
-  currentViewState,
   schema,
-  onSaveView,
   onApplyView,
   onUpdateView,
   onDeleteView,
   onRenameView,
 }: ViewsPanelProps): React.ReactElement {
-  const [newName, setNewName] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [expandedViewId, setExpandedViewId] = useState<string | null>(null);
@@ -169,12 +155,11 @@ export function ViewsPanel({
     }
   }, [renamingId]);
 
-  const handleSave = () => {
-    const trimmed = newName.trim();
-    if (!trimmed) return;
-    onSaveView(trimmed);
-    setNewName("");
-  };
+  const filteredViews = useMemo(() => {
+    if (!searchQuery.trim()) return savedViews;
+    const q = searchQuery.trim().toLowerCase();
+    return savedViews.filter((v) => v.name.toLowerCase().includes(q));
+  }, [savedViews, searchQuery]);
 
   const handleRenameStart = (view: SavedView) => {
     setRenamingId(view.id);
@@ -199,28 +184,17 @@ export function ViewsPanel({
         <div className="views-op-row">
           <InputGroup
             className="views-name-input"
-            placeholder="Name this view..."
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleSave(); }}
-            leftIcon="bookmark"
+            placeholder="Search views..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            leftIcon="search"
             small
+            rightElement={
+              searchQuery ? (
+                <Button icon="cross" minimal small onClick={() => setSearchQuery("")} />
+              ) : undefined
+            }
           />
-          <Button
-            className="views-save-btn"
-            icon="floppy-disk"
-            text="Save"
-            intent={Intent.PRIMARY}
-            small
-            disabled={!newName.trim()}
-            onClick={handleSave}
-          />
-        </div>
-        <div className="views-status-row">
-          <span className="views-scope">
-            <Icon icon="eye-open" iconSize={10} />
-            {viewSummary(currentViewState)}
-          </span>
         </div>
       </div>
 
@@ -230,7 +204,7 @@ export function ViewsPanel({
             <span className="views-steps-title">Saved Views ({savedViews.length})</span>
           </div>
           <div className="views-step-list">
-            {savedViews.map((view, idx) => {
+            {filteredViews.map((view, idx) => {
               const missing = getMissingColumns(view);
               const isCompatible = missing.length === 0;
               const isExpanded = expandedViewId === view.id;
