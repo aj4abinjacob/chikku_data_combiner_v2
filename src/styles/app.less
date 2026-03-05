@@ -2255,7 +2255,48 @@ html, body, #root {
   }
 }
 
-// Scope badge row
+// Filter scope banner (prominent)
+.colops-filter-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin: 6px 0 2px;
+  background: rgba(19, 124, 189, 0.1);
+  border: 1px solid rgba(19, 124, 189, 0.3);
+  border-left: 3px solid #137cbd;
+  border-radius: 4px;
+  color: #137cbd;
+  animation: filter-banner-pulse 2s ease-in-out 1;
+
+  .bp4-icon {
+    flex-shrink: 0;
+  }
+}
+
+.colops-filter-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.2;
+
+  strong {
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  span {
+    font-size: 11px;
+    opacity: 0.85;
+  }
+}
+
+@keyframes filter-banner-pulse {
+  0% { background: rgba(19, 124, 189, 0.25); }
+  100% { background: rgba(19, 124, 189, 0.1); }
+}
+
+// Scope badge row (unfiltered)
 .colops-scope-row {
   padding-top: 2px;
 }
@@ -2268,11 +2309,6 @@ html, body, #root {
   font-weight: 500;
   padding: 2px 8px;
   border-radius: 3px;
-
-  &.colops-scope-filtered {
-    background: rgba(19, 124, 189, 0.08);
-    color: #137cbd;
-  }
 
   &.colops-scope-all {
     background: rgba(217, 130, 43, 0.06);
@@ -2646,6 +2682,42 @@ html, body, #root {
   flex-wrap: wrap;
 }
 
+// Filter scope banner (prominent)
+.rowops-filter-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin: 6px 0 2px;
+  background: rgba(19, 124, 189, 0.1);
+  border: 1px solid rgba(19, 124, 189, 0.3);
+  border-left: 3px solid #137cbd;
+  border-radius: 4px;
+  color: #137cbd;
+  animation: filter-banner-pulse 2s ease-in-out 1;
+
+  .bp4-icon {
+    flex-shrink: 0;
+  }
+}
+
+.rowops-filter-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.2;
+
+  strong {
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  span {
+    font-size: 11px;
+    opacity: 0.85;
+  }
+}
+
 .rowops-scope {
   display: inline-flex;
   align-items: center;
@@ -2655,11 +2727,6 @@ html, body, #root {
   padding: 2px 8px;
   border-radius: 3px;
   flex-shrink: 0;
-
-  &.rowops-scope-filtered {
-    background: rgba(19, 124, 189, 0.08);
-    color: #137cbd;
-  }
 
   &.rowops-scope-all {
     background: rgba(217, 130, 43, 0.06);

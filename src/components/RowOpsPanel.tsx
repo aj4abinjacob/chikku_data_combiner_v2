@@ -331,14 +331,25 @@ export function RowOpsPanel({
           </div>
         )}
 
+        {/* Filter scope banner */}
+        {isFiltered && (
+          <div className="rowops-filter-banner">
+            <Icon icon="filter" iconSize={12} />
+            <div className="rowops-filter-banner-text">
+              <strong>Filtered scope</strong>
+              <span>Affects {totalRows.toLocaleString()} of {unfilteredRows!.toLocaleString()} rows</span>
+            </div>
+          </div>
+        )}
+
         {/* Status row: scope banner + preview + messages */}
         <div className="rowops-status-row">
-          <span className={isFiltered ? "rowops-scope rowops-scope-filtered" : "rowops-scope rowops-scope-all"}>
-            <Icon icon={isFiltered ? "filter" : "database"} iconSize={10} />
-            {isFiltered
-              ? `${totalRows.toLocaleString()} of ${unfilteredRows!.toLocaleString()} rows`
-              : `All ${totalRows.toLocaleString()} rows`}
-          </span>
+          {!isFiltered && (
+            <span className="rowops-scope rowops-scope-all">
+              <Icon icon="database" iconSize={10} />
+              All {totalRows.toLocaleString()} rows
+            </span>
+          )}
           {previewLabel && !isDisabled && (
             <span className="rowops-preview-count">
               <Icon icon="eye-open" iconSize={10} />

@@ -506,15 +506,23 @@ export function ColumnOpsPanel({
             </div>
           )}
 
-          {/* Scope badge */}
-          <div className="colops-scope-row">
-            <span className={isFiltered ? "colops-scope colops-scope-filtered" : "colops-scope colops-scope-all"}>
-              <Icon icon={isFiltered ? "filter" : "database"} iconSize={10} />
-              {isFiltered
-                ? `${totalRows.toLocaleString()} of ${unfilteredRows!.toLocaleString()} rows`
-                : `All ${totalRows.toLocaleString()} rows`}
-            </span>
-          </div>
+          {/* Filter scope banner */}
+          {isFiltered ? (
+            <div className="colops-filter-banner">
+              <Icon icon="filter" iconSize={12} />
+              <div className="colops-filter-banner-text">
+                <strong>Filtered scope</strong>
+                <span>Affects {totalRows.toLocaleString()} of {unfilteredRows!.toLocaleString()} rows</span>
+              </div>
+            </div>
+          ) : (
+            <div className="colops-scope-row">
+              <span className="colops-scope colops-scope-all">
+                <Icon icon="database" iconSize={10} />
+                All {totalRows.toLocaleString()} rows
+              </span>
+            </div>
+          )}
 
           {/* Apply button */}
           <div className="colops-actions">
