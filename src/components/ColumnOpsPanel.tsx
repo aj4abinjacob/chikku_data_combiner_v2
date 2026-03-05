@@ -328,8 +328,12 @@ export function ColumnOpsPanel({
                 <label>Group</label>
                 <InputGroup
                   value={params.groupIndex ?? "1"}
-                  onChange={(e) => updateParam("groupIndex", e.target.value)}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    updateParam("groupIndex", String(isNaN(val) || val < 0 ? 0 : val));
+                  }}
                   type="number"
+                  min={0}
                   fill
                 />
               </div>

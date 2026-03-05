@@ -82,7 +82,7 @@
   {
     "id": "builtin-amazon-asin",
     "title": "Amazon ASIN",
-    "pattern": "amazon\\.[a-z.]+/(?:dp|gp/product|gp/aw/d)/([A-Z0-9]{10})",
+    "pattern": "amazon\\.[a-z.]+/.*?(?:dp|gp/product|gp/aw/d)/([A-Z0-9]{10})",
     "description": "Extracts Amazon ASIN product code (e.g. B0CX23V2ZK) from URLs like /dp/B0CX23V2ZK",
     "category": "Product Codes",
     "isBuiltin": true
