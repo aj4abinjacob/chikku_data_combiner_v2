@@ -260,7 +260,9 @@ export function buildPivotGroupQuery(
   for (const agg of aggConfigs) {
     const col = escapeIdent(agg.column);
     const alias = `"${agg.column.replace(/"/g, '""')}:${agg.fn}"`;
-    if (agg.fn === "COUNT_DISTINCT") {
+    if (agg.fn === "LIST") {
+      selects.push(`ARRAY_TO_STRING(LIST(DISTINCT CAST(${col} AS VARCHAR)), ', ') AS ${alias}`);
+    } else if (agg.fn === "COUNT_DISTINCT") {
       selects.push(`COUNT(DISTINCT ${col}) AS ${alias}`);
     } else if (agg.fn === "COUNT_NULL") {
       selects.push(`SUM(CASE WHEN ${col} IS NULL THEN 1 ELSE 0 END) AS ${alias}`);
@@ -296,7 +298,9 @@ export function buildPivotGrandTotalQuery(
   for (const agg of aggConfigs) {
     const col = escapeIdent(agg.column);
     const alias = `"${agg.column.replace(/"/g, '""')}:${agg.fn}"`;
-    if (agg.fn === "COUNT_DISTINCT") {
+    if (agg.fn === "LIST") {
+      selects.push(`ARRAY_TO_STRING(LIST(DISTINCT CAST(${col} AS VARCHAR)), ', ') AS ${alias}`);
+    } else if (agg.fn === "COUNT_DISTINCT") {
       selects.push(`COUNT(DISTINCT ${col}) AS ${alias}`);
     } else if (agg.fn === "COUNT_NULL") {
       selects.push(`SUM(CASE WHEN ${col} IS NULL THEN 1 ELSE 0 END) AS ${alias}`);

@@ -87,7 +87,7 @@ export interface PivotGroupColumn {
   direction: "ASC" | "DESC";
 }
 
-export type PivotAggFunction = "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" | "MEDIAN" | "COUNT_DISTINCT" | "COUNT_NULL";
+export type PivotAggFunction = "LIST" | "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" | "MEDIAN" | "COUNT_DISTINCT" | "COUNT_NULL";
 
 export interface PivotViewConfig {
   groupColumns: PivotGroupColumn[];

@@ -3440,11 +3440,16 @@ html, body, #root {
   flex-shrink: 0;
 }
 
-// Aggregate values in group rows — bold, right-aligned, primary color
+// Aggregate values in group rows — bold, dark to stand out as summary
 .dg-pivot-agg-value {
+  font-weight: 700;
+  color: #1a2028;
+}
+
+// When group is expanded, slightly muted since real data is visible below
+.dg-pivot-agg-faded {
   font-weight: 600;
-  text-align: right;
-  color: #394b59;
+  opacity: 0.5;
 }
 
 // Empty group column cell for data rows

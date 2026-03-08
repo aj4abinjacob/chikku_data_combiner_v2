@@ -3,6 +3,7 @@ import { Button, HTMLSelect, Icon } from "@blueprintjs/core";
 import { PivotViewConfig, PivotAggFunction } from "../types";
 
 const AGG_OPTIONS: { value: PivotAggFunction; label: string }[] = [
+  { value: "LIST", label: "LIST VALUES" },
   { value: "SUM", label: "SUM" },
   { value: "COUNT", label: "COUNT" },
   { value: "COUNT_DISTINCT", label: "COUNT DISTINCT" },

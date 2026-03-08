@@ -555,7 +555,14 @@ export function DataGrid({
           .map((r) => {
             if (pivotMode && pivotFlatRows) {
               const flatRow = pivotFlatRows[r];
-              if (!flatRow || flatRow.type === "group") return "";
+              if (!flatRow) return "";
+              if (flatRow.type === "group") {
+                return colNames
+                  .map((c) =>
+                    selected.has(cellKey(r, c)) ? getAggValue(flatRow.aggregates, c) : ""
+                  )
+                  .join("\t");
+              }
               const row = flatRow.data;
               return colNames
                 .map((c) =>
@@ -702,15 +709,16 @@ export function DataGrid({
                         width: "100%",
                         height: ROW_HEIGHT,
                       }}
-                      onClick={() => onToggleExpand?.(flatRow.key)}
                     >
-                      {/* Dedicated Group column */}
+                      {/* Dedicated Group column — click to expand/collapse */}
                       <div
                         className="dg-cell dg-pivot-group-cell"
                         style={{
                           width: groupColWidth,
                           paddingLeft: indent,
+                          cursor: "pointer",
                         }}
+                        onClick={() => onToggleExpand?.(flatRow.key)}
                       >
                         <Icon
                           icon={flatRow.expanded ? "chevron-down" : "chevron-right"}
@@ -727,14 +735,25 @@ export function DataGrid({
                           ({flatRow.groupCount?.toLocaleString()})
                         </span>
                       </div>
-                      {/* Data columns: show aggregates if available */}
+                      {/* Data columns: show aggregates — selectable with tooltip */}
                       {dataColumns.map((col) => {
                         const cellText = getAggValue(flatRow.aggregates, col);
                         return (
                           <div
                             key={col}
-                            className={`dg-cell${cellText ? " dg-pivot-agg-value" : ""}`}
+                            className={`dg-cell${cellText ? " dg-pivot-agg-value" : ""}${flatRow.expanded ? " dg-pivot-agg-faded" : ""}${
+                              selected.has(cellKey(virtualRow.index, col)) ? " cell-selected" : ""
+                            }`}
                             style={{ width: columnWidths[col] ?? 150 }}
+                            onMouseDown={(e) =>
+                              handleCellMouseDown(virtualRow.index, col, e)
+                            }
+                            onMouseEnter={(e) => {
+                              handleCellMouseEnterDrag(virtualRow.index, col);
+                              if (cellText && !dragSelecting.current)
+                                handleCellMouseEnter(e, cellText);
+                            }}
+                            onMouseLeave={handleCellMouseLeave}
                           >
                             {cellText}
                           </div>
