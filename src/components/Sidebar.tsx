@@ -392,7 +392,7 @@ export function Sidebar({
               >
                 <Icon
                   icon="drag-handle-vertical"
-                  size={12}
+                  size={10}
                   className="drag-handle"
                 />
                 <Checkbox
