@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@blueprintjs/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { SortColumn, PivotFlatRow, PivotGroupColumn } from "../types";
+import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode } from "../types";
 
 const TOOLTIP_DELAY = 600; // ms before tooltip appears
 
@@ -29,6 +29,9 @@ interface DataGridProps {
   grandTotals?: Record<string, any> | null;
   showGrandTotal?: boolean;
   numericColumns?: Set<string>;
+  groupSortMode?: PivotGroupSortMode | null;
+  groupSortDirection?: "ASC" | "DESC";
+  onGroupSort?: (mode: PivotGroupSortMode, direction: "ASC" | "DESC" | null) => void;
 }
 
 export function DataGrid({
@@ -47,6 +50,9 @@ export function DataGrid({
   grandTotals,
   showGrandTotal,
   numericColumns,
+  groupSortMode,
+  groupSortDirection,
+  onGroupSort,
 }: DataGridProps): React.ReactElement {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const anchor = useRef<{ row: number; col: string } | null>(null);
@@ -629,6 +635,46 @@ export function DataGrid({
             {pivotMode ? (
               <div className="dg-cell dg-pivot-group-header" style={{ width: groupColWidth }}>
                 <span className="dg-header-text">Group By</span>
+                <span className="dg-group-sort-controls">
+                  <span
+                    className={`dg-group-sort-btn${groupSortMode === "alpha" ? " active" : ""}`}
+                    title={groupSortMode === "alpha" ? `Alphabetical ${groupSortDirection} (click to toggle)` : "Sort alphabetically"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!onGroupSort) return;
+                      if (groupSortMode === "alpha") {
+                        if (groupSortDirection === "ASC") onGroupSort("alpha", "DESC");
+                        else onGroupSort("alpha", null);
+                      } else {
+                        onGroupSort("alpha", "ASC");
+                      }
+                    }}
+                  >
+                    <Icon icon="sort-alphabetical" size={12} />
+                    {groupSortMode === "alpha" && (
+                      <Icon icon={groupSortDirection === "ASC" ? "chevron-up" : "chevron-down"} size={10} />
+                    )}
+                  </span>
+                  <span
+                    className={`dg-group-sort-btn${groupSortMode === "count" ? " active" : ""}`}
+                    title={groupSortMode === "count" ? `By count ${groupSortDirection} (click to toggle)` : "Sort by count"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!onGroupSort) return;
+                      if (groupSortMode === "count") {
+                        if (groupSortDirection === "ASC") onGroupSort("count", "DESC");
+                        else onGroupSort("count", null);
+                      } else {
+                        onGroupSort("count", "ASC");
+                      }
+                    }}
+                  >
+                    <Icon icon="sort-numerical" size={12} />
+                    {groupSortMode === "count" && (
+                      <Icon icon={groupSortDirection === "ASC" ? "chevron-up" : "chevron-down"} size={10} />
+                    )}
+                  </span>
+                </span>
                 <div
                   className="col-resize-handle"
                   onMouseDown={(e) => handleResizeStart(e, PIVOT_GROUP_COL_KEY)}
@@ -667,9 +713,10 @@ export function DataGrid({
                       {sortColumns.length > 1 && (
                         <span className="sort-indicator-number">{sortInfo.index}</span>
                       )}
+                      <Icon icon="sort-alphabetical" size={12} />
                       <Icon
                         icon={sortInfo.direction === "ASC" ? "chevron-up" : "chevron-down"}
-                        size={12}
+                        size={10}
                       />
                     </span>
                   )}
@@ -726,10 +773,10 @@ export function DataGrid({
                           className="dg-pivot-expand-icon"
                         />
                         <span
-                          className="dg-pivot-group-value"
-                          title={String(flatRow.groupValue ?? "")}
+                          className={`dg-pivot-group-value${flatRow.groupValue == null ? " dg-null-value" : ""}`}
+                          title={flatRow.groupValue == null ? "NULL" : String(flatRow.groupValue)}
                         >
-                          {formatCell(flatRow.groupValue)}
+                          {flatRow.groupValue == null ? "NULL" : formatCell(flatRow.groupValue)}
                         </span>
                         <span className="dg-pivot-group-count">
                           ({flatRow.groupCount?.toLocaleString()})

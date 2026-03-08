@@ -89,10 +89,14 @@ export interface PivotGroupColumn {
 
 export type PivotAggFunction = "LIST" | "SUM" | "COUNT" | "AVG" | "MIN" | "MAX" | "MEDIAN" | "COUNT_DISTINCT" | "COUNT_NULL";
 
+export type PivotGroupSortMode = "alpha" | "count";
+
 export interface PivotViewConfig {
   groupColumns: PivotGroupColumn[];
   showGrandTotal: boolean;
   defaultAggFunction: PivotAggFunction;
+  groupSortMode?: PivotGroupSortMode | null;
+  groupSortDirection?: "ASC" | "DESC";
 }
 
 export interface PivotFlatRow {

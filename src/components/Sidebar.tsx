@@ -411,7 +411,7 @@ export function Sidebar({
                   }}
                   title={
                     pivotInfo
-                      ? `Group ${pivotInfo.index}: ${pivotInfo.direction} (click to toggle, shift+click for multi-group)`
+                      ? `Group ${pivotInfo.index}: ${pivotInfo.direction}${pivotConfig?.groupSortMode ? ` (sorted by ${pivotConfig.groupSortMode === "count" ? "count" : "name"} ${pivotConfig.groupSortDirection})` : ""} (click to toggle, shift+click for multi-group)`
                       : "Click to group (shift+click for multi-group)"
                   }
                 >
@@ -419,6 +419,13 @@ export function Sidebar({
                     <>
                       <span className="column-pivot-number">{pivotInfo.index}</span>
                       <Icon icon={pivotInfo.direction === "ASC" ? "chevron-up" : "chevron-down"} size={10} />
+                      {pivotConfig?.groupSortMode && (
+                        <Icon
+                          icon={pivotConfig.groupSortMode === "count" ? "sort-numerical" : "sort-alphabetical"}
+                          size={9}
+                          className="column-pivot-sort-mode"
+                        />
+                      )}
                     </>
                   ) : (
                     <Icon icon="layers" size={10} className="column-pivot-idle" />

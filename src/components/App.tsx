@@ -690,6 +690,21 @@ export function App(): React.ReactElement {
     setResetKey((k) => k + 1);
   }, []);
 
+  const handleGroupSort = useCallback((mode: "alpha" | "count", direction: "ASC" | "DESC" | null) => {
+    setViewState((prev) => {
+      if (!prev.pivotConfig) return prev;
+      return {
+        ...prev,
+        pivotConfig: {
+          ...prev.pivotConfig,
+          groupSortMode: direction ? mode : null,
+          groupSortDirection: direction ?? undefined,
+        },
+      };
+    });
+    setResetKey((k) => k + 1);
+  }, []);
+
   const handleToggleGrandTotal = useCallback(() => {
     setViewState((prev) => {
       if (!prev.pivotConfig) return prev;
@@ -1571,6 +1586,9 @@ export function App(): React.ReactElement {
                 grandTotals={pivotActive ? pivotGrandTotals : undefined}
                 showGrandTotal={pivotActive ? viewState.pivotConfig?.showGrandTotal : undefined}
                 numericColumns={pivotActive ? numericColumns : undefined}
+                groupSortMode={pivotActive ? viewState.pivotConfig?.groupSortMode : undefined}
+                groupSortDirection={pivotActive ? viewState.pivotConfig?.groupSortDirection : undefined}
+                onGroupSort={pivotActive ? handleGroupSort : undefined}
               />
               {filterPanelOpen && (
                 <FilterPanel

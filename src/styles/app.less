@@ -456,17 +456,20 @@ html, body, #root {
   background: #f5f8fa;
   border-right: 1px solid #d8e1e8;
   padding: 6px 12px;
+  display: flex;
+  align-items: center;
 
   &:hover {
     background: #ebf1f5;
   }
 
   .sort-indicator {
-    margin-left: 4px;
+    margin-left: auto;
     color: #5c7080;
     display: inline-flex;
     align-items: center;
     gap: 1px;
+    opacity: 0.55;
 
     .sort-indicator-number {
       font-size: 9px;
@@ -3365,10 +3368,42 @@ html, body, #root {
   background: #f5f8fa;
   border-right: 1px solid #d8e1e8;
   padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 
   .dg-header-text {
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .dg-group-sort-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+    margin-right: 8px;
+  }
+
+  .dg-group-sort-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    cursor: pointer;
+    padding: 1px 3px;
+    border-radius: 3px;
+    color: #8a9ba8;
+    transition: background 0.12s, color 0.12s;
+
+    &:hover {
+      background: rgba(19, 124, 189, 0.15);
+      color: #137cbd;
+    }
+
+    &.active {
+      background: rgba(19, 124, 189, 0.1);
+      color: #137cbd;
+    }
   }
 
   .col-resize-handle {
@@ -3384,6 +3419,13 @@ html, body, #root {
       background: rgba(19, 124, 189, 0.3);
     }
   }
+}
+
+// NULL value styling for pivot group rows
+.dg-null-value {
+  font-style: italic;
+  color: #8a9ba8;
+  font-weight: 400;
 }
 
 // Pivot group rows
@@ -3532,6 +3574,11 @@ html, body, #root {
 
 .column-item:hover .column-pivot-indicator {
   opacity: 1;
+}
+
+.column-pivot-sort-mode {
+  margin-left: 1px;
+  color: #137cbd;
 }
 
 .column-clear-pivot-btn {

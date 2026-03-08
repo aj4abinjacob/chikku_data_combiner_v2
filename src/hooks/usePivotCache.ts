@@ -66,6 +66,8 @@ export function usePivotCache({
   const pivotConfig = viewState.pivotConfig;
   const groupColumns = pivotConfig?.groupColumns ?? [];
   const defaultAggFn = pivotConfig?.defaultAggFunction ?? "LIST";
+  const groupSortMode = pivotConfig?.groupSortMode ?? null;
+  const groupSortDir = pivotConfig?.groupSortDirection ?? "ASC";
 
   // Build aggregate configs from schema
   // Numeric columns use the selected agg function; non-numeric columns
@@ -128,51 +130,61 @@ export function usePivotCache({
 
   // Handle sort changes without full tree reset — preserve expand state
   const sortColumnsKey = JSON.stringify(viewState.sortColumns);
-  const prevSortKeyRef = useRef(sortColumnsKey);
+  const groupSortKey = `${groupSortMode}|${groupSortDir}`;
+  const combinedSortKey = `${sortColumnsKey}|${groupSortKey}`;
+  const prevSortKeyRef = useRef(combinedSortKey);
 
-  if (sortColumnsKey !== prevSortKeyRef.current) {
-    prevSortKeyRef.current = sortColumnsKey;
+  if (combinedSortKey !== prevSortKeyRef.current) {
+    prevSortKeyRef.current = combinedSortKey;
 
     if (rootNodesRef.current.length > 0) {
       generationRef.current += 1;
 
       const aggSort = getAggSortEntry();
 
+      const sortGroupNodes = (nodes: GroupNode[]) => {
+        if (groupSortMode === "count") {
+          // Sort by count
+          nodes.sort((a, b) => {
+            const cmp = a.count - b.count;
+            return groupSortDir === "ASC" ? cmp : -cmp;
+          });
+        } else if (groupSortMode === "alpha") {
+          // Sort alphabetically by group value
+          nodes.sort((a, b) => {
+            const va = a.value;
+            const vb = b.value;
+            if (va == null && vb == null) return 0;
+            if (va == null) return 1;
+            if (vb == null) return -1;
+            const cmp = typeof va === "number" && typeof vb === "number"
+              ? va - vb
+              : String(va).localeCompare(String(vb));
+            return groupSortDir === "ASC" ? cmp : -cmp;
+          });
+        } else if (aggSort) {
+          // Sort by aggregate value (from data column header click)
+          const { aggKey, direction: aggDir } = aggSort;
+          nodes.sort((a, b) => {
+            const va = a.aggregates[aggKey];
+            const vb = b.aggregates[aggKey];
+            if (va == null && vb == null) return 0;
+            if (va == null) return 1;
+            if (vb == null) return -1;
+            const cmp = typeof va === "number" && typeof vb === "number"
+              ? va - vb
+              : String(va).localeCompare(String(vb));
+            return aggDir === "ASC" ? cmp : -cmp;
+          });
+        }
+      };
+
       const clearAndSort = (nodes: GroupNode[], depth: number) => {
-        // Re-sort this level
         if (depth < groupColumns.length) {
-          if (aggSort) {
-            // Sort group rows by their aggregate value
-            const { aggKey, direction: aggDir } = aggSort;
-            nodes.sort((a, b) => {
-              const va = a.aggregates[aggKey];
-              const vb = b.aggregates[aggKey];
-              if (va == null && vb == null) return 0;
-              if (va == null) return 1;
-              if (vb == null) return -1;
-              const cmp = typeof va === "number" && typeof vb === "number"
-                ? va - vb
-                : String(va).localeCompare(String(vb));
-              return aggDir === "ASC" ? cmp : -cmp;
-            });
-          } else {
-            const dir = getEffectiveGroupDir(groupColumns[depth]);
-            nodes.sort((a, b) => {
-              const va = a.value;
-              const vb = b.value;
-              if (va == null && vb == null) return 0;
-              if (va == null) return 1;
-              if (vb == null) return -1;
-              const cmp = typeof va === "number" && typeof vb === "number"
-                ? va - vb
-                : String(va).localeCompare(String(vb));
-              return dir === "ASC" ? cmp : -cmp;
-            });
-          }
+          sortGroupNodes(nodes);
         }
 
         for (const node of nodes) {
-          // Clear cached data rows (they need refetching with new ORDER BY)
           node.dataRows = new Map();
           node.dataLoading = new Set();
           if (node.children && node.children.length > 0) {
@@ -211,7 +223,9 @@ export function usePivotCache({
           aggConfigs,
           viewState.filters,
           effectiveDir,
-          aggSortEntry ? { column: aggSortEntry.column, fn: aggSortEntry.fn, direction: aggSortEntry.direction } : undefined
+          aggSortEntry ? { column: aggSortEntry.column, fn: aggSortEntry.fn, direction: aggSortEntry.direction } : undefined,
+          groupSortMode,
+          groupSortDir
         );
         const rows = await window.api.query(sql);
         if (generationRef.current !== gen) return;
@@ -306,7 +320,9 @@ export function usePivotCache({
           aggConfigs,
           viewState.filters,
           effectiveDir,
-          aggSortEntry ? { column: aggSortEntry.column, fn: aggSortEntry.fn, direction: aggSortEntry.direction } : undefined
+          aggSortEntry ? { column: aggSortEntry.column, fn: aggSortEntry.fn, direction: aggSortEntry.direction } : undefined,
+          groupSortMode,
+          groupSortDir
         );
         try {
           const rows = await window.api.query(sql);
