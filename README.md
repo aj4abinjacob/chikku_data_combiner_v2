@@ -1,4 +1,4 @@
-# Chikku Data Combiner
+# Chikku Parser
 
 A desktop app for viewing, combining, and transforming CSV data. Built with Electron, React, DuckDB, and BlueprintJS.
 

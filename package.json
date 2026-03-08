@@ -1,5 +1,5 @@
 {
-  "name": "chikku-data-combiner",
+  "name": "chikku-parser",
   "version": "0.3.2",
   "description": "Desktop app for viewing, combining, and transforming CSV data",
   "main": "dist/main.bundle.js",
@@ -70,8 +70,8 @@
     "webpack-node-externals": "^3.0.0"
   },
   "build": {
-    "appId": "com.abinjacob.chikku-data-combiner",
-    "productName": "Chikku Data Combiner",
+    "appId": "com.abinjacob.chikku-parser",
+    "productName": "Chikku Parser",
     "directories": {
       "buildResources": "res"
     },

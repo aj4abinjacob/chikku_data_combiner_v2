@@ -1627,7 +1627,7 @@ export function App(): React.ReactElement {
             </>
           ) : (
             <div className="welcome">
-              <h2>Chikku Data Combiner</h2>
+              <h2>Chikku Parser</h2>
               <p>Open files to get started (Cmd+O / Ctrl+O)</p>
               <p>Add more files to combine them (Cmd+Shift+O / Ctrl+Shift+O)</p>
             </div>

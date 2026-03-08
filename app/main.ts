@@ -71,7 +71,7 @@ function createWindow(): void {
     height: 900,
     minWidth: 800,
     minHeight: 600,
-    title: "Chikku Data Combiner",
+    title: "Chikku Parser",
     icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, "preload.bundle.js"),
