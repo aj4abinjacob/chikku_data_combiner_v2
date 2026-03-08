@@ -506,7 +506,7 @@ function writeUserPatterns(patterns: RegexPattern[]): void {
 
 function fetchGitHubPatterns(): Promise<RegexPattern[]> {
   return new Promise((resolve, reject) => {
-    const url = "https://raw.githubusercontent.com/aj4abinjacob/chikku_data_combiner_v2/master/app/regex-patterns.json";
+    const url = "https://raw.githubusercontent.com/aj4abinjacob/chikku_parser/master/app/regex-patterns.json";
     const req = https.get(url, { timeout: 5000 }, (res) => {
       if (res.statusCode !== 200) {
         reject(new Error(`HTTP ${res.statusCode}`));
