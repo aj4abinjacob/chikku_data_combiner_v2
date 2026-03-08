@@ -261,7 +261,7 @@ export function buildPivotGroupQuery(
     const col = escapeIdent(agg.column);
     const alias = `"${agg.column.replace(/"/g, '""')}:${agg.fn}"`;
     if (agg.fn === "LIST") {
-      selects.push(`ARRAY_TO_STRING(LIST(DISTINCT CAST(${col} AS VARCHAR)), ', ') AS ${alias}`);
+      selects.push(`ARRAY_TO_STRING(LIST_SORT(LIST(DISTINCT CAST(${col} AS VARCHAR))), ', ') AS ${alias}`);
     } else if (agg.fn === "COUNT_DISTINCT") {
       selects.push(`COUNT(DISTINCT ${col}) AS ${alias}`);
     } else if (agg.fn === "COUNT_NULL") {
@@ -299,7 +299,7 @@ export function buildPivotGrandTotalQuery(
     const col = escapeIdent(agg.column);
     const alias = `"${agg.column.replace(/"/g, '""')}:${agg.fn}"`;
     if (agg.fn === "LIST") {
-      selects.push(`ARRAY_TO_STRING(LIST(DISTINCT CAST(${col} AS VARCHAR)), ', ') AS ${alias}`);
+      selects.push(`ARRAY_TO_STRING(LIST_SORT(LIST(DISTINCT CAST(${col} AS VARCHAR))), ', ') AS ${alias}`);
     } else if (agg.fn === "COUNT_DISTINCT") {
       selects.push(`COUNT(DISTINCT ${col}) AS ${alias}`);
     } else if (agg.fn === "COUNT_NULL") {
