@@ -39,7 +39,7 @@ npm run clean        # Remove dist/
 - Excel import: sheet → temp CSV via SheetJS → `read_csv_auto()` → cleanup
 - "Open With" support: `app.on("open-file")` (macOS), `process.argv` (CLI), single-instance lock
 - Regex patterns: bundled `app/regex-patterns.json`, fetched from GitHub with fallback, user patterns in `userData`
-- IPC channels: `db:load-file`, `db:query`, `db:exec`, `db:describe`, `db:tables`, `db:export-file`, `db:export-excel-multi`, `dialog:save-file`, `system:free-memory`, `file:get-excel-sheets`, `file:write-json`, `file:read-json`, `file:exists`, `patterns:*`
+- IPC channels: `db:load-file`, `db:query`, `db:exec`, `db:describe`, `db:tables`, `db:export-file`, `db:export-excel-multi`, `dialog:save-file`, `system:free-memory`, `file:get-excel-sheets`, `file:write-json`, `file:read-json`, `file:exists`, `patterns:*`, `set-dark-mode` (main→renderer), `theme:sync` (renderer→main)
 
 ### Preload (`app/preload.ts`)
 Context bridge exposing `window.api` (typed as `DbApi` in preload.ts). Key methods: `loadFile`, `query`, `exec`, `describe`, `tables`, `exportFile`, `exportExcelMulti`, `saveFileDialog`, `getFreeMemory`, `getExcelSheets`, `getRegexPatterns`, `saveUserPattern`, `deleteUserPattern`, `writeJsonFile`, `readJsonFile`, `fileExists`, `onOpenFiles`, `onAddFiles`, `onExportCSV`.
@@ -137,6 +137,7 @@ Key types: `ColumnInfo`, `LoadedTable` (with optional `importOptions`), `ViewSta
 - Data operations use `CREATE OR REPLACE TABLE ... AS SELECT` pattern
 - All filter/sort state lives in `ViewState`; chunk cache auto-resets on changes
 - CSS namespaces: `.colops-*`, `.rowops-*`, `.views-*`, `.dg-*`, `.col-select-*`, `.regex-picker-*`, `.regex-manager-*`, `.pivot-toolbar-*`, `.filter-group-*`, `.date-conv-*`, `.merge-*`, `.ghist-*`
+- Dark mode: `.dark-theme` + `.bp4-dark` classes on `app-container` and `body`; preference stored in `localStorage("theme")`; toggled via View > Dark Mode menu (Cmd+Shift+D); dark overrides at end of `app.less` using Less variables (`@dark-bg-*`, `@dark-border-*`, `@dark-text-*`)
 
 ## Keyboard Shortcuts
 
@@ -146,3 +147,4 @@ Key types: `ColumnInfo`, `LoadedTable` (with optional `importOptions`), `ViewSta
 | Cmd+Shift+O / Ctrl+Shift+O | Add files (appends) |
 | Cmd+E / Ctrl+E | Export (opens Export dialog) |
 | Cmd+C / Ctrl+C | Copy selected cells |
+| Cmd+Shift+D / Ctrl+Shift+D | Toggle dark mode |

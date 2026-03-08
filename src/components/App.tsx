@@ -116,6 +116,7 @@ export function App(): React.ReactElement {
   const [savedViewNextId, setSavedViewNextId] = useState(1);
   const [tableHistories, setTableHistories] = useState<Map<string, TableHistory>>(new Map());
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem("theme") === "dark");
 
   // Use refs so IPC callbacks always see latest state
   const tablesRef = useRef(tables);
@@ -406,7 +407,19 @@ export function App(): React.ReactElement {
     window.api.onExportCSV(() => {
       setExportDialogOpen(true);
     });
+    window.api.onSetDarkMode((isDark) => {
+      setDarkMode(isDark);
+      localStorage.setItem("theme", isDark ? "dark" : "light");
+    });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync dark mode class to body (for BlueprintJS dialogs rendered in portals) and menu checkbox
+  useEffect(() => {
+    document.body.classList.toggle("bp4-dark", darkMode);
+    document.body.classList.toggle("dark-theme", darkMode);
+    document.documentElement.classList.toggle("dark-theme", darkMode);
+    window.api.syncTheme(darkMode);
+  }, [darkMode]);
 
   // When active table changes, refresh schema and reset columns
   useEffect(() => {
@@ -1502,7 +1515,7 @@ export function App(): React.ReactElement {
   const hasData = tables.length > 0;
 
   return (
-    <div className="app-container">
+    <div className={`app-container${darkMode ? " bp4-dark dark-theme" : ""}`}>
       <div className="main-layout">
         {sidebarVisible ? (
           <Sidebar

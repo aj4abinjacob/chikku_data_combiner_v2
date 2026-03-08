@@ -4057,3 +4057,1024 @@ html, body, #root {
   gap: 6px;
 }
 
+// ══════════════════════════════════════════════════
+// ── Dark Theme Overrides ──
+// ══════════════════════════════════════════════════
+
+// Dark palette (BlueprintJS dark theme compatible)
+@dark-bg-1: #1c2127;      // darkest — app background
+@dark-bg-2: #252a31;      // surface — sidebar, panels
+@dark-bg-3: #2f343c;      // elevated — headers, hover
+@dark-bg-4: #383e47;      // raised — borders, cards
+@dark-border-1: #404854;  // primary borders
+@dark-border-2: #383e47;  // subtle borders
+@dark-text-1: #f5f8fa;    // primary text
+@dark-text-2: #a7b6c2;    // secondary text
+@dark-text-3: #8a9ba8;    // muted text
+@dark-text-4: #5c7080;    // disabled/subtle text
+
+// Root background
+html.dark-theme,
+html.dark-theme body,
+html.dark-theme #root {
+  background: @dark-bg-1;
+  color: @dark-text-1;
+}
+
+.dark-theme {
+  // ── Sidebar collapsed strip ──
+  .sidebar-collapsed {
+    background: @dark-bg-2;
+    border-right-color: @dark-border-1;
+  }
+
+  // ── Sidebar ──
+  .sidebar {
+    background: @dark-bg-2;
+    border-right-color: @dark-border-1;
+
+    .sidebar-section {
+      border-bottom-color: @dark-border-2;
+
+      h4 {
+        color: @dark-text-3;
+      }
+    }
+
+    .sidebar-section-tables {
+      .sidebar-section-header {
+        background: @dark-bg-2;
+      }
+
+      .table-header-actions .bp4-button {
+        color: @dark-text-3;
+      }
+
+      .table-search {
+        background: @dark-bg-2;
+
+        .bp4-input-group .bp4-input {
+          border-color: @dark-border-1;
+          background: @dark-bg-3;
+          color: @dark-text-1;
+        }
+      }
+    }
+
+    .sidebar-section-columns {
+      .column-header-row {
+        background: @dark-bg-2;
+      }
+
+      .column-header-actions .bp4-button {
+        color: @dark-text-3;
+      }
+
+      .column-search {
+        background: @dark-bg-2;
+
+        .bp4-input-group .bp4-input {
+          border-color: @dark-border-1;
+          background: @dark-bg-3;
+          color: @dark-text-1;
+        }
+      }
+
+      h4 {
+        background: @dark-bg-2;
+      }
+    }
+
+    .sidebar-actions {
+      border-top-color: @dark-border-2;
+    }
+  }
+
+  .table-list-item {
+    .row-count {
+      color: @dark-text-3;
+    }
+  }
+
+  .column-item {
+    background: @dark-bg-3;
+    border-color: @dark-border-2;
+
+    &:hover {
+      border-color: @dark-border-1;
+    }
+
+    .column-type {
+      color: @dark-text-3;
+    }
+
+    .column-sort-indicator {
+      .column-sort-idle {
+        color: @dark-text-3;
+      }
+    }
+  }
+
+  // ── Data Grid ──
+  .dg-header {
+    background: @dark-bg-3;
+    border-bottom-color: @dark-border-1;
+  }
+
+  .dg-cell {
+    border-right-color: @dark-border-2;
+  }
+
+  .dg-row-num-cell {
+    color: @dark-text-4;
+  }
+
+  .dg-header-cell {
+    background: @dark-bg-3;
+    border-right-color: @dark-border-1;
+
+    &:hover {
+      background: @dark-bg-4;
+    }
+
+    .sort-indicator {
+      color: @dark-text-3;
+    }
+  }
+
+  .dg-row {
+    border-bottom-color: @dark-border-2;
+
+    &:hover .dg-cell {
+      background: rgba(19, 124, 189, 0.1);
+    }
+
+    &:hover .dg-cell.cell-selected {
+      background: rgba(19, 124, 189, 0.25);
+    }
+  }
+
+  .dg-cell.cell-selected {
+    background: rgba(19, 124, 189, 0.2);
+    outline-color: rgba(19, 124, 189, 0.5);
+  }
+
+  .dg-cell.column-dragging {
+    background: rgba(19, 124, 189, 0.12);
+  }
+
+  .dg-cell.loading-cell {
+    color: @dark-text-4;
+  }
+
+  // ── Status bar ──
+  .status-bar {
+    background: @dark-bg-2;
+    border-top-color: @dark-border-1;
+    color: @dark-text-2;
+  }
+
+  .filter-toggle {
+    border-left-color: @dark-border-1;
+
+    &:hover {
+      background: @dark-bg-3;
+    }
+
+    &.active {
+      background: rgba(19, 124, 189, 0.12);
+    }
+  }
+
+  .filter-toggle-label {
+    color: @dark-text-3;
+  }
+
+  // ── Welcome screen ──
+  .welcome {
+    color: @dark-text-3;
+
+    h2 {
+      color: @dark-text-1;
+    }
+  }
+
+  // ── Filter panel ──
+  .filter-panel {
+    background: @dark-bg-2;
+    border-top-color: @dark-border-1;
+  }
+
+  .filter-panel-resize-grip {
+    background: @dark-text-4;
+  }
+
+  .filter-panel-header {
+    background: @dark-bg-3;
+    border-bottom-color: @dark-border-2;
+  }
+
+  .filter-panel-title {
+    color: @dark-text-3;
+  }
+
+  .filter-panel-tab-separator {
+    background: @dark-border-1;
+  }
+
+  .filter-row {
+    .filter-value-input .bp4-input {
+      border-color: @dark-border-1;
+      background: @dark-bg-3;
+      color: @dark-text-1;
+    }
+  }
+
+  .filter-group.filter-group-nested {
+    background: rgba(19, 124, 189, 0.06);
+  }
+
+  .filter-group-nested[data-depth="1"] {
+    background: rgba(113, 87, 217, 0.06);
+  }
+
+  .filter-group-nested[data-depth="2"] {
+    background: rgba(217, 130, 43, 0.06);
+  }
+
+  .filter-group-nested[data-depth="3"] {
+    background: rgba(15, 153, 96, 0.06);
+  }
+
+  .filter-views-divider-grip {
+    background: @dark-text-4;
+  }
+
+  // ── IN value picker ──
+  .in-value-dropdown {
+    background: @dark-bg-2;
+    border-color: @dark-border-1;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(0, 0, 0, 0.2);
+
+    .bp4-input {
+      border-color: @dark-border-1;
+      background: @dark-bg-3;
+      color: @dark-text-1;
+    }
+  }
+
+  .in-value-dropdown-header {
+    border-bottom-color: @dark-border-2;
+  }
+
+  .in-value-dropdown-separator {
+    background: @dark-border-1;
+  }
+
+  .in-value-dropdown-count {
+    color: @dark-text-3;
+  }
+
+  .in-value-dropdown-item {
+    &:hover {
+      background: @dark-bg-3;
+    }
+  }
+
+  .in-value-dropdown-label {
+    color: @dark-text-1;
+  }
+
+  .in-value-dropdown-empty {
+    color: @dark-text-3;
+  }
+
+  .in-value-dropdown-list {
+    &::-webkit-scrollbar-thumb {
+      background: @dark-text-4;
+    }
+  }
+
+  // ── Column ops panel ──
+  .colops-empty,
+  .colops-preview-empty,
+  .colops-history-empty {
+    color: @dark-text-3;
+  }
+
+  .colops-layout .bp4-input {
+    border-color: @dark-border-1;
+    background: @dark-bg-3;
+    color: @dark-text-1;
+  }
+
+  .colops-field > label,
+  .colops-field-half > label {
+    color: @dark-text-3;
+  }
+
+  .colops-history-panel {
+    border-left-color: @dark-border-2;
+  }
+
+  .colops-steps-title {
+    color: @dark-text-3;
+  }
+
+  .colops-step-item {
+    &:hover {
+      background: @dark-bg-3;
+    }
+  }
+
+  .colops-step-number {
+    background: @dark-bg-4;
+    color: @dark-text-2;
+  }
+
+  .colops-step-desc {
+    color: @dark-text-1;
+  }
+
+  .colops-preview-panel {
+    border-left-color: @dark-border-2;
+  }
+
+  .colops-preview-table {
+    th {
+      color: @dark-text-3;
+      border-bottom-color: @dark-border-2;
+    }
+
+    td {
+      border-bottom-color: @dark-border-2;
+    }
+  }
+
+  .colops-inline-error {
+    color: #ff7373;
+  }
+
+  // ── Row ops panel ──
+  .rowops-empty {
+    color: @dark-text-3;
+  }
+
+  .rowops-col-selector {
+    border-color: @dark-border-1;
+    background: @dark-bg-3;
+
+    .rowops-col-selector-label {
+      color: @dark-text-3;
+    }
+
+    .rowops-col-selector-search .bp4-input-group .bp4-input {
+      border-color: @dark-border-1;
+      background: @dark-bg-4;
+      color: @dark-text-1;
+    }
+
+    .rowops-col-item {
+      &:hover {
+        background: @dark-bg-4;
+      }
+
+      .rowops-col-type {
+        background: rgba(138, 155, 168, 0.15);
+      }
+    }
+  }
+
+  .rowops-steps {
+    border-top-color: @dark-border-2;
+  }
+
+  .rowops-steps-title {
+    color: @dark-text-3;
+  }
+
+  .rowops-step-item {
+    &:hover {
+      background: @dark-bg-3;
+    }
+  }
+
+  .rowops-step-number {
+    background: @dark-bg-4;
+    color: @dark-text-2;
+  }
+
+  .rowops-step-desc {
+    color: @dark-text-1;
+  }
+
+  .rowops-preview-count {
+    color: @dark-text-2;
+  }
+
+  .rowops-inline-error {
+    color: #ff7373;
+  }
+
+  // ── Preview tables (shared pattern) ──
+  .op-preview {
+    border-top-color: @dark-border-2;
+
+    .op-preview-header {
+      color: @dark-text-3;
+    }
+
+    .op-preview-error {
+      background: rgba(255, 0, 0, 0.1);
+      border-color: rgba(255, 0, 0, 0.2);
+      color: #ff7373;
+    }
+
+    .op-preview-table {
+      th {
+        color: @dark-text-3;
+        border-bottom-color: @dark-border-1;
+        background: @dark-bg-3;
+      }
+
+      td {
+        border-bottom-color: @dark-border-2;
+      }
+    }
+  }
+
+  // ── Combine dialog ──
+  .combine-mappings-panel {
+    background: @dark-bg-3;
+
+    .combine-mappings-header h4 {
+      color: @dark-text-3;
+    }
+
+    .combine-mappings-list {
+      &::-webkit-scrollbar-thumb {
+        background: @dark-text-4;
+      }
+    }
+  }
+
+  .combine-mapping-row {
+    background: @dark-bg-2;
+    border-color: @dark-border-1;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+
+    &:hover {
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+      border-color: @dark-border-1;
+    }
+
+    &.active {
+      box-shadow: 0 2px 8px rgba(19, 124, 189, 0.15);
+    }
+
+    .combine-mapping-index {
+      color: @dark-text-3;
+    }
+
+    .combine-field-label {
+      color: @dark-text-3;
+    }
+  }
+
+  .combine-input-tags {
+    background: @dark-bg-3;
+    border-color: @dark-border-1;
+
+    .combine-input-placeholder {
+      color: @dark-text-3;
+    }
+  }
+
+  .combine-columns-panel {
+    background: @dark-bg-2;
+    border-left-color: @dark-border-2;
+
+    > h4 {
+      color: @dark-text-3;
+    }
+
+    .combine-columns-hint {
+      color: @dark-text-3;
+    }
+
+    .combine-column-buttons {
+      &::-webkit-scrollbar-thumb {
+        background: @dark-text-4;
+      }
+    }
+  }
+
+  .combine-empty-state {
+    .bp4-non-ideal-state-visual .bp4-icon {
+      color: @dark-text-3;
+    }
+
+    .bp4-non-ideal-state-text {
+      .bp4-heading {
+        color: @dark-text-1;
+      }
+
+      div {
+        color: @dark-text-2;
+      }
+    }
+  }
+
+  // ── Lists and form panels (shared pattern) ──
+  .combine-col-list,
+  .rename-col-list,
+  .case-condition-list,
+  .aggregate-checkbox-list,
+  .aggregate-func-row,
+  .aggregate-col-grid,
+  .export-format-row,
+  .export-table-grid,
+  .merge-key-pairs,
+  .merge-options-grid,
+  .regex-manager-form {
+    border-color: @dark-border-1;
+    background: @dark-bg-3;
+  }
+
+  .combine-col-list {
+    .combine-col-search {
+      border-bottom-color: @dark-border-2;
+
+      .bp4-input-group .bp4-input {
+        border-color: @dark-border-1;
+        background: @dark-bg-4;
+        color: @dark-text-1;
+      }
+    }
+
+    .combine-col-item {
+      &:hover {
+        background: @dark-bg-4;
+        border-color: @dark-border-2;
+      }
+
+      .column-type {
+        color: @dark-text-3;
+      }
+    }
+  }
+
+  // ── Aggregate dialog ──
+  .aggregate-section .aggregate-section-header {
+    color: @dark-text-3;
+  }
+
+  .aggregate-col-item {
+    &:hover {
+      background: @dark-bg-4;
+      border-color: @dark-border-2;
+    }
+
+    .aggregate-col-type {
+      color: @dark-text-3;
+    }
+  }
+
+  .aggregate-results-wrapper {
+    border-color: @dark-border-1;
+    background: @dark-bg-2;
+  }
+
+  .aggregate-results-table {
+    th {
+      color: @dark-text-3;
+      border-bottom-color: @dark-border-1;
+      background: @dark-bg-3;
+    }
+
+    td {
+      border-bottom-color: @dark-border-2;
+    }
+  }
+
+  .aggregate-results-truncated {
+    color: @dark-text-3;
+    border-top-color: @dark-border-2;
+    background: @dark-bg-3;
+  }
+
+  // ── Date conversion dialog ──
+  .date-conv-detection-table {
+    border-color: @dark-border-1;
+    background: @dark-bg-2;
+
+    table {
+      th {
+        color: @dark-text-3;
+        border-bottom-color: @dark-border-1;
+        background: @dark-bg-3;
+      }
+
+      td {
+        border-bottom-color: @dark-border-2;
+      }
+    }
+  }
+
+  .date-conv-group-cell {
+    color: @dark-text-1;
+  }
+
+  .date-conv-sample-values {
+    color: @dark-text-3;
+  }
+
+  .date-conv-hidden-groups {
+    color: @dark-text-3;
+    border-top-color: @dark-border-2;
+    background: @dark-bg-3;
+  }
+
+  .date-conv-example {
+    color: @dark-text-2;
+
+    code {
+      background: @dark-bg-3;
+      border-color: @dark-border-1;
+    }
+  }
+
+  // ── Pivot ──
+  .pivot-toolbar {
+    background: rgba(15, 153, 96, 0.12);
+    border-bottom-color: rgba(15, 153, 96, 0.3);
+  }
+
+  .pivot-toolbar-exit {
+    color: @dark-text-3;
+  }
+
+  .dg-pivot-group-header {
+    background: @dark-bg-3;
+    border-right-color: @dark-border-1;
+    color: @dark-text-1;
+  }
+
+  .dg-pivot-group-row {
+    background: @dark-bg-3;
+
+    &:hover {
+      background: @dark-bg-4;
+    }
+  }
+
+  .dg-pivot-group-count {
+    color: @dark-text-3;
+  }
+
+  .dg-pivot-expand-icon {
+    color: @dark-text-3;
+  }
+
+  .dg-pivot-agg-value {
+    color: @dark-text-1;
+  }
+
+  .dg-pivot-data-group-cell {
+    border-right-color: @dark-border-2;
+  }
+
+  .dg-pivot-grand-total-row {
+    background: @dark-bg-4;
+    border-top-color: @dark-text-2;
+  }
+
+  .dg-pivot-data-row {
+    background: @dark-bg-1;
+  }
+
+  .pivot-breadcrumb-item {
+    background: rgba(13, 128, 80, 0.15);
+  }
+
+  .pivot-distinct-preview {
+    border-color: @dark-border-1;
+    background: @dark-bg-3;
+
+    .pivot-distinct-count {
+      color: @dark-text-1;
+    }
+
+    .pivot-distinct-sample {
+      color: @dark-text-2;
+    }
+  }
+
+  // ── Regex pattern picker ──
+  .regex-picker-popover {
+    background: @dark-bg-2;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  }
+
+  .regex-picker-search {
+    border-bottom-color: @dark-border-2;
+
+    .bp4-input-group .bp4-input {
+      border-color: @dark-border-1;
+      background: @dark-bg-3;
+      color: @dark-text-1;
+    }
+  }
+
+  .regex-picker-loading,
+  .regex-picker-empty {
+    color: @dark-text-3;
+  }
+
+  .regex-picker-category {
+    &:not(:first-child) {
+      border-top-color: @dark-border-2;
+    }
+  }
+
+  .regex-picker-category-label {
+    color: @dark-text-3;
+  }
+
+  .regex-picker-item {
+    &:hover {
+      background: rgba(19, 124, 189, 0.1);
+    }
+  }
+
+  .regex-picker-item-title {
+    color: @dark-text-1;
+  }
+
+  .regex-picker-item-pattern {
+    color: @dark-text-3;
+  }
+
+  .regex-picker-footer {
+    border-top-color: @dark-border-2;
+  }
+
+  // ── Regex pattern manager ──
+  .regex-manager-section-header {
+    color: @dark-text-3;
+  }
+
+  .regex-manager-table-wrapper {
+    border-color: @dark-border-1;
+    background: @dark-bg-2;
+  }
+
+  .regex-manager-table {
+    th {
+      color: @dark-text-3;
+      border-bottom-color: @dark-border-1;
+      background: @dark-bg-3;
+    }
+
+    td {
+      border-bottom-color: @dark-border-2;
+    }
+
+    code {
+      color: @dark-text-2;
+      background: @dark-bg-3;
+    }
+  }
+
+  .regex-manager-empty {
+    color: @dark-text-3;
+    border-color: @dark-border-1;
+  }
+
+  .regex-manager-form-header {
+    color: @dark-text-3;
+  }
+
+  // ── Searchable column select ──
+  .col-select-trigger {
+    border-color: @dark-border-1;
+    background: @dark-bg-3;
+    color: @dark-text-1;
+
+    &:hover {
+      border-color: @dark-text-4;
+    }
+  }
+
+  .col-select-trigger-placeholder {
+    color: @dark-text-3;
+  }
+
+  .col-select-trigger-caret {
+    color: @dark-text-3;
+  }
+
+  .col-select-popover {
+    background: @dark-bg-2;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  }
+
+  .col-select-search {
+    border-bottom-color: @dark-border-2;
+
+    .bp4-input-group .bp4-input {
+      border-color: @dark-border-1;
+      background: @dark-bg-3;
+      color: @dark-text-1;
+    }
+  }
+
+  .col-select-list {
+    &::-webkit-scrollbar-thumb {
+      background: @dark-text-4;
+    }
+  }
+
+  .col-select-empty {
+    color: @dark-text-3;
+  }
+
+  .col-select-item-name {
+    color: @dark-text-1;
+  }
+
+  .col-select-item-type {
+    color: @dark-text-3;
+    background: rgba(138, 155, 168, 0.15);
+  }
+
+  // ── Saved views ──
+  .views-empty {
+    color: @dark-text-3;
+  }
+
+  .views-name-input {
+    .bp4-input-group .bp4-input,
+    .bp4-input {
+      border-color: @dark-border-1;
+      background: @dark-bg-3;
+      color: @dark-text-1;
+    }
+  }
+
+  .views-steps {
+    border-top-color: @dark-border-2;
+  }
+
+  .views-steps-title {
+    color: @dark-text-3;
+  }
+
+  .views-step-item {
+    &:hover {
+      background: @dark-bg-3;
+    }
+  }
+
+  .views-step-number {
+    background: @dark-bg-4;
+    color: @dark-text-2;
+  }
+
+  .views-step-desc {
+    color: @dark-text-1;
+  }
+
+  .views-step-origin {
+    color: @dark-text-3;
+    background: rgba(138, 155, 168, 0.15);
+  }
+
+  .views-inline-detail {
+    color: @dark-text-2;
+    background: rgba(19, 124, 189, 0.06);
+  }
+
+  .views-inline-detail-label {
+    color: @dark-text-3;
+  }
+
+  .views-inline-detail-none {
+    color: @dark-text-3;
+  }
+
+  // ── Global history dialog ──
+  .ghist-table-list {
+    border-right-color: @dark-border-1;
+  }
+
+  .ghist-table-item {
+    &:hover {
+      background-color: rgba(19, 124, 189, 0.1);
+    }
+  }
+
+  .ghist-empty-tables,
+  .ghist-empty-state {
+    color: @dark-text-2;
+  }
+
+  .ghist-entry-step {
+    background: @dark-bg-4;
+    color: @dark-text-2;
+  }
+
+  .ghist-entry-desc {
+    color: @dark-text-1;
+  }
+
+  .ghist-entry-meta,
+  .ghist-entry-time {
+    color: @dark-text-3;
+  }
+
+  .ghist-replay-header {
+    border-bottom-color: @dark-border-2;
+  }
+
+  .ghist-replay-label {
+    color: @dark-text-2;
+  }
+
+  .ghist-progress-bar-area {
+    border-top-color: @dark-border-2;
+  }
+
+  .ghist-progress-text {
+    color: @dark-text-2;
+  }
+
+  .ghist-replay-status {
+    color: @dark-text-2;
+    border-top-color: @dark-border-2;
+  }
+
+  // ── Merge dialog ──
+  .merge-key-row .merge-key-arrow {
+    color: @dark-text-3;
+  }
+
+  .merge-option-label {
+    color: @dark-text-3;
+  }
+
+  .merge-rename-row {
+    .merge-rename-original {
+      color: @dark-text-1;
+    }
+
+    .merge-rename-arrow {
+      color: @dark-text-3;
+    }
+  }
+
+  // ── Rename columns ──
+  .rename-col-list .rename-col-row .rename-arrow {
+    color: @dark-text-3;
+  }
+
+  // ── Case conditions ──
+  .case-condition-row {
+    .case-condition-label,
+    .case-condition-then {
+      color: @dark-text-3;
+    }
+  }
+
+  // ── General input overrides for dark mode ──
+  // (Catch-all for BlueprintJS inputs not specifically targeted above)
+  .bp4-input {
+    background: @dark-bg-3;
+    color: @dark-text-1;
+  }
+
+  .bp4-html-select select {
+    background: @dark-bg-3;
+    color: @dark-text-1;
+  }
+
+  // ── Scrollbar styling ──
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: @dark-text-4;
+    border-radius: 4px;
+
+    &:hover {
+      background: @dark-text-3;
+    }
+  }
+}
+

@@ -10,6 +10,9 @@ import * as XLSX from "xlsx";
 // Per-window DuckDB instances, keyed by webContents.id
 const dbMap = new Map<number, Database>();
 
+// Dark mode state (synced from renderer)
+let darkModeChecked = false;
+
 // ── "Open With" file queue ──
 // Files passed via OS "Open With" or command-line args before the window is ready
 const pendingOpenFiles: string[] = [];
@@ -159,6 +162,18 @@ function buildMenu(): void {
     {
       label: "View",
       submenu: [
+        {
+          label: "Dark Mode",
+          type: "checkbox",
+          checked: darkModeChecked,
+          accelerator: "CmdOrCtrl+Shift+D",
+          click: (menuItem) => {
+            darkModeChecked = menuItem.checked;
+            const win = BrowserWindow.getFocusedWindow();
+            if (win) win.webContents.send("set-dark-mode", menuItem.checked);
+          },
+        },
+        { type: "separator" },
         { role: "reload" },
         { role: "forceReload" },
         { role: "toggleDevTools" },
@@ -620,6 +635,13 @@ ipcMain.handle("patterns:import", async (event) => {
   } catch (err) {
     return { error: (err as Error).message, imported: 0 };
   }
+});
+
+// ── Theme sync ──
+// Renderer sends its saved dark mode state on load so the menu checkbox stays in sync
+ipcMain.on("theme:sync", (_event, isDark: boolean) => {
+  darkModeChecked = isDark;
+  buildMenu();
 });
 
 // ── "Open With" support ──

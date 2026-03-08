@@ -707,7 +707,7 @@ export function DataGrid({
                   onDrop={handleHeaderDrop}
                   onDragEnd={handleHeaderDragEnd}
                 >
-                  <span className="dg-header-text">{col}</span>
+                  <span className="dg-header-text" title={col}>{col}</span>
                   {sortInfo && (
                     <span className="sort-indicator">
                       {sortColumns.length > 1 && (

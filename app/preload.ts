@@ -35,6 +35,8 @@ export interface DbApi {
   onOpenFiles: (callback: (filePaths: string[]) => void) => void;
   onAddFiles: (callback: (filePaths: string[]) => void) => void;
   onExportCSV: (callback: () => void) => void;
+  onSetDarkMode: (callback: (isDark: boolean) => void) => void;
+  syncTheme: (isDark: boolean) => void;
 }
 
 contextBridge.exposeInMainWorld("api", {
@@ -87,5 +89,13 @@ contextBridge.exposeInMainWorld("api", {
   },
   onExportCSV: (callback: () => void) => {
     ipcRenderer.on("export-csv", () => callback());
+  },
+
+  // Theme
+  onSetDarkMode: (callback: (isDark: boolean) => void) => {
+    ipcRenderer.on("set-dark-mode", (_event, isDark) => callback(isDark));
+  },
+  syncTheme: (isDark: boolean) => {
+    ipcRenderer.send("theme:sync", isDark);
   },
 } satisfies DbApi);
