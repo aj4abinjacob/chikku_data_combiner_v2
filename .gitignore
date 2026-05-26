@@ -1,7 +1,12 @@
 node_modules/
 dist/
+dist-tauri/
 build/
 *.tsbuildinfo
 .DS_Store
 *.log
 *.csv
+
+# Tauri / Rust build artifacts
+src-tauri/target/
+src-tauri/gen/

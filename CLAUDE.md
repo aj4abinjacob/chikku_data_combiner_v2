@@ -21,7 +21,39 @@ npm run start        # Launch Electron (requires prior build)
 npm run dist         # Package for distribution (electron-builder)
 npm run dist:mac     # Package for macOS only
 npm run clean        # Remove dist/
+
+# Tauri (experimental Rust backend, see src-tauri/)
+npm run tauri:dev    # Launch Tauri shell with webpack-dev-server
+npm run tauri:build  # Package Tauri app
 ```
+
+## Tauri Backend (parallel to Electron)
+
+`src-tauri/` hosts a Rust/Tauri build that runs the existing React renderer on top of a Rust process. Electron build is untouched; both coexist via different npm scripts.
+
+| Layer | File |
+|-------|------|
+| Cargo manifest | `src-tauri/Cargo.toml` |
+| Tauri config | `src-tauri/tauri.conf.json` |
+| Capabilities | `src-tauri/capabilities/default.json` |
+| App entry | `src-tauri/src/main.rs` → `lib.rs::run()` |
+| DuckDB session map | `src-tauri/src/db.rs` (per-window, keyed by Tauri window label) |
+| Tauri commands | `src-tauri/src/commands.rs` (load_file, query, exec, describe, tables, export_file, export_excel_multi, get_excel_sheets, free_memory, pattern CRUD, JSON read/write, file_exists, open_new_window, close_db, take_pending_files) |
+| Excel | `src-tauri/src/excel.rs` (calamine reader → temp CSV; rust_xlsxwriter writer) |
+| Regex patterns | `src-tauri/src/patterns.rs` (GitHub fetch w/ bundled fallback via `include_str!`; user patterns in `dirs::data_dir()/chikku-parser/`) |
+| Multi-window | `src-tauri/src/window_mgr.rs` (per-window pending-files queue; spawn new window per opened file) |
+| Frontend adapter | `src/tauri-api.ts` (installs `window.api` shape from Electron preload using Tauri invoke + event listen) |
+| HTML shell | `html/index.tauri.html` (no CSP meta — CSP lives in `tauri.conf.json`) |
+
+Renderer detection: `src/renderer.tsx` calls `installIfTauri()` before mounting React. Detection uses `window.__TAURI_INTERNALS__` / `window.__TAURI__`.
+
+Multi-window model:
+- One Rust process, multiple Tauri webview windows.
+- Each window owns an in-memory DuckDB session, closed on `WindowEvent::Destroyed`.
+- File-open events (`RunEvent::Opened` on macOS, `tauri-plugin-single-instance` argv callback on Linux/Windows) spawn a new app window and queue the paths via `PendingFiles`.
+- Renderer drains the queue on mount by calling `take_pending_files`.
+
+Webpack: `tauriRendererConfig` (target=web, output=`dist-tauri/`) selected via `webpack --env tauri`. Tauri dev runs webpack-dev-server on port 5181.
 
 ## Architecture
 

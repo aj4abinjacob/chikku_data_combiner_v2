@@ -98,7 +98,29 @@ const rendererConfig = (env) => ({
   },
 });
 
+// Tauri renderer-only bundle: target web, output to dist-tauri/
+const tauriRendererConfig = (env) => ({
+  ...config(env),
+  target: "web",
+  entry: {
+    renderer: "./src/renderer.tsx",
+  },
+  output: {
+    path: path.resolve(__dirname, "dist-tauri"),
+    filename: "[name].bundle.js",
+  },
+  devServer: {
+    static: path.resolve(__dirname, "dist-tauri"),
+    port: 5181,
+    hot: false,
+    liveReload: true,
+  },
+});
+
 module.exports = function (env, argv) {
   const mode = argv?.mode || "development";
+  if (env && env.tauri) {
+    return [tauriRendererConfig(mode)];
+  }
   return [mainConfig(mode), preloadConfig(mode), rendererConfig(mode)];
 };

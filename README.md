@@ -60,6 +60,45 @@ This builds the app in development mode and launches Electron.
 | `npm run dist:win` | Package for Windows |
 | `npm run dist:linux` | Package for Linux |
 
+## Tauri (experimental Rust backend)
+
+An alternative Tauri + Rust backend is available alongside the Electron build. It runs the same React UI on top of a Rust process, with per-window DuckDB sessions and `calamine` / `rust_xlsxwriter` for Excel.
+
+### One-time setup
+
+1. Install the Rust toolchain via [rustup](https://rustup.rs):
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   ```
+2. Install the JS deps that include `@tauri-apps/cli`:
+   ```bash
+   npm install
+   ```
+3. macOS: install Xcode Command Line Tools (`xcode-select --install`).
+
+### Run
+
+```bash
+npm run tauri:dev
+```
+
+This starts the webpack dev server for the renderer (on port 5181), then launches the Tauri shell.
+
+### Package
+
+```bash
+npm run tauri:build
+```
+
+### Layout
+
+- `src-tauri/` — Rust crate (Cargo workspace root for the Tauri app)
+- `src/tauri-api.ts` — Frontend adapter exposing `window.api` backed by Tauri commands
+- `html/index.tauri.html` — HTML shell used by the Tauri renderer build (no CSP meta — CSP comes from `tauri.conf.json`)
+- `dist-tauri/` — Renderer output consumed by Tauri (ignored by git)
+
+Each Tauri window owns its own in-memory DuckDB session. Files opened via the OS while the app is already running route into the running process and spawn new app windows rather than starting a fresh process.
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |

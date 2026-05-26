@@ -1,0 +1,65 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Chikku Parser",
+  "version": "0.3.8",
+  "identifier": "com.abinjacob.chikku-parser",
+  "build": {
+    "beforeDevCommand": "npm run tauri:renderer:watch",
+    "devUrl": "http://localhost:5181",
+    "beforeBuildCommand": "npm run tauri:renderer:build",
+    "frontendDist": "../dist-tauri"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Chikku Parser",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: asset: https://asset.localhost; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.icns"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["csv"],
+        "name": "Comma Separated Values",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["tsv"],
+        "name": "Tab Separated Values",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["json", "jsonl", "ndjson"],
+        "name": "JSON File",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["parquet"],
+        "name": "Parquet File",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["xlsx", "xls"],
+        "name": "Excel Workbook",
+        "role": "Viewer"
+      }
+    ],
+    "category": "DeveloperTool",
+    "publisher": "Abin Jacob"
+  }
+}

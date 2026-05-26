@@ -5,6 +5,7 @@
   "main": "dist/main.bundle.js",
   "scripts": {
     "clean": "rimraf dist",
+    "clean:tauri": "rimraf dist-tauri",
     "build:dir": "mkdirp dist",
     "build:html": "recursive-copy -w html dist",
     "build:preload": "recursive-copy -w app/preload.js dist/preload.js",
@@ -20,7 +21,12 @@
     "dist": "electron-builder --publish=never",
     "dist:mac": "electron-builder --mac --publish=never",
     "dist:win": "electron-builder --win --publish=never",
-    "dist:linux": "electron-builder --linux --publish=never"
+    "dist:linux": "electron-builder --linux --publish=never",
+    "tauri:assets": "mkdirp dist-tauri && recursive-copy -w html/index.tauri.html dist-tauri/index.html && recursive-copy -w html/icon.svg dist-tauri/icon.svg",
+    "tauri:renderer:build": "npm run tauri:assets && webpack --env tauri --mode production",
+    "tauri:renderer:watch": "npm run tauri:assets && webpack serve --env tauri --mode development",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "keywords": [
     "csv",
@@ -37,6 +43,10 @@
     "@blueprintjs/icons": "^4.16.0",
     "@blueprintjs/popover2": "^1.14.1",
     "@tanstack/react-virtual": "^3.13.19",
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@tauri-apps/plugin-fs": "^2.0.0",
+    "@tauri-apps/plugin-shell": "^2.0.0",
     "chrono-node": "^2.9.0",
     "duckdb": "^1.1.0",
     "electron-log": "^4.4.8",
@@ -46,6 +56,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
     "@types/lodash": "^4.17.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
@@ -67,6 +78,7 @@
     "typescript": "^5.4.0",
     "webpack": "^5.90.0",
     "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^5.0.4",
     "webpack-node-externals": "^3.0.0"
   },
   "build": {
