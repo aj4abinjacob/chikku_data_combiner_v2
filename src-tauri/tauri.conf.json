@@ -10,17 +10,7 @@
     "frontendDist": "../dist-tauri"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Chikku Parser",
-        "width": 1400,
-        "height": 900,
-        "minWidth": 800,
-        "minHeight": 600,
-        "resizable": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: asset: https://asset.localhost; connect-src 'self' ipc: http://ipc.localhost"
     }
