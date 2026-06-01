@@ -25,6 +25,9 @@ pub enum AppError {
 
     #[error(transparent)]
     CalamineXlsx(#[from] calamine::XlsxError),
+
+    #[error(transparent)]
+    Tauri(#[from] tauri::Error),
 }
 
 impl AppError {

@@ -2,11 +2,13 @@ mod commands;
 mod db;
 mod error;
 mod excel;
+mod menu;
 mod patterns;
 mod window_mgr;
 
 use commands::*;
 use db::DbState;
+use menu::MenuState;
 use patterns::PatternState;
 use tauri::{Manager, RunEvent};
 use window_mgr::{filter_supported, spawn_window, take_pending_files, PendingFiles};
@@ -44,6 +46,7 @@ pub fn run() {
         .manage(DbState::default())
         .manage(PatternState::default())
         .manage(PendingFiles::default())
+        .manage(MenuState::default())
         .invoke_handler(tauri::generate_handler![
             load_file,
             query,
@@ -67,8 +70,15 @@ pub fn run() {
             take_pending_files,
         ])
         .setup(move |app| {
+            let handle = app.handle().clone();
+            let menu = menu::build_menu(&handle)?;
+            app.set_menu(menu)?;
+            app.on_menu_event(|app, ev| {
+                menu::handle_menu_event(app, ev.id().0.as_str());
+            });
+
             let initial = cli_files.clone();
-            let initial_label = spawn_window(&app.handle(), Some(initial))?;
+            let initial_label = spawn_window(&handle, Some(initial))?;
             log::info!("initial window spawned: {}", initial_label);
             Ok(())
         })
