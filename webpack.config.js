@@ -1,16 +1,21 @@
 const webpack = require("webpack");
 const path = require("path");
-const nodeExternals = require("webpack-node-externals");
 
-function config(nodeEnv) {
+module.exports = function (_env, argv) {
+  const mode = argv?.mode || "development";
+
   return {
     devtool: "source-map",
-    mode: nodeEnv,
+    mode,
+    target: "web",
+    entry: {
+      renderer: "./src/renderer.tsx",
+    },
     resolve: {
       extensions: [".ts", ".tsx", ".js"],
     },
     output: {
-      path: path.resolve(__dirname, "dist"),
+      path: path.resolve(__dirname, "dist-tauri"),
       filename: "[name].bundle.js",
     },
     module: {
@@ -53,74 +58,14 @@ function config(nodeEnv) {
     },
     plugins: [
       new webpack.DefinePlugin({
-        "process.env.NODE_ENV": JSON.stringify(nodeEnv),
+        "process.env.NODE_ENV": JSON.stringify(mode),
       }),
     ],
+    devServer: {
+      static: path.resolve(__dirname, "dist-tauri"),
+      port: 5181,
+      hot: false,
+      liveReload: true,
+    },
   };
-}
-
-// Electron main process bundle
-const mainConfig = (env) => ({
-  ...config(env),
-  target: "electron-main",
-  entry: {
-    main: "./app/main.ts",
-  },
-  externalsPresets: { node: true },
-  externals: [nodeExternals()],
-  node: {
-    __dirname: false,
-    __filename: false,
-  },
-});
-
-// Electron preload script bundle
-const preloadConfig = (env) => ({
-  ...config(env),
-  target: "electron-preload",
-  entry: {
-    preload: "./app/preload.ts",
-  },
-  externalsPresets: { node: true },
-  externals: [nodeExternals()],
-  node: {
-    __dirname: false,
-    __filename: false,
-  },
-});
-
-// Electron renderer process bundle
-const rendererConfig = (env) => ({
-  ...config(env),
-  target: "electron-renderer",
-  entry: {
-    renderer: "./src/renderer.tsx",
-  },
-});
-
-// Tauri renderer-only bundle: target web, output to dist-tauri/
-const tauriRendererConfig = (env) => ({
-  ...config(env),
-  target: "web",
-  entry: {
-    renderer: "./src/renderer.tsx",
-  },
-  output: {
-    path: path.resolve(__dirname, "dist-tauri"),
-    filename: "[name].bundle.js",
-  },
-  devServer: {
-    static: path.resolve(__dirname, "dist-tauri"),
-    port: 5181,
-    hot: false,
-    liveReload: true,
-  },
-});
-
-module.exports = function (env, argv) {
-  const mode = argv?.mode || "development";
-  if (env && env.tauri) {
-    return [tauriRendererConfig(mode)];
-  }
-  return [mainConfig(mode), preloadConfig(mode), rendererConfig(mode)];
 };

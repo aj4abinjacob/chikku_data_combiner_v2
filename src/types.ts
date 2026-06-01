@@ -1,9 +1,37 @@
-import type { DbApi } from "../app/preload";
-
 declare global {
   interface Window {
     api: DbApi;
   }
+}
+
+export interface DbApi {
+  loadCSV: (filePath: string, tableName: string) => Promise<any>;
+  loadFile: (filePath: string, tableName: string, options?: ImportOptions) => Promise<any>;
+  getExcelSheets: (filePath: string) => Promise<SheetInfo[]>;
+  query: (sql: string) => Promise<any[]>;
+  exec: (sql: string) => Promise<boolean>;
+  describe: (tableName: string) => Promise<any[]>;
+  tables: () => Promise<any[]>;
+  exportCSV: (sql: string, filePath: string) => Promise<boolean>;
+  exportFile: (sql: string, filePath: string, format: string) => Promise<boolean>;
+  exportExcelMulti: (sheets: { sheetName: string; sql: string }[], filePath: string) => Promise<boolean>;
+  saveDialog: () => Promise<string | null>;
+  saveFileDialog: (format: string) => Promise<string | null>;
+  getFreeMemory: () => Promise<number>;
+  getRegexPatterns: () => Promise<RegexPattern[]>;
+  saveUserPattern: (pattern: RegexPattern) => Promise<boolean>;
+  deleteUserPattern: (patternId: string) => Promise<boolean>;
+  exportPatterns: () => Promise<boolean>;
+  importPatterns: () => Promise<{ imported: number; error?: string }>;
+  openExternal: (url: string) => Promise<void>;
+  writeJsonFile: (filePath: string, data: any) => Promise<boolean>;
+  readJsonFile: () => Promise<any | null>;
+  fileExists: (filePath: string) => Promise<boolean>;
+  onOpenFiles: (callback: (filePaths: string[]) => void) => void;
+  onAddFiles: (callback: (filePaths: string[]) => void) => void;
+  onExportCSV: (callback: () => void) => void;
+  onSetDarkMode: (callback: (isDark: boolean) => void) => void;
+  syncTheme: (isDark: boolean) => void;
 }
 
 export interface ColumnInfo {

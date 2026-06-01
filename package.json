@@ -2,27 +2,11 @@
   "name": "chikku-parser",
   "version": "0.3.8",
   "description": "Desktop app for viewing, combining, and transforming CSV data",
-  "main": "dist/main.bundle.js",
   "scripts": {
-    "clean": "rimraf dist",
-    "clean:tauri": "rimraf dist-tauri",
-    "build:dir": "mkdirp dist",
-    "build:html": "recursive-copy -w html dist",
-    "build:preload": "recursive-copy -w app/preload.js dist/preload.js",
-    "build:regex": "recursive-copy -w app/regex-patterns.json dist/regex-patterns.json",
-    "build-assets": "npm run build:dir && npm run build:html && npm run build:regex",
-    "build-dev": "npm run build-assets && webpack --mode development",
-    "build-prod": "npm run build-assets && webpack --env prod --mode production",
-    "build": "npm run build-prod",
-    "watch": "npm run build-assets && webpack --mode development --watch",
-    "start": "electron ./dist/main.bundle.js",
-    "dev": "npm run build-dev && npm run start",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder --publish=never",
-    "dist:mac": "electron-builder --mac --publish=never",
-    "dist:win": "electron-builder --win --publish=never",
-    "dist:linux": "electron-builder --linux --publish=never",
-    "tauri:assets": "mkdirp dist-tauri && recursive-copy -w html/index.tauri.html dist-tauri/index.html && recursive-copy -w html/icon.svg dist-tauri/icon.svg",
+    "clean": "rimraf dist-tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri:assets": "mkdirp dist-tauri && recursive-copy -w html/index.html dist-tauri/index.html && recursive-copy -w html/icon.svg dist-tauri/icon.svg",
     "tauri:renderer:build": "npm run tauri:assets && webpack --env tauri --mode production",
     "tauri:renderer:watch": "npm run tauri:assets && webpack serve --env tauri --mode development",
     "tauri:dev": "tauri dev",
@@ -33,7 +17,7 @@
     "data",
     "combiner",
     "viewer",
-    "electron",
+    "tauri",
     "duckdb"
   ],
   "author": "Abin Jacob <aj4abinjacob@gmail.com>",
@@ -48,12 +32,9 @@
     "@tauri-apps/plugin-fs": "^2.0.0",
     "@tauri-apps/plugin-shell": "^2.0.0",
     "chrono-node": "^2.9.0",
-    "duckdb": "^1.1.0",
-    "electron-log": "^4.4.8",
     "lodash": "^4.17.21",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "xlsx": "^0.18.5"
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
@@ -61,8 +42,6 @@
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "css-loader": "^6.10.0",
-    "electron": "^31.0.1",
-    "electron-builder": "^24.13.3",
     "file-loader": "^6.2.0",
     "less": "^4.2.0",
     "less-loader": "^12.2.0",
@@ -78,81 +57,6 @@
     "typescript": "^5.4.0",
     "webpack": "^5.90.0",
     "webpack-cli": "^5.1.4",
-    "webpack-dev-server": "^5.0.4",
-    "webpack-node-externals": "^3.0.0"
-  },
-  "build": {
-    "appId": "com.abinjacob.chikku-parser",
-    "productName": "Chikku Parser",
-    "afterPack": "./scripts/afterPack.js",
-    "directories": {
-      "buildResources": "res"
-    },
-    "files": [
-      "dist/main.bundle.js",
-      "dist/preload.bundle.js",
-      "dist/renderer.bundle.js",
-      "dist/index.html",
-      "dist/favicon.svg",
-      "dist/**/*.{woff,woff2,ttf,eot}"
-    ],
-    "fileAssociations": [
-      {
-        "ext": "csv",
-        "name": "Comma Separated Values",
-        "role": "Viewer"
-      },
-      {
-        "ext": "tsv",
-        "name": "Tab Separated Values",
-        "role": "Viewer"
-      },
-      {
-        "ext": "json",
-        "name": "JSON File",
-        "role": "Viewer"
-      },
-      {
-        "ext": "parquet",
-        "name": "Parquet File",
-        "role": "Viewer"
-      },
-      {
-        "ext": "xlsx",
-        "name": "Excel Workbook",
-        "role": "Viewer"
-      },
-      {
-        "ext": "xls",
-        "name": "Excel Spreadsheet",
-        "role": "Viewer"
-      }
-    ],
-    "publish": {
-      "provider": "github"
-    },
-    "mac": {
-      "identity": null,
-      "category": "public.app-category.developer-tools",
-      "target": [
-        "dmg",
-        "zip"
-      ]
-    },
-    "linux": {
-      "target": [
-        "deb",
-        "rpm",
-        "tar.bz2"
-      ]
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ]
-    },
-    "nsis": {
-      "oneClick": false
-    }
+    "webpack-dev-server": "^5.0.4"
   }
 }

@@ -18,9 +18,9 @@ pub struct RegexPattern {
 }
 
 const BUILTIN_URL: &str =
-    "https://raw.githubusercontent.com/aj4abinjacob/chikku_parser/master/app/regex-patterns.json";
+    "https://raw.githubusercontent.com/aj4abinjacob/chikku_parser/master/src-tauri/assets/regex-patterns.json";
 
-const BUNDLED_FALLBACK: &str = include_str!("../../app/regex-patterns.json");
+const BUNDLED_FALLBACK: &str = include_str!("../assets/regex-patterns.json");
 
 #[derive(Default)]
 pub struct PatternState {

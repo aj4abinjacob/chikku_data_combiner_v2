@@ -1,15 +1,15 @@
 /**
- * Tauri adapter that exposes the same `window.api` shape the Electron preload provides.
+ * Tauri adapter that exposes the `window.api` surface used by the React app.
  *
- * The React app talks to `window.api` (typed as DbApi). In Tauri builds, the preload script
- * does not exist — this module installs an equivalent surface backed by Tauri commands and
- * event listeners.
+ * The React app talks to `window.api` (typed as DbApi). This module installs that surface
+ * backed by Tauri commands and event listeners.
  */
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
+import type { DbApi } from "./types";
 
 interface RegexPattern {
   id: string;
@@ -36,7 +36,7 @@ const filterMap: Record<string, { name: string; extensions: string[] }[]> = {
 };
 
 function installTauriApi() {
-  const api = {
+  const api: DbApi = {
     loadCSV: (filePath: string, tableName: string) =>
       invoke("load_file", { filePath, tableName, options: null }),
 

@@ -8,42 +8,37 @@
 
 ## Project
 
-Chikku Parser — an Electron desktop app for viewing, combining, and transforming data files. Supports CSV, TSV, JSON, Parquet, and Excel (.xlsx/.xls) formats.
+Chikku Parser is a Tauri desktop app for viewing, combining, and transforming data files. Supports CSV, TSV, JSON, Parquet, and Excel (.xlsx/.xls) formats.
 
 ## Commands
 
 ```bash
-npm run dev          # Build (dev) + launch Electron
-npm run build-dev    # Build in development mode only
-npm run build-prod   # Build in production mode
-npm run watch        # Webpack watch mode (dev)
-npm run start        # Launch Electron (requires prior build)
-npm run dist         # Package for distribution (electron-builder)
-npm run dist:mac     # Package for macOS only
-npm run clean        # Remove dist/
-
-# Tauri (experimental Rust backend, see src-tauri/)
-npm run tauri:dev    # Launch Tauri shell with webpack-dev-server
-npm run tauri:build  # Package Tauri app
+npm run dev                   # Launch Tauri shell with webpack-dev-server
+npm run build                 # Package Tauri app
+npm run clean                 # Remove dist-tauri/
+npm run tauri:renderer:build  # Build renderer only
+npm run tauri:renderer:watch  # Run renderer dev server
+npm run tauri:dev             # Launch Tauri shell with webpack-dev-server
+npm run tauri:build           # Package Tauri app
 ```
 
-## Tauri Backend (parallel to Electron)
+## Tauri Backend
 
-`src-tauri/` hosts a Rust/Tauri build that runs the existing React renderer on top of a Rust process. Electron build is untouched; both coexist via different npm scripts.
+`src-tauri/` hosts the Rust/Tauri app and runs the React renderer on top of a Rust process.
 
 | Layer | File |
 |-------|------|
 | Cargo manifest | `src-tauri/Cargo.toml` |
 | Tauri config | `src-tauri/tauri.conf.json` |
 | Capabilities | `src-tauri/capabilities/default.json` |
-| App entry | `src-tauri/src/main.rs` → `lib.rs::run()` |
+| App entry | `src-tauri/src/main.rs` -> `lib.rs::run()` |
 | DuckDB session map | `src-tauri/src/db.rs` (per-window, keyed by Tauri window label) |
 | Tauri commands | `src-tauri/src/commands.rs` (load_file, query, exec, describe, tables, export_file, export_excel_multi, get_excel_sheets, free_memory, pattern CRUD, JSON read/write, file_exists, open_new_window, close_db, take_pending_files) |
-| Excel | `src-tauri/src/excel.rs` (calamine reader → temp CSV; rust_xlsxwriter writer) |
-| Regex patterns | `src-tauri/src/patterns.rs` (GitHub fetch w/ bundled fallback via `include_str!`; user patterns in `dirs::data_dir()/chikku-parser/`) |
+| Excel | `src-tauri/src/excel.rs` (calamine reader -> temp CSV; rust_xlsxwriter writer) |
+| Regex patterns | `src-tauri/src/patterns.rs` (GitHub fetch with bundled fallback from `src-tauri/assets/regex-patterns.json`; user patterns in `dirs::data_dir()/chikku-parser/`) |
 | Multi-window | `src-tauri/src/window_mgr.rs` (per-window pending-files queue; spawn new window per opened file) |
-| Frontend adapter | `src/tauri-api.ts` (installs `window.api` shape from Electron preload using Tauri invoke + event listen) |
-| HTML shell | `html/index.tauri.html` (no CSP meta — CSP lives in `tauri.conf.json`) |
+| Frontend adapter | `src/tauri-api.ts` (installs `window.api` using Tauri invoke + event listen) |
+| HTML shell | `html/index.html` |
 
 Renderer detection: `src/renderer.tsx` calls `installIfTauri()` before mounting React. Detection uses `window.__TAURI_INTERNALS__` / `window.__TAURI__`.
 
@@ -53,130 +48,60 @@ Multi-window model:
 - File-open events (`RunEvent::Opened` on macOS, `tauri-plugin-single-instance` argv callback on Linux/Windows) spawn a new app window and queue the paths via `PendingFiles`.
 - Renderer drains the queue on mount by calling `take_pending_files`.
 
-Webpack: `tauriRendererConfig` (target=web, output=`dist-tauri/`) selected via `webpack --env tauri`. Tauri dev runs webpack-dev-server on port 5181.
+Webpack builds a web-target renderer to `dist-tauri/`. Tauri dev runs webpack-dev-server on port 5181.
 
 ## Architecture
 
-**Single-package Electron app** with three webpack bundles (`webpack.config.js`):
-
-| Bundle | Entry | Output | Target |
-|--------|-------|--------|--------|
-| Main | `app/main.ts` | `dist/main.bundle.js` | `electron-main` |
-| Preload | `app/preload.ts` | `dist/preload.bundle.js` | `electron-preload` |
-| Renderer | `src/renderer.tsx` | `dist/renderer.bundle.js` | `electron-renderer` |
-
-### Main Process (`app/main.ts`)
-- Per-window DuckDB instances (`dbMap: Map<webContentsId, Database>`, in-memory `:memory:`)
-- IPC handlers resolve DB via `event.sender.id`; promisified helpers `runPromise`/`allPromise`
-- Excel import: sheet → temp CSV via SheetJS → `read_csv_auto()` → cleanup
-- "Open With" support: `app.on("open-file")` (macOS), `process.argv` (CLI), single-instance lock
-- Regex patterns: bundled `app/regex-patterns.json`, fetched from GitHub with fallback, user patterns in `userData`
-- IPC channels: `db:load-file`, `db:query`, `db:exec`, `db:describe`, `db:tables`, `db:export-file`, `db:export-excel-multi`, `dialog:save-file`, `system:free-memory`, `file:get-excel-sheets`, `file:write-json`, `file:read-json`, `file:exists`, `patterns:*`, `set-dark-mode` (main→renderer), `theme:sync` (renderer→main)
-
-### Preload (`app/preload.ts`)
-Context bridge exposing `window.api` (typed as `DbApi` in preload.ts). Key methods: `loadFile`, `query`, `exec`, `describe`, `tables`, `exportFile`, `exportExcelMulti`, `saveFileDialog`, `getFreeMemory`, `getExcelSheets`, `getRegexPatterns`, `saveUserPattern`, `deleteUserPattern`, `writeJsonFile`, `readJsonFile`, `fileExists`, `onOpenFiles`, `onAddFiles`, `onExportCSV`.
-
 ### Key Directories
 
-- `app/` — Electron main process + preload
-- `src/components/` — React components (24 files)
+- `src-tauri/` — Rust/Tauri backend, commands, window management, assets
+- `src/components/` — React components
 - `src/hooks/` — `useChunkCache`, `usePivotCache`
 - `src/utils/` — `sqlBuilder.ts`, `colOpsSQL.ts`, `rowOpsSQL.ts`, `dateDetection.ts`
-- `src/types.ts` — All TypeScript interfaces
+- `src/types.ts` — TypeScript interfaces, including `DbApi`
 - `src/styles/app.less` — All styles (imports BlueprintJS CSS)
-- `html/` — HTML shell + favicon SVG (copied to dist)
-- `res/` — Build resources, `icon.svg`
+- `html/` — Renderer HTML shell + favicon SVG
+- `dist-tauri/` — Renderer output consumed by Tauri
 
 ### Tech Stack
-Electron 31, React 18, TypeScript 5 (strict, ES2020, CommonJS), DuckDB (in-memory), SheetJS (xlsx), BlueprintJS 4, chrono-node, @tanstack/react-virtual, Webpack 5, Less, lodash, electron-log.
+
+Tauri 2, Rust, React 18, TypeScript 5 (strict, ES2020, CommonJS), DuckDB (in-memory), calamine, rust_xlsxwriter, BlueprintJS 4, chrono-node, @tanstack/react-virtual, Webpack 5, Less, lodash.
 
 ## Components
 
 ### App.tsx — Main Orchestrator
-- State: `tables[]`, `activeTable`, `viewState`, `schema`, `resetKey`, dialog states, `colOpsSteps`/`rowOpsSteps` with `undoStrategy`, `savedViews` (global flat array of SavedView), `tableHistories` (Map<string, TableHistory>), `historyDialogOpen`
+- State: `tables[]`, `activeTable`, `viewState`, `schema`, `resetKey`, dialog states, `colOpsSteps`/`rowOpsSteps` with `undoStrategy`, `savedViews`, `tableHistories`, `historyDialogOpen`
 - Hooks: `useChunkCache` (flat mode), `usePivotCache` (pivot mode, when `pivotConfig.groupColumns.length > 0`)
 - Key handlers: `loadFiles`, `handleDeleteTable`, `handleCombineExecute`, `handleDataOperation`, `handleSampleTable`, `handleCreateAggregateTable`, `handleCreatePivotTable`, `handleLookupMerge`, `handleColOpApply`, `handleColOpUndo`, `handleRowOpApply`, `handleRowOpUndo`, `handleRevertToEntry`, `handleExportHistory`, `handleImportHistory`
 - `handleColOpApply`: reads `params.targetMode` ("replace"|"new_column"|"existing_column") and `params.targetColumn`; "new_column" adds column via `ALTER TABLE ADD COLUMN`; promotes non-VARCHAR to VARCHAR for string ops; executes `UPDATE` scoped by filters; adaptive undo (per-step vs snapshot based on RAM)
 - Layout: `Sidebar + PivotToolbar + DataGrid + FilterPanel + StatusBar + dialogs`
 
 ### Sidebar.tsx — Left Panel
-Three sections: Tables (max 20%), Columns (flex), Operations (fixed bottom). Table management (delete, selective combine, search). Column visibility/search. Unified sort+group controls on column pills. Operation buttons: Data Operations, Aggregate, Pivot Table, Lookup Merge, Date Conversion, Export.
+Three sections: Tables, Columns, Operations. Table management, column visibility/search, sort/group controls, and operation buttons for data operations, aggregate, pivot table, lookup merge, date conversion, and export.
 
 ### DataGrid.tsx — Virtualized Data Grid
 Virtual scrolling via `@tanstack/react-virtual`. Div-based layout. Dual-mode: flat (chunk cache) and pivot (tree with group/data rows). Cell selection, copy (TSV), multi-sort, column resize/reorder. `ROW_HEIGHT = 28`.
 
-### FilterPanel.tsx — Bottom Panel (Filters + Column Ops + Row Ops)
-Resizable (80-500px). Three tabs. Recursive AND/OR filter groups. Operators include CONTAINS (regex), IN (value picker). Draft state model with immutable updates. Filters tab has side-by-side layout: filter builder (left) + compact ViewsPanel (right, 260px fixed). Header bar includes Apply Filters, Clear, and Save View button (inline name input that toggles on click).
+### FilterPanel.tsx — Bottom Panel
+Resizable (80-500px). Three tabs. Recursive AND/OR filter groups. Operators include CONTAINS (regex), IN (value picker). Draft state model with immutable updates. Filters tab has side-by-side filter builder and compact views panel.
 
 ### ColumnOpsPanel.tsx — Column Ops Tab
-Three-column layout: left config panel (~300px, scrollable) with stacked form fields, center preview panel (flex), right history panel (~240px). Operations grouped in `<optgroup>`: Text (Trim, UPPERCASE, lowercase), Search (Find & Replace, Regex Extract), Modify (Set Value, Prefix/Suffix, Extract Numbers, Clear to NULL). **Extract Numbers** has mode (First/All), type (Any/Integer/Float), separator (for All mode, default empty); Integer/Float use TRY_CAST for numeric output, "all" mode joins with separator as text. **Target mode** for all ops except clear_null: "Same column" (replace), "New column", "Existing column". **Live preview**: debounced (300ms) 5-sample Before/After table with empty state. **History panel**: always visible, shows "No steps yet" when empty, step list with undo/revert actions when populated. Adaptive undo (per-step/snapshot). Regex pattern picker integration.
+Three-column layout: config, preview, history. Operations include trim, uppercase, lowercase, find/replace, regex extract, set value, prefix/suffix, extract numbers, clear to NULL. Target modes support replacing, writing to a new column, or writing to an existing column. Live preview is debounced.
 
 ### DataOperationsDialog.tsx — Data Operations Modal
-12 operation types: substring, custom_sql, create_column, delete_column, combine_columns, rename_column, sample_table, remove_duplicates, remove_empty_rows, conditional_column, replace_empty_null, replace_sentinel_null. Text/regex ops (trim, upper, lower, regex_extract, replace_regex) moved to ColumnOpsPanel to avoid duplication. **Remove Empty Rows** has All/Any mode (like pandas `dropna(how=...)`) with multi-column selection and row count preview. **Target mode selector** (extract ops only: substring, custom_sql): RadioGroup with "Replace source", "New column", "Existing column". All other ops replace source or use dedicated new-column input. Live preview. Generates `CREATE OR REPLACE TABLE ... AS SELECT` SQL.
+Includes substring, custom SQL, create/delete/combine/rename columns, sampling, duplicate removal, empty-row removal, conditional column, and NULL/sentinel replacement operations. Generates `CREATE OR REPLACE TABLE ... AS SELECT` SQL.
 
 ### Other Components
 - **ExportDialog.tsx**: Format selection (CSV/TSV/JSON/Excel/Parquet), table selection, view options, Excel row/col limit warnings
 - **CombineDialog.tsx**: Column mapping modal for UNION ALL with auto VARCHAR cast
-- **AggregateDialog.tsx**: Aggregate stats (SUM/MIN/MAX/AVG/COUNT/MEDIAN/STDDEV), optional Group By, materializes as `aggregate_N`
+- **AggregateDialog.tsx**: Aggregate stats, optional Group By, materializes as `aggregate_N`
 - **PivotDialog.tsx**: DuckDB native `PIVOT` syntax, materializes as `pivot_N`
-- **PivotToolbar.tsx**: Controls above DataGrid when pivot active (expand/collapse, grand total, agg function). Default agg is LIST VALUES (unique values via `STRING_AGG(DISTINCT)`). Group row cells support selection, tooltip, and clipboard.
+- **PivotToolbar.tsx**: Controls above DataGrid when pivot active
 - **LookupMergeDialog.tsx**: LEFT/INNER JOIN with composite keys, duplicate/NULL key detection, column conflict resolution
-- **DateConversionDialog.tsx**: Format detection (ISO/numeric/text-month), `TRY_STRPTIME`/`strftime` conversion
+- **DateConversionDialog.tsx**: Format detection, `TRY_STRPTIME`/`strftime` conversion
 - **ExcelSheetPickerDialog.tsx**: Multi-sheet import picker
 - **ImportRetryDialog.tsx**: CSV parse failure retry with delimiter/ignore options
 - **PreviewTableDialog.tsx**: Reusable results table dialog
 - **SearchableColumnSelect.tsx**: Popover2-based searchable column dropdown with keyboard nav
 - **RegexPatternPicker.tsx**: Inline pattern picker grouped by category
 - **RegexPatternManagerDialog.tsx**: Pattern CRUD + import/export
-- **RowOpsPanel.tsx**: Row ops (delete_filtered, keep_filtered, remove_empty, remove_duplicates) with independent undo. **remove_empty** has All/Any mode toggle (like pandas `dropna(how=...)`).
-- **ViewsPanel.tsx**: Compact views panel embedded in Filters tab right side — apply/update/rename/delete named ViewState snapshots globally (visible across all tables). In-memory only, no new tables created. Search input at top filters views by name. Scrollable view list with actions, inline rename via double-click. Compatibility checking: views with filter columns missing from current table schema are greyed out with disabled Apply button and tooltip showing missing columns. Origin badge shows source table name. Save View moved to FilterPanel header bar.
-- **HistoryDialog.tsx**: Global operation history — two-panel modal (table list + timeline). Per-table history of all col ops, row ops, data ops with SQL replay-based revert. Save/load history as JSON. Generated tables viewable but non-revertible.
-- **StatusBar.tsx**: Table name, row count, pivot status
-- **Toolbar.tsx**: Sidebar toggle (largely superseded by Sidebar)
-
-## Hooks
-
-### useChunkCache — Lazy Data Loading
-1000-row chunks, LRU eviction (max 20 chunks), generation counter for stale responses. Returns `{ totalRows, getRow, isRowLoaded, ensureRange }`.
-
-### usePivotCache — Pivot View Data
-Tree-based GroupNode cache. Lazy expand (sub-groups or data chunks). Returns `{ flatRows, grandTotals, loading, toggleExpand, expandAll, collapseAll, ensureRange }`.
-
-## Types (`src/types.ts`)
-
-Key types: `ColumnInfo`, `LoadedTable` (with optional `importOptions`), `ViewState`, `FilterGroup`/`FilterNode`/`FilterCondition` (recursive), `SortColumn`, `PivotGroupColumn`, `PivotViewConfig`, `PivotFlatRow`, `ColOpType`, `ColOpTargetMode` ("replace"|"new_column"|"existing_column"), `ColOpStep`, `RowOpType`, `RowOpStep`, `UndoStrategy`, `ColumnMapping`, `RegexPattern`, `SavedView`, `FileFormat`, `ImportOptions`, `SheetInfo`, `HistoryOpSource` ("col_op"|"row_op"|"data_op"), `HistoryEntry`, `TableSourceInfo`, `TableHistory`, `HistoryExportData`. Helper functions: `isFilterGroup()`, `hasActiveFilters()`, `countConditions()`, `extractFilterColumns()`. Constants: `EXCEL_MAX_ROWS`, `EXCEL_MAX_COLS`.
-
-## Utils
-
-### sqlBuilder.ts
-`buildSelectQuery`, `buildFilterGroupClause`, `buildCombineQuery`, `buildMappedCombineQuery`, `buildChunkQuery`, `buildCountQuery`, `buildPivotGroupQuery`, `buildPivotGrandTotalQuery`, `buildPivotDataChunkQuery`, `escapeIdent`.
-
-### colOpsSQL.ts
-`buildColOpExpr(column, opType, params)` — returns SET expression string (used by both UPDATE and preview). `buildColOpUpdateSQL(tableName, column, opType, params, filters, targetColumn?)` — UPDATE with optional target column. `buildStepDescription(opType, column, params, targetColumn?)` — appends ` → "target"` when different. `buildAllMatchesExtractExpr`.
-
-### rowOpsSQL.ts
-`buildRowOpSQL(tableName, opType, params, filters, schema)` — DELETE or CREATE OR REPLACE TABLE. `buildRowOpStepDescription`.
-
-### dateDetection.ts
-`detectDateFormat(samples)` — classifies as ISO/numeric/text-month, max-value heuristic for DD/MM vs MM/DD. `OUTPUT_FORMATS` for dropdown.
-
-## Key Patterns
-
-- Generated tables use sequential names: `combined_N`, `sample_N`, `aggregate_N`, `pivot_N`, `merge_N`
-- Backup tables: `__colops_backup_N_table` / `__colops_snapshot_table`, `__rowops_backup_N_table` / `__rowops_snapshot_table`
-- Undo strategy chosen on first op: per-step (small tables, individual undo) vs snapshot (large tables, revert-all only)
-- Column ops target modes (extract ops only): "replace" (UPDATE source), "new_column" (ALTER TABLE ADD + UPDATE), "existing_column" (UPDATE different col)
-- Data operations use `CREATE OR REPLACE TABLE ... AS SELECT` pattern
-- All filter/sort state lives in `ViewState`; chunk cache auto-resets on changes
-- CSS namespaces: `.colops-*`, `.rowops-*`, `.views-*`, `.dg-*`, `.col-select-*`, `.regex-picker-*`, `.regex-manager-*`, `.pivot-toolbar-*`, `.filter-group-*`, `.date-conv-*`, `.merge-*`, `.ghist-*`
-- Dark mode: `.dark-theme` + `.bp4-dark` classes on `app-container` and `body`; preference stored in `localStorage("theme")`; toggled via View > Dark Mode menu (Cmd+Shift+D); dark overrides at end of `app.less` using Less variables (`@dark-bg-*`, `@dark-border-*`, `@dark-text-*`, `@dark-accent*`, `@dark-success*`, `@dark-warning*`, `@dark-error*`, `@dark-purple*`, `@dark-depth-N-bg`). Accent colors use brighter values than light theme for contrast; semantic colors (success=teal-green, error=coral, warning=amber) chosen for color-blind accessibility.
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| Cmd+O / Ctrl+O | Open files (replaces current) |
-| Cmd+Shift+O / Ctrl+Shift+O | Add files (appends) |
-| Cmd+E / Ctrl+E | Export (opens Export dialog) |
-| Cmd+C / Ctrl+C | Copy selected cells |
-| Cmd+Shift+D / Ctrl+Shift+D | Toggle dark mode |
