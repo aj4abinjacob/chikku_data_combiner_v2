@@ -1,9 +1,10 @@
 {
   "name": "chikku-parser",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Desktop app for viewing, combining, and transforming CSV data",
   "scripts": {
     "clean": "rimraf dist-tauri",
+    "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
     "tauri:assets": "mkdirp dist-tauri && recursive-copy -w html/index.html dist-tauri/index.html && recursive-copy -w html/icon.svg dist-tauri/icon.svg",
