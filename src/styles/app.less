@@ -28,6 +28,7 @@ html, body, #root {
   display: flex;
   flex: 1;
   overflow: hidden;
+  border-top: 1px solid #bfccd6;
 }
 
 // ── Sidebar collapsed strip ──
@@ -4110,6 +4111,10 @@ html.dark-theme #root {
 }
 
 .dark-theme {
+  .main-layout {
+    border-top-color: @dark-border-1;
+  }
+
   // ── Sidebar collapsed strip ──
   .sidebar-collapsed {
     background: @dark-bg-2;
@@ -5197,4 +5202,3 @@ html.dark-theme #root {
     stroke: @dark-accent;
   }
 }
-
