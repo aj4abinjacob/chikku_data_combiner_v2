@@ -329,13 +329,15 @@ export function DataGrid({
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       if (!headerDragCol.current || headerDragCol.current === col) {
-        setHeaderDropTarget(null);
+        setHeaderDropTarget((prev) => (prev === null ? prev : null));
         return;
       }
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const midX = rect.left + rect.width / 2;
       const position = e.clientX < midX ? "left" : "right";
-      setHeaderDropTarget({ col, position });
+      setHeaderDropTarget((prev) =>
+        prev?.col === col && prev.position === position ? prev : { col, position }
+      );
     },
     []
   );

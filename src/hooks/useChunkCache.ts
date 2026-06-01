@@ -4,6 +4,7 @@ import { buildChunkQuery, buildCountQuery } from "../utils/sqlBuilder";
 
 const CHUNK_SIZE = 1000;
 const MAX_CACHED_CHUNKS = 20;
+const PREFETCH_CHUNKS = 1;
 
 interface UseChunkCacheArgs {
   tableName: string | null;
@@ -87,8 +88,6 @@ export function useChunkCache({
     tableName,
     enabled,
     filtersKey,
-    sortKey,
-    visibleColumnsKey,
     dataVersion,
   ]);
 
@@ -160,8 +159,10 @@ export function useChunkCache({
       const gen = generationRef.current;
       const startChunk = Math.floor(startIndex / CHUNK_SIZE);
       const endChunk = Math.floor(endIndex / CHUNK_SIZE);
+      const firstChunk = Math.max(0, startChunk - PREFETCH_CHUNKS);
+      const lastChunk = endChunk + PREFETCH_CHUNKS;
 
-      for (let ci = startChunk; ci <= endChunk; ci++) {
+      for (let ci = firstChunk; ci <= lastChunk; ci++) {
         if (cacheRef.current.has(ci) || loadingRef.current.has(ci)) continue;
         loadingRef.current.add(ci);
         fetchChunk(ci, gen);
