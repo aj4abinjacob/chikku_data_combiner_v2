@@ -85,22 +85,30 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri app");
 
-    app.run(|app_handle, event| match event {
-        RunEvent::Opened { urls } => {
-            // macOS "Open With" / drag-to-dock — each url is a file:// path.
-            let paths: Vec<String> = urls
-                .into_iter()
-                .filter_map(|u| u.to_file_path().ok())
-                .map(|p| p.to_string_lossy().to_string())
-                .collect();
-            let supported = filter_supported(paths);
-            if supported.is_empty() {
-                return;
-            }
-            if let Err(e) = spawn_window(app_handle, Some(supported)) {
-                log::warn!("spawn_window from open-file failed: {e}");
-            }
+    app.run(|app_handle, event| {
+        #[cfg(target_os = "macos")]
+        if let RunEvent::Opened { urls } = event {
+            handle_opened_urls(app_handle, urls);
         }
-        _ => {}
+
+        #[cfg(not(target_os = "macos"))]
+        let _ = (app_handle, event);
     });
+}
+
+#[cfg(target_os = "macos")]
+fn handle_opened_urls(app_handle: &tauri::AppHandle, urls: Vec<tauri::Url>) {
+    // macOS "Open With" / drag-to-dock — each url is a file:// path.
+    let paths: Vec<String> = urls
+        .into_iter()
+        .filter_map(|u| u.to_file_path().ok())
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+    let supported = filter_supported(paths);
+    if supported.is_empty() {
+        return;
+    }
+    if let Err(e) = spawn_window(app_handle, Some(supported)) {
+        log::warn!("spawn_window from open-file failed: {e}");
+    }
 }
