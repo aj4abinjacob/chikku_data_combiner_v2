@@ -101,10 +101,6 @@ function createWindow(): void {
   // }
 
   const wcId = win.webContents.id;
-  win.on("close", () => {
-    // Remove DB from map immediately so IPC handlers fail fast during shutdown
-    dbMap.delete(wcId);
-  });
   win.on("closed", () => {
     closeDb(wcId);
   });

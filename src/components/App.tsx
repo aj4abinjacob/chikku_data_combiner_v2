@@ -125,6 +125,10 @@ export function App(): React.ReactElement {
   activeTableRef.current = activeTable;
   const tableHistoriesRef = useRef(tableHistories);
   tableHistoriesRef.current = tableHistories;
+  const colOpsStepsRef = useRef(colOpsSteps);
+  colOpsStepsRef.current = colOpsSteps;
+  const rowOpsStepsRef = useRef(rowOpsSteps);
+  rowOpsStepsRef.current = rowOpsSteps;
 
   // Determine if pivot mode is active
   const pivotActive = !!viewState.pivotConfig && viewState.pivotConfig.groupColumns.length > 0;
@@ -187,6 +191,86 @@ export function App(): React.ReactElement {
     });
   }, [getSourceInfoForTable]);
 
+  const makeTableHistory = useCallback((table: LoadedTable): TableHistory => ({
+    tableName: table.tableName,
+    sourceInfo: getSourceInfoForTable(table),
+    initialSchema: [...table.schema],
+    entries: [],
+    nextEntryId: 1,
+  }), [getSourceInfoForTable]);
+
+  const cleanupReplacedTables = useCallback(async (nextTables: LoadedTable[]) => {
+    const nextNames = new Set(nextTables.map((t) => t.tableName));
+    const oldTableNames = tablesRef.current
+      .map((t) => t.tableName)
+      .filter((name) => !nextNames.has(name));
+    const operationTableNames = [
+      ...colOpsStepsRef.current.map((step) => step.backupTable).filter(Boolean),
+      ...rowOpsStepsRef.current.map((step) => step.backupTable).filter(Boolean),
+    ] as string[];
+    const currentTable = activeTableRef.current;
+    if (currentTable) {
+      operationTableNames.push(
+        `__colops_snapshot_${currentTable}`,
+        `__rowops_snapshot_${currentTable}`
+      );
+    }
+
+    for (const tableName of Array.from(new Set([...oldTableNames, ...operationTableNames]))) {
+      try {
+        await window.api.exec(`DROP TABLE IF EXISTS ${escapeIdent(tableName)}`);
+      } catch (err) {
+        console.error(`Drop table error for ${tableName}:`, err);
+      }
+    }
+
+    setColOpsSteps([]);
+    setUndoStrategy("per-step");
+    setColOpsNextId(1);
+    setRowOpsSteps([]);
+    setRowOpsUndoStrategy("per-step");
+    setRowOpsNextId(1);
+  }, []);
+
+  const finalizeLoadedTables = useCallback(
+    async (newTables: LoadedTable[], replace: boolean, nextActiveTable?: string) => {
+      if (replace) {
+        await cleanupReplacedTables(newTables);
+      }
+
+      setTables(newTables);
+      setTableHistories((prev) => {
+        const next = replace ? new Map<string, TableHistory>() : new Map(prev);
+        for (const table of newTables) {
+          if (!next.has(table.tableName)) {
+            next.set(table.tableName, makeTableHistory(table));
+          }
+        }
+        return next;
+      });
+
+      if (newTables.length > 0) {
+        setActiveTable(nextActiveTable ?? newTables[0].tableName);
+        setViewState((prev) => ({ ...prev, filters: { logic: "AND", children: [] } }));
+        setResetKey((k) => k + 1);
+        setFilterPanelOpen(false);
+      } else if (replace) {
+        setActiveTable(null);
+        setViewState((prev) => ({
+          ...prev,
+          filters: { logic: "AND", children: [] },
+          visibleColumns: [],
+          columnOrder: [],
+          sortColumns: [],
+          pivotConfig: null,
+        }));
+        setResetKey((k) => k + 1);
+        setFilterPanelOpen(false);
+      }
+    },
+    [cleanupReplacedTables, makeTableHistory]
+  );
+
   const recordHistoryEntry = useCallback(
     (tableName: string, source: HistoryOpSource, description: string, sqlStatements: string[]) => {
       setTableHistories((prev) => {
@@ -241,7 +325,12 @@ export function App(): React.ReactElement {
   // Load files into DuckDB (handles all formats)
   // accumulatedTables: when continuing after a dialog, pass the already-loaded tables
   const loadFiles = useCallback(
-    async (filePaths: string[], replace: boolean, accumulatedTables?: LoadedTable[]) => {
+    async (
+      filePaths: string[],
+      replace: boolean,
+      accumulatedTables?: LoadedTable[],
+      replaceOriginal = replace
+    ) => {
       const newTables: LoadedTable[] = accumulatedTables ?? (replace ? [] : [...tablesRef.current]);
 
       for (let i = 0; i < filePaths.length; i++) {
@@ -302,23 +391,9 @@ export function App(): React.ReactElement {
         }
       }
 
-      setTables(newTables);
-
-      // Initialize history for newly loaded tables
-      for (const t of newTables) {
-        if (!tableHistoriesRef.current.has(t.tableName)) {
-          initializeTableHistory(t);
-        }
-      }
-
-      if (newTables.length > 0) {
-        setActiveTable(newTables[0].tableName);
-        setViewState((prev) => ({ ...prev, filters: { logic: "AND", children: [] } }));
-        setResetKey((k) => k + 1);
-        setFilterPanelOpen(false);
-      }
+      await finalizeLoadedTables(newTables, replaceOriginal);
     },
-    [loadSingleFile, initializeTableHistory]
+    [loadSingleFile, finalizeLoadedTables]
   );
 
   // Handle Excel sheet picker result
@@ -341,31 +416,20 @@ export function App(): React.ReactElement {
 
       // Continue loading remaining files, or finalize
       if (remainingFiles.length > 0) {
-        await loadFiles(remainingFiles, false, newTables);
+        await loadFiles(remainingFiles, false, newTables, replace);
       } else {
-        setTables(newTables);
-        // Initialize history for newly loaded tables
-        for (const t of newTables) {
-          if (!tableHistoriesRef.current.has(t.tableName)) {
-            initializeTableHistory(t);
-          }
-        }
-        if (newTables.length > 0) {
-          setActiveTable(newTables[replace ? 0 : newTables.length - selectedSheets.length].tableName);
-          setViewState((prev) => ({ ...prev, filters: { logic: "AND", children: [] } }));
-          setResetKey((k) => k + 1);
-          setFilterPanelOpen(false);
-        }
+        const activeIndex = replace ? 0 : newTables.length - selectedSheets.length;
+        await finalizeLoadedTables(newTables, replace, newTables[activeIndex]?.tableName);
       }
     },
-    [pendingExcelImport, loadSingleFile, loadFiles, initializeTableHistory]
+    [pendingExcelImport, loadSingleFile, loadFiles, finalizeLoadedTables]
   );
 
   // Handle CSV retry
   const handleRetryImport = useCallback(
     async (options: { csvDelimiter?: string; csvIgnoreErrors?: boolean }) => {
       if (!pendingRetry) return;
-      const { filePath, tableName, otherFiles, remainingFiles } = pendingRetry;
+      const { filePath, tableName, otherFiles, replace, remainingFiles } = pendingRetry;
       const newTables = [...otherFiles];
 
       const result = await loadSingleFile(filePath, tableName, options);
@@ -381,24 +445,12 @@ export function App(): React.ReactElement {
 
       // Continue loading remaining files, or finalize
       if (remainingFiles.length > 0) {
-        await loadFiles(remainingFiles, false, newTables);
+        await loadFiles(remainingFiles, false, newTables, replace);
       } else {
-        setTables(newTables);
-        // Initialize history for newly loaded tables
-        for (const t of newTables) {
-          if (!tableHistoriesRef.current.has(t.tableName)) {
-            initializeTableHistory(t);
-          }
-        }
-        if (newTables.length > 0) {
-          setActiveTable(newTables[newTables.length - 1].tableName);
-          setViewState((prev) => ({ ...prev, filters: { logic: "AND", children: [] } }));
-          setResetKey((k) => k + 1);
-          setFilterPanelOpen(false);
-        }
+        await finalizeLoadedTables(newTables, replace, newTables[newTables.length - 1]?.tableName);
       }
     },
-    [pendingRetry, loadSingleFile, loadFiles, initializeTableHistory]
+    [pendingRetry, loadSingleFile, loadFiles, finalizeLoadedTables]
   );
 
   // Register IPC listeners once on mount
@@ -1133,17 +1185,6 @@ export function App(): React.ReactElement {
           }));
         }
 
-        // Update row count in tables state
-        const countResult = await window.api.query(
-          `SELECT COUNT(*) as count FROM "${currentTable}"`
-        );
-        setTables((prev) =>
-          prev.map((t) =>
-            t.tableName === currentTable
-              ? { ...t, rowCount: Number(countResult[0].count) }
-              : t
-          )
-        );
       } catch (err) {
         // If backup was created but UPDATE failed, drop the backup
         if (backupName) {
@@ -1166,22 +1207,13 @@ export function App(): React.ReactElement {
 
       setColOpsSteps((prev) => prev.slice(0, -1));
       setDataVersion((v) => v + 1);
-      setSchemaVersion((v) => v + 1);
       setResetKey((k) => k + 1);
 
-      // Refresh schema and row count
+      // Refresh schema
       const newSchema = await window.api.describe(activeTable);
       setSchema(newSchema);
-      const countResult = await window.api.query(
-        `SELECT COUNT(*) as count FROM "${activeTable}"`
-      );
-      setTables((prev) =>
-        prev.map((t) =>
-          t.tableName === activeTable
-            ? { ...t, rowCount: Number(countResult[0].count) }
-            : t
-        )
-      );
+      const allCols = newSchema.map((c: ColumnInfo) => c.column_name);
+      setViewState((prev) => ({ ...prev, visibleColumns: allCols, columnOrder: allCols }));
     },
     [activeTable, colOpsSteps]
   );
@@ -1198,22 +1230,13 @@ export function App(): React.ReactElement {
       setColOpsNextId(1);
       setUndoStrategy("per-step");
       setDataVersion((v) => v + 1);
-      setSchemaVersion((v) => v + 1);
       setResetKey((k) => k + 1);
 
-      // Refresh schema and row count
+      // Refresh schema
       const newSchema = await window.api.describe(activeTable);
       setSchema(newSchema);
-      const countResult = await window.api.query(
-        `SELECT COUNT(*) as count FROM "${activeTable}"`
-      );
-      setTables((prev) =>
-        prev.map((t) =>
-          t.tableName === activeTable
-            ? { ...t, rowCount: Number(countResult[0].count) }
-            : t
-        )
-      );
+      const allCols = newSchema.map((c: ColumnInfo) => c.column_name);
+      setViewState((prev) => ({ ...prev, visibleColumns: allCols, columnOrder: allCols }));
     },
     [activeTable, colOpsSteps]
   );
@@ -1722,17 +1745,13 @@ export function App(): React.ReactElement {
           fileName={pendingExcelImport.fileName}
           sheets={pendingExcelImport.sheets}
           onClose={() => {
-            const { otherFiles, remainingFiles } = pendingExcelImport;
+            const { otherFiles, replace, remainingFiles } = pendingExcelImport;
             setPendingExcelImport(null);
             // Skip this Excel file, continue with remaining files or finalize already-loaded tables
             if (remainingFiles.length > 0) {
-              loadFiles(remainingFiles, false, otherFiles);
+              void loadFiles(remainingFiles, false, otherFiles, replace);
             } else if (otherFiles.length > 0) {
-              setTables(otherFiles);
-              setActiveTable(otherFiles[0].tableName);
-              setViewState((prev) => ({ ...prev, filters: { logic: "AND", children: [] } }));
-              setResetKey((k) => k + 1);
-              setFilterPanelOpen(false);
+              void finalizeLoadedTables(otherFiles, replace, otherFiles[0].tableName);
             }
           }}
           onImport={handleExcelSheetImport}
@@ -1744,17 +1763,13 @@ export function App(): React.ReactElement {
           filePath={pendingRetry.filePath}
           errorMessage={pendingRetry.errorMessage}
           onClose={() => {
-            const { otherFiles, remainingFiles } = pendingRetry;
+            const { otherFiles, replace, remainingFiles } = pendingRetry;
             setPendingRetry(null);
             // Skip this file, continue with remaining files or finalize already-loaded tables
             if (remainingFiles.length > 0) {
-              loadFiles(remainingFiles, false, otherFiles);
+              void loadFiles(remainingFiles, false, otherFiles, replace);
             } else if (otherFiles.length > 0) {
-              setTables(otherFiles);
-              setActiveTable(otherFiles[0].tableName);
-              setViewState((prev) => ({ ...prev, filters: { logic: "AND", children: [] } }));
-              setResetKey((k) => k + 1);
-              setFilterPanelOpen(false);
+              void finalizeLoadedTables(otherFiles, replace, otherFiles[0].tableName);
             }
           }}
           onRetry={handleRetryImport}
