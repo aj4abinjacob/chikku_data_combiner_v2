@@ -98,7 +98,7 @@ pub fn query(conn: &Connection, sql: &str) -> AppResult<Vec<Value>> {
         .collect();
     let mut out: Vec<Value> = Vec::new();
     while let Some(row) = rows.next()? {
-        let mut obj = Map::new();
+        let mut obj = Map::with_capacity(col_count);
         for i in 0..col_count {
             let v = row.get_ref(i)?;
             obj.insert(col_names[i].clone(), value_ref_to_json(v));

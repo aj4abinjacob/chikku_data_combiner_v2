@@ -42,7 +42,7 @@ pub enum LoadResult {
     },
 }
 
-fn null_empty_strings(conn: &duckdb::Connection, table: &str) -> AppResult<()> {
+fn null_empty_strings(conn: &duckdb::Connection, table: &str) -> AppResult<Vec<Value>> {
     let schema = db::query(conn, &format!(r#"DESCRIBE "{}""#, table))?;
     let mut cols: Vec<String> = Vec::new();
     for row in &schema {
@@ -58,7 +58,7 @@ fn null_empty_strings(conn: &duckdb::Connection, table: &str) -> AppResult<()> {
         }
     }
     if cols.is_empty() {
-        return Ok(());
+        return Ok(schema);
     }
     let clauses: Vec<String> = cols
         .iter()
@@ -68,7 +68,7 @@ fn null_empty_strings(conn: &duckdb::Connection, table: &str) -> AppResult<()> {
         conn,
         &format!(r#"UPDATE "{}" SET {}"#, table, clauses.join(", ")),
     )?;
-    Ok(())
+    Ok(schema)
 }
 
 #[tauri::command]
@@ -90,7 +90,7 @@ pub fn load_file(
         .to_ascii_lowercase();
     let safe_path = escape_sql_literal(&file_path);
 
-    let load_result: AppResult<()> = (|| {
+    let load_result: AppResult<Vec<Value>> = (|| {
         match ext.as_str() {
             "xlsx" | "xls" => {
                 let tmp = std::env::temp_dir().join(format!(
@@ -150,29 +150,29 @@ pub fn load_file(
                 )?;
             }
         }
-        null_empty_strings(&conn, &safe)?;
-        Ok(())
+        null_empty_strings(&conn, &safe)
     })();
 
-    if let Err(err) = load_result {
-        let msg = err.to_string();
-        let is_csv_error = (ext == "csv" || ext == "tsv")
-            && (msg.contains("CSV")
-                || msg.contains("delimiter")
-                || msg.contains("columns")
-                || msg.contains("expected")
-                || msg.contains("values")
-                || msg.contains("Error"));
-        if is_csv_error {
-            return Ok(LoadResult::Err {
-                error: msg,
-                can_retry: true,
-            });
+    let schema = match load_result {
+        Ok(schema) => schema,
+        Err(err) => {
+            let msg = err.to_string();
+            let is_csv_error = (ext == "csv" || ext == "tsv")
+                && (msg.contains("CSV")
+                    || msg.contains("delimiter")
+                    || msg.contains("columns")
+                    || msg.contains("expected")
+                    || msg.contains("values")
+                    || msg.contains("Error"));
+            if is_csv_error {
+                return Ok(LoadResult::Err {
+                    error: msg,
+                    can_retry: true,
+                });
+            }
+            return Err(err);
         }
-        return Err(err);
-    }
-
-    let schema = db::query(&conn, &format!(r#"DESCRIBE "{}""#, safe))?;
+    };
     let count_rows = db::query(
         &conn,
         &format!(r#"SELECT COUNT(*) AS count FROM "{}""#, safe),
@@ -422,4 +422,3 @@ fn sysinfo_free_bytes() -> u64 {
         4_u64 * 1024 * 1024 * 1024
     }
 }
-
