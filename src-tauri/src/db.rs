@@ -88,11 +88,14 @@ pub fn exec(conn: &Connection, sql: &str) -> AppResult<()> {
 /// Run a SELECT and return rows as `[{col: value, ...}, ...]`.
 pub fn query(conn: &Connection, sql: &str) -> AppResult<Vec<Value>> {
     let mut stmt = conn.prepare(sql)?;
+    let mut rows = stmt.query(params![])?;
+    let stmt = rows
+        .as_ref()
+        .ok_or_else(|| AppError::msg("query did not return statement metadata"))?;
     let col_count = stmt.column_count();
     let col_names: Vec<String> = (0..col_count)
         .map(|i| stmt.column_name(i).map(|s| s.to_string()).unwrap_or_default())
         .collect();
-    let mut rows = stmt.query(params![])?;
     let mut out: Vec<Value> = Vec::new();
     while let Some(row) = rows.next()? {
         let mut obj = Map::new();
