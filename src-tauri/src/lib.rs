@@ -13,7 +13,7 @@ use patterns::PatternState;
 use std::time::Duration;
 use tauri::{Manager, RunEvent};
 use window_mgr::{
-    filter_supported, open_files_in_window, spawn_window, take_pending_files, PendingFiles,
+    filter_supported, spawn_window, spawn_windows_for_files, take_pending_files, PendingFiles,
 };
 
 fn args_to_files(argv: &[String]) -> Vec<String> {
@@ -42,8 +42,8 @@ pub fn run() {
                 }
                 return;
             }
-            if let Err(e) = open_files_in_window(app, files) {
-                log::warn!("open_files_in_window failed: {e}");
+            if let Err(e) = spawn_windows_for_files(app, files) {
+                log::warn!("spawn_windows_for_files failed: {e}");
             }
         }))
         .manage(DbState::default())
@@ -92,8 +92,12 @@ pub fn run() {
                     }
                 });
             } else {
-                let initial_label = spawn_window(&handle, Some(initial))?;
-                log::info!("initial window spawned: {}", initial_label);
+                let initial_labels = if initial.is_empty() {
+                    vec![spawn_window(&handle, None)?]
+                } else {
+                    spawn_windows_for_files(&handle, initial)?
+                };
+                log::info!("initial window(s) spawned: {:?}", initial_labels);
             }
             Ok(())
         })
@@ -123,7 +127,7 @@ fn handle_opened_urls(app_handle: &tauri::AppHandle, urls: Vec<tauri::Url>) {
     if supported.is_empty() {
         return;
     }
-    if let Err(e) = open_files_in_window(app_handle, supported) {
-        log::warn!("open_files_in_window from open-file failed: {e}");
+    if let Err(e) = spawn_windows_for_files(app_handle, supported) {
+        log::warn!("spawn_windows_for_files from open-file failed: {e}");
     }
 }

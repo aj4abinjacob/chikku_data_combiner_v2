@@ -1,10 +1,10 @@
 use crate::db::DbState;
 use crate::error::{AppError, AppResult};
 use parking_lot::Mutex;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const SUPPORTED_EXTS: &[&str] = &[
     "csv", "tsv", "json", "jsonl", "ndjson", "parquet", "xlsx", "xls",
@@ -35,7 +35,6 @@ where
 #[derive(Default)]
 pub struct PendingFiles {
     by_window: Mutex<HashMap<String, Vec<String>>>,
-    ready_windows: Mutex<HashSet<String>>,
 }
 
 impl PendingFiles {
@@ -48,20 +47,14 @@ impl PendingFiles {
     }
 
     pub fn take(&self, label: &str) -> Vec<String> {
-        self.ready_windows.lock().insert(label.to_string());
         let mut map = self.by_window.lock();
         map.remove(label).unwrap_or_default()
-    }
-
-    pub fn is_ready(&self, label: &str) -> bool {
-        self.ready_windows.lock().contains(label)
     }
 }
 
 static WINDOW_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-fn next_label() -> String {
-    let n = WINDOW_COUNTER.fetch_add(1, Ordering::SeqCst);
+fn label_for(n: u64) -> String {
     if n == 1 {
         "main".to_string()
     } else {
@@ -72,12 +65,15 @@ fn next_label() -> String {
 /// Create a new window. If `files` is non-empty, queue them for that window so the
 /// renderer can pick them up via `take_pending_files` on mount.
 pub fn spawn_window(app: &AppHandle, files: Option<Vec<String>>) -> AppResult<String> {
-    let label = next_label();
+    let window_id = WINDOW_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let label = label_for(window_id);
+    let cascade_offset = ((window_id - 1) % 8) as f64 * 36.0;
     let url = WebviewUrl::App("index.html".into());
     let builder = WebviewWindowBuilder::new(app, &label, url)
         .title("Chikku Parser")
         .inner_size(1400.0, 900.0)
         .min_inner_size(800.0, 600.0)
+        .position(80.0 + cascade_offset, 80.0 + cascade_offset)
         .resizable(true);
     let window = builder
         .build()
@@ -104,40 +100,26 @@ pub fn spawn_window(app: &AppHandle, files: Option<Vec<String>>) -> AppResult<St
     Ok(label)
 }
 
-/// Open files in an existing window when possible. macOS delivers Finder
-/// "Open With" files after startup, so reusing the startup window avoids a
-/// blank companion window next to the file-loaded window.
-pub fn open_files_in_window(app: &AppHandle, files: Vec<String>) -> AppResult<Option<String>> {
+/// Open externally requested files as independent app sessions.
+pub fn spawn_windows_for_files(app: &AppHandle, files: Vec<String>) -> AppResult<Vec<String>> {
     let supported = filter_supported(files);
     if supported.is_empty() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
 
-    let mut windows = app.webview_windows();
-    let focused = windows
-        .values()
-        .find(|window| window.is_focused().unwrap_or(false))
-        .cloned();
-    let window = focused
-        .or_else(|| windows.remove("main"))
-        .or_else(|| windows.into_values().next());
+    let mut labels = Vec::with_capacity(supported.len());
+    for file in supported {
+        labels.push(spawn_window(app, Some(vec![file]))?);
+    }
 
-    if let Some(window) = window {
-        let label = window.label().to_string();
-        let state: tauri::State<'_, PendingFiles> = app.state();
-        if state.is_ready(&label) {
-            window
-                .emit("open-files", supported)
-                .map_err(|e| AppError::msg(format!("emit open-files: {e}")))?;
-        } else {
-            state.push(&label, supported);
+    if let Some(label) = labels.last() {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.unminimize();
+            let _ = window.set_focus();
         }
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-        return Ok(Some(label));
     }
 
-    spawn_window(app, Some(supported)).map(Some)
+    Ok(labels)
 }
 
 #[tauri::command]

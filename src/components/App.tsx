@@ -24,6 +24,22 @@ function makeTableName(filePath: string): string {
   return base.replace(/[^a-zA-Z0-9_]/g, "_");
 }
 
+function makeUniqueTableName(baseName: string, existingNames: Set<string>): string {
+  if (!existingNames.has(baseName)) {
+    existingNames.add(baseName);
+    return baseName;
+  }
+
+  let i = 2;
+  let candidate = `${baseName}_${i}`;
+  while (existingNames.has(candidate)) {
+    i++;
+    candidate = `${baseName}_${i}`;
+  }
+  existingNames.add(candidate);
+  return candidate;
+}
+
 function getFileExtension(filePath: string): string {
   return filePath.split(".").pop()?.toLowerCase() || "";
 }
@@ -332,6 +348,7 @@ export function App(): React.ReactElement {
       replaceOriginal = replace
     ) => {
       const newTables: LoadedTable[] = accumulatedTables ?? (replace ? [] : [...tablesRef.current]);
+      const tableNames = new Set(newTables.map((t) => t.tableName));
 
       for (let i = 0; i < filePaths.length; i++) {
         const fp = filePaths[i];
@@ -355,7 +372,7 @@ export function App(): React.ReactElement {
               return; // Wait for dialog result, then continue with remaining
             }
             // Single sheet — import directly
-            const tableName = makeTableName(fp);
+            const tableName = makeUniqueTableName(makeTableName(fp), tableNames);
             const result = await loadSingleFile(fp, tableName, { excelSheet: sheets[0].name });
             if (result && !("error" in result)) {
               newTables.push(result);
@@ -365,7 +382,7 @@ export function App(): React.ReactElement {
           }
         } else if (ext === "csv" || ext === "tsv") {
           // CSV/TSV — try loading, show retry on failure
-          const tableName = makeTableName(fp);
+          const tableName = makeUniqueTableName(makeTableName(fp), tableNames);
           const result = await loadSingleFile(fp, tableName);
           if (result && "error" in result && result.canRetry) {
             setPendingRetry({
@@ -383,7 +400,7 @@ export function App(): React.ReactElement {
           }
         } else {
           // JSON, Parquet — straight load
-          const tableName = makeTableName(fp);
+          const tableName = makeUniqueTableName(makeTableName(fp), tableNames);
           const result = await loadSingleFile(fp, tableName);
           if (result && !("error" in result)) {
             newTables.push(result);
@@ -402,10 +419,12 @@ export function App(): React.ReactElement {
       if (!pendingExcelImport) return;
       const { filePath, otherFiles, replace, remainingFiles } = pendingExcelImport;
       const newTables = [...otherFiles];
+      const tableNames = new Set(newTables.map((t) => t.tableName));
       const baseName = makeTableName(filePath);
 
       for (const sheetName of selectedSheets) {
-        const tableName = `${baseName}_${sheetName.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+        const sheetBaseName = `${baseName}_${sheetName.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+        const tableName = makeUniqueTableName(sheetBaseName, tableNames);
         const result = await loadSingleFile(filePath, tableName, { excelSheet: sheetName });
         if (result && !("error" in result)) {
           newTables.push(result);
@@ -455,7 +474,7 @@ export function App(): React.ReactElement {
 
   // Register IPC listeners once on mount
   useEffect(() => {
-    window.api.onOpenFiles((filePaths) => loadFiles(filePaths, true));
+    window.api.onOpenFiles((filePaths) => loadFiles(filePaths, false));
     window.api.onAddFiles((filePaths) => loadFiles(filePaths, false));
     window.api.onExportCSV(() => {
       setExportDialogOpen(true);
