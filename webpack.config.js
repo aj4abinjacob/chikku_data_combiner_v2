@@ -1,5 +1,6 @@
 const webpack = require("webpack");
 const path = require("path");
+const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 
 module.exports = function (_env, argv) {
   const mode = argv?.mode || "development";
@@ -33,15 +34,15 @@ module.exports = function (_env, argv) {
         },
         {
           test: /\.less$/,
-          use: ["style-loader", "css-loader", "less-loader"],
+          use: [MiniCssExtractPlugin.loader, "css-loader", "less-loader"],
         },
         {
           test: /\.scss$/,
-          use: ["style-loader", "css-loader", "resolve-url-loader", "sass-loader"],
+          use: [MiniCssExtractPlugin.loader, "css-loader", "resolve-url-loader", "sass-loader"],
         },
         {
           test: /\.css$/,
-          use: ["style-loader", "css-loader"],
+          use: [MiniCssExtractPlugin.loader, "css-loader"],
         },
         {
           test: /\.(jpe?g|png|gif|svg)$/i,
@@ -59,6 +60,9 @@ module.exports = function (_env, argv) {
     plugins: [
       new webpack.DefinePlugin({
         "process.env.NODE_ENV": JSON.stringify(mode),
+      }),
+      new MiniCssExtractPlugin({
+        filename: "[name].css",
       }),
     ],
     devServer: {

@@ -1,6 +1,6 @@
 {
   "name": "chikku-parser",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "description": "Desktop app for viewing, combining, and transforming CSV data",
   "scripts": {
     "clean": "rimraf dist-tauri",
@@ -46,6 +46,7 @@
     "file-loader": "^6.2.0",
     "less": "^4.2.0",
     "less-loader": "^12.2.0",
+    "mini-css-extract-plugin": "^2.10.2",
     "mkdirp": "^3.0.1",
     "recursive-copy-cli": "^1.0.20",
     "resolve-url-loader": "^5.0.0",
@@ -53,7 +54,6 @@
     "sass": "^1.80.0",
     "sass-loader": "^14.2.0",
     "source-map-loader": "^5.0.0",
-    "style-loader": "^3.3.4",
     "ts-loader": "^9.5.0",
     "typescript": "^5.4.0",
     "webpack": "^5.90.0",
