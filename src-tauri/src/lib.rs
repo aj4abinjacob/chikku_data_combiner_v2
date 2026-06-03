@@ -10,8 +10,11 @@ use commands::*;
 use db::DbState;
 use menu::MenuState;
 use patterns::PatternState;
+use std::time::Duration;
 use tauri::{Manager, RunEvent};
-use window_mgr::{filter_supported, spawn_window, take_pending_files, PendingFiles};
+use window_mgr::{
+    filter_supported, open_files_in_window, spawn_window, take_pending_files, PendingFiles,
+};
 
 fn args_to_files(argv: &[String]) -> Vec<String> {
     // First arg is the app path itself; subsequent args may be files.
@@ -39,8 +42,8 @@ pub fn run() {
                 }
                 return;
             }
-            if let Err(e) = spawn_window(app, Some(files)) {
-                log::warn!("spawn_window failed: {e}");
+            if let Err(e) = open_files_in_window(app, files) {
+                log::warn!("open_files_in_window failed: {e}");
             }
         }))
         .manage(DbState::default())
@@ -78,8 +81,20 @@ pub fn run() {
             });
 
             let initial = cli_files.clone();
-            let initial_label = spawn_window(&handle, Some(initial))?;
-            log::info!("initial window spawned: {}", initial_label);
+            if cfg!(target_os = "macos") && initial.is_empty() {
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(750));
+                    if handle.webview_windows().is_empty() {
+                        match spawn_window(&handle, None) {
+                            Ok(label) => log::info!("delayed initial window spawned: {label}"),
+                            Err(e) => log::warn!("delayed initial window spawn failed: {e}"),
+                        }
+                    }
+                });
+            } else {
+                let initial_label = spawn_window(&handle, Some(initial))?;
+                log::info!("initial window spawned: {}", initial_label);
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -108,7 +123,7 @@ fn handle_opened_urls(app_handle: &tauri::AppHandle, urls: Vec<tauri::Url>) {
     if supported.is_empty() {
         return;
     }
-    if let Err(e) = spawn_window(app_handle, Some(supported)) {
-        log::warn!("spawn_window from open-file failed: {e}");
+    if let Err(e) = open_files_in_window(app_handle, supported) {
+        log::warn!("open_files_in_window from open-file failed: {e}");
     }
 }

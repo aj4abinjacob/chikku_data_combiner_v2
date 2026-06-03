@@ -1,6 +1,6 @@
 {
   "name": "chikku-parser",
-  "version": "0.3.13",
+  "version": "0.3.14",
   "description": "Desktop app for viewing, combining, and transforming CSV data",
   "scripts": {
     "clean": "rimraf dist-tauri",

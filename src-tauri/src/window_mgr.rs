@@ -1,10 +1,10 @@
 use crate::db::DbState;
 use crate::error::{AppError, AppResult};
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const SUPPORTED_EXTS: &[&str] = &[
     "csv", "tsv", "json", "jsonl", "ndjson", "parquet", "xlsx", "xls",
@@ -35,6 +35,7 @@ where
 #[derive(Default)]
 pub struct PendingFiles {
     by_window: Mutex<HashMap<String, Vec<String>>>,
+    ready_windows: Mutex<HashSet<String>>,
 }
 
 impl PendingFiles {
@@ -47,8 +48,13 @@ impl PendingFiles {
     }
 
     pub fn take(&self, label: &str) -> Vec<String> {
+        self.ready_windows.lock().insert(label.to_string());
         let mut map = self.by_window.lock();
         map.remove(label).unwrap_or_default()
+    }
+
+    pub fn is_ready(&self, label: &str) -> bool {
+        self.ready_windows.lock().contains(label)
     }
 }
 
@@ -96,6 +102,42 @@ pub fn spawn_window(app: &AppHandle, files: Option<Vec<String>>) -> AppResult<St
     });
 
     Ok(label)
+}
+
+/// Open files in an existing window when possible. macOS delivers Finder
+/// "Open With" files after startup, so reusing the startup window avoids a
+/// blank companion window next to the file-loaded window.
+pub fn open_files_in_window(app: &AppHandle, files: Vec<String>) -> AppResult<Option<String>> {
+    let supported = filter_supported(files);
+    if supported.is_empty() {
+        return Ok(None);
+    }
+
+    let mut windows = app.webview_windows();
+    let focused = windows
+        .values()
+        .find(|window| window.is_focused().unwrap_or(false))
+        .cloned();
+    let window = focused
+        .or_else(|| windows.remove("main"))
+        .or_else(|| windows.into_values().next());
+
+    if let Some(window) = window {
+        let label = window.label().to_string();
+        let state: tauri::State<'_, PendingFiles> = app.state();
+        if state.is_ready(&label) {
+            window
+                .emit("open-files", supported)
+                .map_err(|e| AppError::msg(format!("emit open-files: {e}")))?;
+        } else {
+            state.push(&label, supported);
+        }
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(Some(label));
+    }
+
+    spawn_window(app, Some(supported)).map(Some)
 }
 
 #[tauri::command]
