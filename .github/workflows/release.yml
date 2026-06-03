@@ -58,6 +58,37 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Configure macOS signing credentials
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_SECRET: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD_SECRET: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY_SECRET: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID_SECRET: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD_SECRET: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          append_env() {
+            local name="$1"
+            local value="$2"
+
+            if [ -n "$value" ]; then
+              {
+                echo "${name}<<__${name}__"
+                echo "$value"
+                echo "__${name}__"
+              } >> "$GITHUB_ENV"
+            fi
+          }
+
+          append_env "APPLE_CERTIFICATE" "$APPLE_CERTIFICATE_SECRET"
+          append_env "APPLE_CERTIFICATE_PASSWORD" "$APPLE_CERTIFICATE_PASSWORD_SECRET"
+          append_env "APPLE_SIGNING_IDENTITY" "$APPLE_SIGNING_IDENTITY_SECRET"
+          append_env "APPLE_ID" "$APPLE_ID_SECRET"
+          append_env "APPLE_PASSWORD" "$APPLE_PASSWORD_SECRET"
+          append_env "APPLE_TEAM_ID" "$APPLE_TEAM_ID_SECRET"
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
