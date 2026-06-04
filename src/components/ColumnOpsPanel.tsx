@@ -9,6 +9,7 @@ import {
   Icon,
   RadioGroup,
   Radio,
+  Tag,
 } from "@blueprintjs/core";
 import { ColumnInfo, ColOpType, ColOpStep, UndoStrategy, FilterGroup, ColOpTargetMode } from "../types";
 import { buildColOpExpr } from "../utils/colOpsSQL";
@@ -17,7 +18,6 @@ import { RegexPatternPicker } from "./RegexPatternPicker";
 import { RegexPatternManagerDialog } from "./RegexPatternManagerDialog";
 import { SearchableColumnSelect } from "./SearchableColumnSelect";
 
-// Grouped operation options for <optgroup> structure
 const OP_GROUPS: { label: string; ops: { value: ColOpType; label: string }[] }[] = [
   {
     label: "Search",
@@ -45,16 +45,10 @@ const OP_GROUPS: { label: string; ops: { value: ColOpType; label: string }[] }[]
   },
 ];
 
-// Flat list for lookups
 const ALL_OPS = OP_GROUPS.flatMap((g) => g.ops);
 
-// Operations that need no extra params
 const NO_PARAM_OPS = new Set<ColOpType>(["trim", "upper", "lower", "clear_null"]);
-
-// Operations that should NOT show target mode (result is always NULL replacement)
 const NO_TARGET_OPS = new Set<ColOpType>(["clear_null"]);
-
-// Operations that should NOT show "Existing column" option
 const NO_EXISTING_TARGET_OPS = new Set<ColOpType>(["assign_value"]);
 
 interface ColumnOpsPanelProps {
@@ -105,19 +99,16 @@ export function ColumnOpsPanel({
   const [lastAppliedKey, setLastAppliedKey] = useState<string | null>(null);
   const configRef = useRef<HTMLDivElement>(null);
 
-  // Notify parent to grow panel when config content changes
   useLayoutEffect(() => {
     if (!visible || !configRef.current || !onContentHeightChange) return;
     const el = configRef.current;
-    // scrollHeight = full content height the config panel needs
-    onContentHeightChange(el.scrollHeight + 20);
+    onContentHeightChange(el.scrollHeight + 60);
   }, [visible, opType, targetMode, selectedColumn, colOpsSteps.length, onContentHeightChange]);
 
   const handlePatternsChanged = useCallback(() => {
     setPatternRefreshKey((k) => k + 1);
   }, []);
 
-  // Live preview: debounced query for 5 sample rows showing before/after
   useEffect(() => {
     if (!activeTable || !selectedColumn || !visible) {
       setPreviews([]);
@@ -131,7 +122,6 @@ export function ColumnOpsPanel({
       return;
     }
 
-    // For ops with required params, skip preview until params are filled
     if (opType === "assign_value" && !params.value) { setPreviews([]); setPreviewError(null); return; }
     if (opType === "find_replace" && !params.pattern) { setPreviews([]); setPreviewError(null); return; }
     if (opType === "regex_extract" && !params.pattern) { setPreviews([]); setPreviewError(null); return; }
@@ -166,10 +156,21 @@ export function ColumnOpsPanel({
   const isFiltered = hasFilter && totalRows !== unfilteredRows;
   const showTargetMode = !NO_TARGET_OPS.has(opType);
   const hideExistingTarget = NO_EXISTING_TARGET_OPS.has(opType);
+  const needsParams = !NO_PARAM_OPS.has(opType);
 
-  // Track current config to detect changes since last apply
   const currentConfigKey = JSON.stringify({ selectedColumn, opType, params, targetMode: showTargetMode ? targetMode : "replace", targetColumn: showTargetMode ? targetColumn : "" });
   const isUnchangedSinceApply = lastAppliedKey === currentConfigKey;
+
+  const opLabel = ALL_OPS.find((o) => o.value === opType)?.label ?? opType;
+
+  const paramsMissing = (() => {
+    if (!needsParams) return false;
+    if (opType === "assign_value") return !params.value;
+    if (opType === "find_replace") return !params.pattern;
+    if (opType === "regex_extract") return !params.pattern;
+    if (opType === "prefix_suffix") return !params.prefix && !params.suffix;
+    return false;
+  })();
 
   const handleApply = async () => {
     if (!selectedColumn || !activeTable) return;
@@ -185,9 +186,7 @@ export function ColumnOpsPanel({
       const appliedOp = ALL_OPS.find((o) => o.value === opType)?.label ?? opType;
       const fullParams = { ...params, targetMode: effectiveTargetMode, targetColumn: effectiveTargetCol };
       await onApply(opType, selectedColumn, fullParams);
-      // Mark this config as applied
       setLastAppliedKey(currentConfigKey);
-      // Show success flash
       const targetLabel = effectiveTargetMode === "new_column" ? ` → new "${effectiveTargetCol}"`
         : effectiveTargetMode === "existing_column" ? ` → "${effectiveTargetCol}"`
         : "";
@@ -249,9 +248,6 @@ export function ColumnOpsPanel({
     setParams((prev) => ({ ...prev, [key]: value }));
   };
 
-  const needsParams = !NO_PARAM_OPS.has(opType);
-
-  // Stacked parameter fields
   const renderParams = () => {
     switch (opType) {
       case "assign_value":
@@ -275,7 +271,7 @@ export function ColumnOpsPanel({
               <InputGroup
                 value={params.pattern ?? ""}
                 onChange={(e) => updateParam("pattern", e.target.value)}
-                placeholder="Find..."
+                placeholder="Text to find..."
                 onKeyDown={(e) => { if (e.key === "Enter") handleApply(); }}
                 rightElement={params.useRegex === "true" ? (
                   <RegexPatternPicker
@@ -288,16 +284,16 @@ export function ColumnOpsPanel({
               />
             </div>
             <div className="colops-field">
-              <label>Replace</label>
+              <label>Replace with</label>
               <InputGroup
                 value={params.replacement ?? ""}
                 onChange={(e) => updateParam("replacement", e.target.value)}
-                placeholder="Replace with..."
+                placeholder="Replacement..."
                 onKeyDown={(e) => { if (e.key === "Enter") handleApply(); }}
                 fill
               />
             </div>
-            <div className="colops-field">
+            <div className="colops-field colops-field-inline">
               <Checkbox
                 checked={params.useRegex === "true"}
                 onChange={(e) => updateParam("useRegex", (e.target as HTMLInputElement).checked ? "true" : "false")}
@@ -347,13 +343,13 @@ export function ColumnOpsPanel({
                   <InputGroup
                     value={params.separator ?? ""}
                     onChange={(e) => updateParam("separator", e.target.value)}
-                    placeholder="Sep"
+                    placeholder=", "
                     fill
                   />
                 </div>
               )}
             </div>
-            <div className="colops-field">
+            <div className="colops-field colops-field-inline">
               <Checkbox
                 checked={params.allMatches === "true"}
                 onChange={(e) => updateParam("allMatches", (e.target as HTMLInputElement).checked ? "true" : "false")}
@@ -395,7 +391,7 @@ export function ColumnOpsPanel({
                 <InputGroup
                   value={params.separator ?? ""}
                   onChange={(e) => updateParam("separator", e.target.value)}
-                  placeholder=""
+                  placeholder=", "
                   fill
                 />
               </div>
@@ -410,7 +406,7 @@ export function ColumnOpsPanel({
               <InputGroup
                 value={params.prefix ?? ""}
                 onChange={(e) => updateParam("prefix", e.target.value)}
-                placeholder="Before value..."
+                placeholder="Text before..."
                 onKeyDown={(e) => { if (e.key === "Enter") handleApply(); }}
                 fill
               />
@@ -420,7 +416,7 @@ export function ColumnOpsPanel({
               <InputGroup
                 value={params.suffix ?? ""}
                 onChange={(e) => updateParam("suffix", e.target.value)}
-                placeholder="After value..."
+                placeholder="Text after..."
                 onKeyDown={(e) => { if (e.key === "Enter") handleApply(); }}
                 fill
               />
@@ -433,14 +429,61 @@ export function ColumnOpsPanel({
   };
 
   const applyDisabled =
-    !selectedColumn || loading || isUnchangedSinceApply
+    !selectedColumn || loading || isUnchangedSinceApply || paramsMissing
     || (showTargetMode && targetMode === "new_column" && (!targetColumn.trim() || columns.some((c) => c.column_name === targetColumn.trim())))
     || (showTargetMode && targetMode === "existing_column" && !targetColumn);
 
+  const statusInfo = (() => {
+    if (successMsg) return { tag: "Applied", intent: Intent.SUCCESS, icon: "tick" as const, detail: successMsg };
+    if (error) return { tag: "Error", intent: Intent.DANGER, icon: "error" as const, detail: error };
+    if (loading) return { tag: "Working", intent: Intent.PRIMARY, icon: "refresh" as const, detail: "Applying..." };
+    if (!selectedColumn) return { tag: "Ready", intent: undefined, icon: "edit" as const, detail: "Pick a column to start" };
+    if (paramsMissing) return { tag: "Editing", intent: Intent.WARNING, icon: "edit" as const, detail: `${opLabel} on "${selectedColumn}" — fill required fields` };
+    if (isUnchangedSinceApply) return { tag: "Applied", intent: Intent.SUCCESS, icon: "tick" as const, detail: `${opLabel} on "${selectedColumn}"` };
+    return { tag: "Draft", intent: Intent.WARNING, icon: "edit" as const, detail: `${opLabel} on "${selectedColumn}" — ready to apply` };
+  })();
+
+  const focusColumnPicker = () => {
+    const el = configRef.current?.querySelector<HTMLElement>(".colops-col-select button, .colops-col-select input");
+    el?.click();
+    el?.focus();
+  };
+
   return (
     <div className="colops-body" style={{ display: visible ? "flex" : "none" }}>
+      {/* Toolbar — matches filter-toolbar */}
+      <div className="colops-toolbar">
+        <div className="colops-status-strip">
+          <Tag minimal icon={statusInfo.icon} intent={statusInfo.intent}>
+            {statusInfo.tag}
+          </Tag>
+          <span className="colops-status-detail" title={statusInfo.detail}>{statusInfo.detail}</span>
+          {isFiltered && (
+            <Tag minimal icon="filter" intent={Intent.PRIMARY} className="colops-scope-tag">
+              {totalRows.toLocaleString()} of {unfilteredRows!.toLocaleString()} rows
+            </Tag>
+          )}
+          {!isFiltered && (
+            <Tag minimal icon="database" className="colops-scope-tag colops-scope-all">
+              All {totalRows.toLocaleString()} rows
+            </Tag>
+          )}
+        </div>
+        <div className="colops-toolbar-actions">
+          <Button
+            intent={Intent.PRIMARY}
+            icon="tick"
+            text="Apply"
+            small
+            onClick={handleApply}
+            loading={loading}
+            disabled={applyDisabled}
+          />
+        </div>
+      </div>
+
       <div className="colops-layout">
-        {/* Left panel: configuration form */}
+        {/* Left: configuration */}
         <div className="colops-config" ref={configRef}>
           <div className="colops-field">
             <label>Column</label>
@@ -482,7 +525,6 @@ export function ColumnOpsPanel({
 
           {needsParams && renderParams()}
 
-          {/* Target mode — shown for all ops except clear_null */}
           {showTargetMode && (
             <div className="colops-field">
               <label>Write to</label>
@@ -503,7 +545,7 @@ export function ColumnOpsPanel({
                   <InputGroup
                     value={targetColumn}
                     onChange={(e) => setTargetColumn(e.target.value)}
-                    placeholder="Column name..."
+                    placeholder="New column name..."
                     intent={targetColumn && columns.some((c) => c.column_name === targetColumn.trim()) ? Intent.DANGER : Intent.NONE}
                     onKeyDown={(e) => { if (e.key === "Enter") handleApply(); }}
                     fill
@@ -521,57 +563,15 @@ export function ColumnOpsPanel({
               </div>
             </div>
           )}
-
-          {/* Filter scope banner */}
-          {isFiltered ? (
-            <div className="colops-filter-banner">
-              <Icon icon="filter" iconSize={12} />
-              <div className="colops-filter-banner-text">
-                <strong>Filtered scope</strong>
-                <span>Affects {totalRows.toLocaleString()} of {unfilteredRows!.toLocaleString()} rows</span>
-              </div>
-            </div>
-          ) : (
-            <div className="colops-scope-row">
-              <span className="colops-scope colops-scope-all">
-                <Icon icon="database" iconSize={10} />
-                All {totalRows.toLocaleString()} rows
-              </span>
-            </div>
-          )}
-
-          {/* Apply button */}
-          <div className="colops-actions">
-            <Button
-              intent={Intent.PRIMARY}
-              icon="tick"
-              text="Apply"
-              onClick={handleApply}
-              loading={loading}
-              disabled={applyDisabled}
-              fill
-            />
-          </div>
-
-          {/* Success / error messages */}
-          {successMsg && (
-            <span className="colops-inline-success">
-              <Icon icon="tick-circle" iconSize={12} intent={Intent.SUCCESS} />
-              {successMsg}
-            </span>
-          )}
-          {error && (
-            <span className="colops-inline-error" title={error}>
-              <Icon icon="error" iconSize={12} intent={Intent.DANGER} />
-              {error}
-            </span>
-          )}
         </div>
 
-        {/* Center panel: preview */}
+        {/* Center: preview / guidance */}
         <div className="colops-preview-panel">
           {previewError ? (
-            <span className="colops-preview-error">{previewError}</span>
+            <div className="colops-preview-error-card">
+              <Icon icon="error" iconSize={14} />
+              <span>{previewError}</span>
+            </div>
           ) : previews.length > 0 ? (
             <table className="colops-preview-table">
               <thead>
@@ -584,67 +584,109 @@ export function ColumnOpsPanel({
               </tbody>
             </table>
           ) : (
-            <div className="colops-preview-empty">
-              Select a column and action to see preview
+            <div className="colops-empty-state">
+              <div className="colops-empty-icon" aria-hidden="true">
+                <Icon icon={selectedColumn ? "edit" : "th"} iconSize={18} />
+              </div>
+              <div className="colops-empty-main">
+                <div className="colops-empty-copy">
+                  <span className="colops-empty-title">
+                    {!selectedColumn
+                      ? "Transform a column"
+                      : paramsMissing
+                        ? `Configure ${opLabel}`
+                        : opType === "clear_null"
+                          ? "Ready to clear values to NULL"
+                          : "Preview will appear here"}
+                  </span>
+                  <span className="colops-empty-text">
+                    {!selectedColumn
+                      ? "Pick a column and an action to preview before applying."
+                      : paramsMissing
+                        ? "Fill the parameters on the left to see how rows will change."
+                        : opType === "clear_null"
+                          ? `Apply will set "${selectedColumn}" to NULL on every row in scope.`
+                          : "No distinct values to preview yet."}
+                  </span>
+                </div>
+                {!selectedColumn && (
+                  <div className="colops-empty-actions">
+                    <Button
+                      icon="th"
+                      text="Choose column"
+                      small
+                      intent={Intent.PRIMARY}
+                      disabled={columns.length === 0}
+                      onClick={focusColumnPicker}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
 
-        {/* Right panel: history */}
+        {/* Right: history */}
         <div className="colops-history-panel">
-          {colOpsSteps.length > 0 ? (
-            <>
-              <div className="colops-steps-header">
-                <span className="colops-steps-title">History ({colOpsSteps.length})</span>
-                <div className="colops-steps-actions">
-                  {undoStrategy === "per-step" && (
-                    <Button
-                      small
-                      minimal
-                      intent={Intent.PRIMARY}
-                      icon="undo"
-                      text="Undo"
-                      onClick={handleUndo}
-                      disabled={loading}
-                    />
-                  )}
-                  {undoStrategy === "snapshot" && (
-                    <Button
-                      small
-                      minimal
-                      intent={Intent.WARNING}
-                      icon="undo"
-                      text="Revert All"
-                      onClick={() => setRevertConfirmOpen(true)}
-                      disabled={loading}
-                    />
-                  )}
+          <div className="colops-history-header">
+            <span className="colops-history-title">
+              History
+              {colOpsSteps.length > 0 && (
+                <span className="colops-history-count">{colOpsSteps.length}</span>
+              )}
+            </span>
+            {colOpsSteps.length > 0 && (
+              <div className="colops-steps-actions">
+                {undoStrategy === "per-step" && (
                   <Button
                     small
                     minimal
-                    icon="trash"
-                    onClick={() => setClearConfirmOpen(true)}
+                    icon="undo"
+                    onClick={handleUndo}
                     disabled={loading}
-                    title="Clear history"
+                    title="Undo last step"
                   />
+                )}
+                {undoStrategy === "snapshot" && (
+                  <Button
+                    small
+                    minimal
+                    intent={Intent.WARNING}
+                    icon="undo"
+                    onClick={() => setRevertConfirmOpen(true)}
+                    disabled={loading}
+                    title="Revert all"
+                  />
+                )}
+                <Button
+                  small
+                  minimal
+                  icon="trash"
+                  onClick={() => setClearConfirmOpen(true)}
+                  disabled={loading}
+                  title="Clear history"
+                />
+              </div>
+            )}
+          </div>
+          {colOpsSteps.length > 0 ? (
+            <div className="colops-step-list">
+              {[...colOpsSteps].reverse().map((step, idx) => (
+                <div key={step.id} className={`colops-step-item ${idx === 0 ? "colops-step-latest" : ""}`}>
+                  <span className="colops-step-number">{step.id}</span>
+                  <span className="colops-step-desc" title={step.description}>{step.description}</span>
                 </div>
-              </div>
-              <div className="colops-step-list">
-                {[...colOpsSteps].reverse().map((step, idx) => (
-                  <div key={step.id} className={`colops-step-item ${idx === 0 ? "colops-step-latest" : ""}`}>
-                    <span className="colops-step-number">{step.id}</span>
-                    <span className="colops-step-desc" title={step.description}>{step.description}</span>
-                  </div>
-                ))}
-              </div>
-            </>
+              ))}
+            </div>
           ) : (
-            <div className="colops-history-empty">No steps yet</div>
+            <div className="colops-history-empty">
+              <Icon icon="history" iconSize={14} />
+              <span>Applied steps will show here</span>
+            </div>
           )}
         </div>
       </div>
 
-      {/* Confirmation dialogs */}
       <Alert
         isOpen={clearConfirmOpen}
         onClose={() => setClearConfirmOpen(false)}

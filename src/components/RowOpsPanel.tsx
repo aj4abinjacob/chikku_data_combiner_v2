@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import ReactDOM from "react-dom";
 import {
   Button,
   Checkbox,
@@ -9,18 +10,149 @@ import {
   Icon,
   RadioGroup,
   Radio,
+  Tag,
 } from "@blueprintjs/core";
 import { ColumnInfo, RowOpType, RowOpStep, UndoStrategy, FilterGroup, hasActiveFilters } from "../types";
 
-const OP_OPTIONS: { value: RowOpType; label: string }[] = [
-  { value: "delete_filtered", label: "Delete Filtered Rows" },
-  { value: "keep_filtered", label: "Keep Filtered Rows" },
-  { value: "remove_empty", label: "Remove Empty Rows" },
-  { value: "remove_duplicates", label: "Remove Duplicates" },
+const OP_OPTIONS: { value: RowOpType; label: string; description: string }[] = [
+  { value: "delete_filtered", label: "Delete Filtered Rows", description: "Remove rows that match the current filter" },
+  { value: "keep_filtered", label: "Keep Filtered Rows", description: "Remove rows that do NOT match the current filter" },
+  { value: "remove_empty", label: "Remove Empty Rows", description: "Remove rows that are empty in selected columns" },
+  { value: "remove_duplicates", label: "Remove Duplicates", description: "Drop duplicate rows by selected columns" },
 ];
 
 const FILTER_REQUIRED_OPS = new Set<RowOpType>(["delete_filtered", "keep_filtered"]);
 const COLUMN_SELECT_OPS = new Set<RowOpType>(["remove_empty", "remove_duplicates"]);
+
+// ── Multi-column picker popover (modeled after filter IN picker) ──
+
+interface ColumnMultiPickerProps {
+  columns: ColumnInfo[];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+  placeholderAll: string;
+}
+
+function ColumnMultiPicker({ columns, selected, onChange, placeholderAll }: ColumnMultiPickerProps): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    if (anchorRef.current) {
+      const rect = anchorRef.current.getBoundingClientRect();
+      setPos({
+        top: rect.top,
+        left: rect.left,
+        width: Math.max(rect.width, 280),
+      });
+    }
+    const handler = (e: MouseEvent) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node) &&
+        anchorRef.current &&
+        !anchorRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const toggle = (name: string) => {
+    const next = new Set(selected);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    onChange(next);
+  };
+
+  const filtered = columns
+    .filter((c) => !search || c.column_name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }));
+
+  const selectAll = () => {
+    const next = new Set(selected);
+    for (const c of filtered) next.add(c.column_name);
+    onChange(next);
+  };
+
+  const clearAll = () => onChange(new Set());
+
+  const label = selected.size === 0
+    ? placeholderAll
+    : selected.size === 1
+      ? Array.from(selected)[0]
+      : `${selected.size} columns`;
+
+  const dropdown = open
+    ? ReactDOM.createPortal(
+        <div
+          className="in-value-dropdown"
+          ref={dropdownRef}
+          style={{
+            position: "fixed",
+            bottom: window.innerHeight - pos.top + 4,
+            left: pos.left,
+            width: pos.width,
+          }}
+        >
+          <div className="in-value-dropdown-header">
+            <InputGroup
+              placeholder="Search columns..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              small
+              leftIcon="search"
+              autoFocus
+            />
+            <div className="in-value-dropdown-actions">
+              <Button small minimal text="All" onClick={selectAll} />
+              <Button small minimal text="None" onClick={clearAll} />
+              <span className="in-value-dropdown-count">
+                {selected.size} / {columns.length}
+              </span>
+            </div>
+          </div>
+          <div className="in-value-dropdown-list">
+            {filtered.length === 0 ? (
+              <div className="in-value-dropdown-empty">No columns</div>
+            ) : (
+              filtered.map((c) => (
+                <label key={c.column_name} className="in-value-dropdown-item">
+                  <Checkbox
+                    checked={selected.has(c.column_name)}
+                    onChange={() => toggle(c.column_name)}
+                    style={{ marginBottom: 0 }}
+                  />
+                  <span className="in-value-dropdown-label" title={c.column_name}>{c.column_name}</span>
+                  <span className="rowops-picker-type">{c.column_type}</span>
+                </label>
+              ))
+            )}
+          </div>
+        </div>,
+        document.body
+      )
+    : null;
+
+  return (
+    <div className="in-value-picker-wrapper rowops-col-picker" ref={anchorRef}>
+      <Button
+        className="filter-value-btn"
+        small
+        rightIcon={open ? "caret-up" : "caret-down"}
+        text={label}
+        onClick={() => setOpen((v) => !v)}
+      />
+      {dropdown}
+    </div>
+  );
+}
 
 interface RowOpsPanelProps {
   columns: ColumnInfo[];
@@ -53,7 +185,6 @@ export function RowOpsPanel({
 }: RowOpsPanelProps): React.ReactElement {
   const [opType, setOpType] = useState<RowOpType>("delete_filtered");
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(new Set());
-  const [colSearch, setColSearch] = useState("");
   const [emptyMode, setEmptyMode] = useState<"all" | "any">("any");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,15 +201,12 @@ export function RowOpsPanel({
   const needsColumns = COLUMN_SELECT_OPS.has(opType);
   const isDisabled = needsFilter && !hasFilter;
 
-  // Reset column selection when op type changes
   useEffect(() => {
     setSelectedColumns(new Set());
-    setColSearch("");
     setEmptyMode("any");
     setPreviewCount(null);
   }, [opType]);
 
-  // Debounced preview count
   useEffect(() => {
     if (!activeTable || !visible) return;
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
@@ -91,10 +219,8 @@ export function RowOpsPanel({
     previewTimerRef.current = setTimeout(async () => {
       try {
         if (opType === "delete_filtered" && hasFilter) {
-          // Count of rows that will be deleted = filtered row count
           setPreviewCount(totalRows);
         } else if (opType === "keep_filtered" && hasFilter) {
-          // Count of rows that will be deleted = total - filtered
           const total = unfilteredRows ?? totalRows;
           setPreviewCount(total - totalRows);
         } else if (opType === "remove_empty") {
@@ -155,7 +281,6 @@ export function RowOpsPanel({
       await onApply(opType, params);
       setOpType("delete_filtered");
       setSelectedColumns(new Set());
-      setColSearch("");
       setPreviewCount(null);
       setSuccessMsg(`${appliedOp} completed`);
       setTimeout(() => setSuccessMsg(null), 3000);
@@ -211,31 +336,7 @@ export function RowOpsPanel({
     );
   }
 
-  const toggleColumn = (colName: string) => {
-    setSelectedColumns((prev) => {
-      const next = new Set(prev);
-      if (next.has(colName)) next.delete(colName);
-      else next.add(colName);
-      return next;
-    });
-  };
-
-  const selectAllColumns = () => {
-    const visible = filteredColumns.map((c) => c.column_name);
-    setSelectedColumns((prev) => {
-      const next = new Set(prev);
-      for (const v of visible) next.add(v);
-      return next;
-    });
-  };
-
-  const deselectAllColumns = () => setSelectedColumns(new Set());
-
-  const filteredColumns = columns
-    .filter((c) =>
-      !colSearch || c.column_name.toLowerCase().includes(colSearch.toLowerCase())
-    )
-    .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }));
+  const opMeta = OP_OPTIONS.find((o) => o.value === opType)!;
 
   const previewLabel = (() => {
     if (previewCount === null) return null;
@@ -243,26 +344,37 @@ export function RowOpsPanel({
     return `${previewCount.toLocaleString()} row${previewCount !== 1 ? "s" : ""} will be removed`;
   })();
 
+  const statusInfo = (() => {
+    if (successMsg) return { tag: "Done", intent: Intent.SUCCESS, icon: "tick" as const, detail: successMsg };
+    if (error) return { tag: "Error", intent: Intent.DANGER, icon: "error" as const, detail: error };
+    if (loading) return { tag: "Working", intent: Intent.PRIMARY, icon: "refresh" as const, detail: "Applying..." };
+    if (isDisabled) return { tag: "Needs filter", intent: Intent.WARNING, icon: "filter" as const, detail: opMeta.description };
+    if (previewLabel) return { tag: "Ready", intent: Intent.WARNING, icon: "edit" as const, detail: previewLabel };
+    return { tag: "Ready", intent: undefined, icon: "edit" as const, detail: opMeta.description };
+  })();
+
   return (
     <div className="rowops-body" style={{ display: visible ? "flex" : "none" }}>
-      {/* Top area: form + status */}
-      <div className="rowops-top">
-        {/* Operation row */}
-        <div className="rowops-op-row">
-          <HTMLSelect
-            className="rowops-op-select"
-            value={opType}
-            onChange={(e) => setOpType(e.target.value as RowOpType)}
-          >
-            {OP_OPTIONS.map((op) => (
-              <option key={op.value} value={op.value}>
-                {op.label}
-              </option>
-            ))}
-          </HTMLSelect>
-
+      {/* Toolbar — matches filter-toolbar */}
+      <div className="rowops-toolbar">
+        <div className="rowops-status-strip">
+          <Tag minimal icon={statusInfo.icon} intent={statusInfo.intent}>
+            {statusInfo.tag}
+          </Tag>
+          <span className="rowops-status-detail" title={statusInfo.detail}>{statusInfo.detail}</span>
+          {isFiltered && (
+            <Tag minimal icon="filter" intent={Intent.PRIMARY} className="rowops-scope-tag">
+              {totalRows.toLocaleString()} of {unfilteredRows!.toLocaleString()} rows
+            </Tag>
+          )}
+          {!isFiltered && (
+            <Tag minimal icon="database" className="rowops-scope-tag rowops-scope-all">
+              All {totalRows.toLocaleString()} rows
+            </Tag>
+          )}
+        </div>
+        <div className="rowops-toolbar-actions">
           <Button
-            className="rowops-apply-btn"
             intent={Intent.WARNING}
             icon="tick"
             text="Apply"
@@ -272,110 +384,109 @@ export function RowOpsPanel({
             disabled={isDisabled || loading}
           />
         </div>
+      </div>
 
-        {/* Disabled hint */}
-        {isDisabled && (
-          <div className="rowops-disabled-hint">
-            <Icon icon="info-sign" iconSize={12} />
-            Set a filter first to use this operation
-          </div>
-        )}
-
-        {/* All/Any mode toggle for remove_empty */}
-        {opType === "remove_empty" && (
-          <RadioGroup
-            className="rowops-empty-mode"
-            inline
-            selectedValue={emptyMode}
-            onChange={(e) => setEmptyMode((e.target as HTMLInputElement).value as "all" | "any")}
-          >
-            <Radio label="Any column empty" value="any" />
-            <Radio label="All columns empty" value="all" />
-          </RadioGroup>
-        )}
-
-        {/* Column selector for remove_empty and remove_duplicates */}
-        {needsColumns && (
-          <div className="rowops-col-selector">
-            <div className="rowops-col-selector-header">
-              <span className="rowops-col-selector-label">
-                {opType === "remove_duplicates" ? "Dedup by columns" : "Check columns"} ({selectedColumns.size === 0 ? "all" : selectedColumns.size})
-              </span>
-              <div className="rowops-col-selector-actions">
-                <Button small minimal text="All" onClick={selectAllColumns} />
-                <Button small minimal text="None" onClick={deselectAllColumns} />
+      {/* Content */}
+      <div className="rowops-content">
+        {isDisabled ? (
+          <div className="rowops-empty-state">
+            <div className="rowops-empty-icon" aria-hidden="true">
+              <Icon icon="filter" iconSize={18} />
+            </div>
+            <div className="rowops-empty-main">
+              <div className="rowops-empty-copy">
+                <span className="rowops-empty-title">A filter is required first</span>
+                <span className="rowops-empty-text">
+                  {opMeta.label} works on filtered rows. Switch to the Filters tab and add a condition.
+                </span>
+              </div>
+              <div className="rowops-empty-actions">
+                <HTMLSelect
+                  className="rowops-empty-op-select"
+                  value={opType}
+                  onChange={(e) => setOpType(e.target.value as RowOpType)}
+                >
+                  {OP_OPTIONS.map((op) => (
+                    <option key={op.value} value={op.value}>{op.label}</option>
+                  ))}
+                </HTMLSelect>
               </div>
             </div>
-            <div className="rowops-col-selector-search">
-              <InputGroup
-                placeholder="Search columns..."
-                value={colSearch}
-                onChange={(e) => setColSearch(e.target.value)}
-                small
-                leftIcon="search"
-              />
-            </div>
-            <div className="rowops-col-selector-list">
-              {filteredColumns.map((col) => (
-                <label key={col.column_name} className={`rowops-col-item ${selectedColumns.has(col.column_name) ? "selected" : ""}`}>
-                  <Checkbox
-                    checked={selectedColumns.has(col.column_name)}
-                    onChange={() => toggleColumn(col.column_name)}
-                    style={{ marginBottom: 0 }}
+          </div>
+        ) : (
+          <div className="rowops-form-card">
+            <div className="rowops-form-row">
+              <div className="rowops-field">
+                <label>Operation</label>
+                <HTMLSelect
+                  className="rowops-op-select"
+                  value={opType}
+                  onChange={(e) => setOpType(e.target.value as RowOpType)}
+                  fill
+                >
+                  {OP_OPTIONS.map((op) => (
+                    <option key={op.value} value={op.value}>{op.label}</option>
+                  ))}
+                </HTMLSelect>
+              </div>
+
+              {opType === "remove_empty" && (
+                <div className="rowops-field">
+                  <label>Match</label>
+                  <div className="rowops-mode-switch" role="group" aria-label="Empty match mode">
+                    <button
+                      type="button"
+                      className={`rowops-mode-option${emptyMode === "any" ? " active" : ""}`}
+                      aria-pressed={emptyMode === "any"}
+                      onClick={() => setEmptyMode("any")}
+                      title="Match if any selected column is empty"
+                    >
+                      Any
+                    </button>
+                    <button
+                      type="button"
+                      className={`rowops-mode-option${emptyMode === "all" ? " active" : ""}`}
+                      aria-pressed={emptyMode === "all"}
+                      onClick={() => setEmptyMode("all")}
+                      title="Match only if all selected columns are empty"
+                    >
+                      All
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {needsColumns && (
+                <div className="rowops-field rowops-field-grow">
+                  <label>
+                    {opType === "remove_duplicates" ? "Dedup by" : "Check"}
+                  </label>
+                  <ColumnMultiPicker
+                    columns={columns}
+                    selected={selectedColumns}
+                    onChange={setSelectedColumns}
+                    placeholderAll="All columns"
                   />
-                  <span className="rowops-col-name">{col.column_name}</span>
-                  <span className="rowops-col-type">{col.column_type}</span>
-                </label>
-              ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rowops-form-hint">
+              <Icon icon="info-sign" iconSize={11} />
+              <span>{opMeta.description}</span>
             </div>
           </div>
         )}
-
-        {/* Filter scope banner */}
-        {isFiltered && (
-          <div className="rowops-filter-banner">
-            <Icon icon="filter" iconSize={12} />
-            <div className="rowops-filter-banner-text">
-              <strong>Filtered scope</strong>
-              <span>Affects {totalRows.toLocaleString()} of {unfilteredRows!.toLocaleString()} rows</span>
-            </div>
-          </div>
-        )}
-
-        {/* Status row: scope banner + preview + messages */}
-        <div className="rowops-status-row">
-          {!isFiltered && (
-            <span className="rowops-scope rowops-scope-all">
-              <Icon icon="database" iconSize={10} />
-              All {totalRows.toLocaleString()} rows
-            </span>
-          )}
-          {previewLabel && !isDisabled && (
-            <span className="rowops-preview-count">
-              <Icon icon="eye-open" iconSize={10} />
-              {previewLabel}
-            </span>
-          )}
-          {successMsg && (
-            <span className="rowops-inline-success">
-              <Icon icon="tick-circle" iconSize={12} intent={Intent.SUCCESS} />
-              {successMsg}
-            </span>
-          )}
-          {error && (
-            <span className="rowops-inline-error" title={error}>
-              <Icon icon="error" iconSize={12} intent={Intent.DANGER} />
-              {error}
-            </span>
-          )}
-        </div>
       </div>
 
       {/* Step history */}
       {rowOpsSteps.length > 0 && (
         <div className="rowops-steps">
           <div className="rowops-steps-header">
-            <span className="rowops-steps-title">History ({rowOpsSteps.length})</span>
+            <span className="rowops-steps-title">
+              History
+              <span className="rowops-steps-count">{rowOpsSteps.length}</span>
+            </span>
             <div className="rowops-steps-actions">
               {undoStrategy === "snapshot" && (
                 <Button
