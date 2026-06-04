@@ -246,16 +246,18 @@ export function ViewsPanel({
                       <Button
                         small
                         minimal
-                        text="Apply"
+                        icon="play"
                         intent={Intent.PRIMARY}
                         disabled={!isCompatible}
                         onClick={(e) => { e.stopPropagation(); onApplyView(view); }}
+                        title="Apply view"
                       />
                       <Button
                         small
                         minimal
-                        text="Update"
+                        icon="refresh"
                         onClick={(e) => { e.stopPropagation(); onUpdateView(view.id); }}
+                        title="Update view"
                       />
                       <Button
                         small
@@ -263,6 +265,7 @@ export function ViewsPanel({
                         icon="trash"
                         intent={Intent.DANGER}
                         onClick={(e) => { e.stopPropagation(); onDeleteView(view.id); }}
+                        title="Delete view"
                       />
                     </div>
                   </div>

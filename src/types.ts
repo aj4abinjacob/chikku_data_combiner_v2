@@ -60,7 +60,7 @@ export interface ColumnOperation {
 
 export interface FilterCondition {
   column: string;
-  operator: "=" | "!=" | ">" | "<" | ">=" | "<=" | "LIKE" | "NOT LIKE" | "IS NULL" | "IS NOT NULL" | "CONTAINS" | "IN" | "STARTS WITH" | "NOT STARTS WITH" | "ENDS WITH" | "NOT ENDS WITH";
+  operator: "=" | "!=" | ">" | "<" | ">=" | "<=" | "LIKE" | "NOT LIKE" | "IS NULL" | "IS NOT NULL" | "CONTAINS" | "DOES NOT CONTAIN" | "IN" | "STARTS WITH" | "NOT STARTS WITH" | "ENDS WITH" | "NOT ENDS WITH";
   value: string;
 }
 

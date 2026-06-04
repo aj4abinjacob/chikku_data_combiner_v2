@@ -29,26 +29,72 @@ import { RowOpsPanel } from "./RowOpsPanel";
 import { ViewsPanel } from "./ViewsPanel";
 import { SearchableColumnSelect } from "./SearchableColumnSelect";
 
-const OPERATORS: { value: FilterCondition["operator"]; label: string }[] = [
-  { value: "CONTAINS", label: "contains" },
-  { value: "IN", label: "in" },
-  { value: ">", label: ">" },
-  { value: "<", label: "<" },
-  { value: "=", label: "=" },
-  { value: "!=", label: "!=" },
-  { value: ">=", label: ">=" },
-  { value: "<=", label: "<=" },
-  { value: "STARTS WITH", label: "starts with" },
-  { value: "NOT STARTS WITH", label: "not starts with" },
-  { value: "ENDS WITH", label: "ends with" },
-  { value: "NOT ENDS WITH", label: "not ends with" },
-  { value: "LIKE", label: "like" },
-  { value: "NOT LIKE", label: "not like" },
-  { value: "IS NULL", label: "is null" },
-  { value: "IS NOT NULL", label: "is not null" },
+type FilterOperator = FilterCondition["operator"];
+type ColumnKind = "text" | "number" | "date" | "boolean" | "unknown";
+type OperatorOption = { value: FilterOperator; label: string };
+
+const OPERATOR_LABELS: Record<FilterOperator, string> = {
+  CONTAINS: "contains",
+  "DOES NOT CONTAIN": "does not contain",
+  "=": "equals",
+  "!=": "not equal",
+  IN: "in list",
+  "IS NULL": "is empty",
+  "IS NOT NULL": "is not empty",
+  ">": "greater than",
+  "<": "less than",
+  "STARTS WITH": "starts with",
+  "ENDS WITH": "ends with",
+  LIKE: "LIKE",
+  "NOT LIKE": "NOT LIKE",
+  ">=": ">=",
+  "<=": "<=",
+  "NOT STARTS WITH": "not starts with",
+  "NOT ENDS WITH": "not ends with",
+};
+
+const OPERATOR_OPTIONS: Record<FilterOperator, OperatorOption> = Object.fromEntries(
+  (Object.keys(OPERATOR_LABELS) as FilterOperator[]).map((value) => [
+    value,
+    { value, label: OPERATOR_LABELS[value] },
+  ])
+) as Record<FilterOperator, OperatorOption>;
+
+const COMMON_OPERATORS_BY_KIND: Record<ColumnKind, FilterOperator[]> = {
+  text: [
+    "CONTAINS",
+    "DOES NOT CONTAIN",
+    "=",
+    "!=",
+    "IN",
+    "STARTS WITH",
+    "ENDS WITH",
+    "IS NULL",
+    "IS NOT NULL",
+  ],
+  number: ["=", "!=", ">", "<", "IN", "IS NULL", "IS NOT NULL"],
+  date: ["=", "!=", ">", "<", "IN", "IS NULL", "IS NOT NULL"],
+  boolean: ["=", "!=", "IS NULL", "IS NOT NULL"],
+  unknown: ["CONTAINS", "DOES NOT CONTAIN", "=", "!=", "IN", "IS NULL", "IS NOT NULL", ">", "<"],
+};
+
+const ADVANCED_OPERATOR_ORDER: FilterOperator[] = [
+  "LIKE",
+  "NOT LIKE",
+  ">=",
+  "<=",
+  "STARTS WITH",
+  "ENDS WITH",
+  "NOT STARTS WITH",
+  "NOT ENDS WITH",
+  "CONTAINS",
+  "DOES NOT CONTAIN",
+  "IN",
+  ">",
+  "<",
 ];
 
-const NO_VALUE_OPS = new Set(["IS NULL", "IS NOT NULL"]);
+const NO_VALUE_OPS = new Set<FilterOperator>(["IS NULL", "IS NOT NULL"]);
 
 const MIN_PANEL_HEIGHT = 80;
 const MAX_PANEL_HEIGHT = 500;
@@ -78,6 +124,43 @@ function isDraftGroup(node: DraftFilterNode): node is DraftFilterGroup {
 let nextId = 1;
 function genId(): string {
   return `fnode_${nextId++}`;
+}
+
+function getColumnKind(columnName: string, columns: ColumnInfo[]): ColumnKind {
+  const type = columns
+    .find((col) => col.column_name === columnName)
+    ?.column_type.toLowerCase() ?? "";
+
+  if (/(bool|boolean)/.test(type)) return "boolean";
+  if (/(date|time|timestamp|interval)/.test(type)) return "date";
+  if (/(int|decimal|numeric|double|float|real|hugeint|bigint|smallint|tinyint|ubigint|uinteger|usmallint|utinyint)/.test(type)) {
+    return "number";
+  }
+  if (/(char|string|text|varchar|uuid|json)/.test(type)) return "text";
+  return "unknown";
+}
+
+function getOperatorGroups(
+  columnName: string,
+  columns: ColumnInfo[],
+  selectedOperator: FilterOperator
+): { common: OperatorOption[]; advanced: OperatorOption[] } {
+  const commonValues = COMMON_OPERATORS_BY_KIND[getColumnKind(columnName, columns)];
+  const commonSet = new Set<FilterOperator>(commonValues);
+  const advancedValues = ADVANCED_OPERATOR_ORDER.filter((value) => !commonSet.has(value));
+
+  if (!commonSet.has(selectedOperator) && !advancedValues.includes(selectedOperator)) {
+    advancedValues.unshift(selectedOperator);
+  }
+
+  return {
+    common: commonValues.map((value) => OPERATOR_OPTIONS[value]),
+    advanced: advancedValues.map((value) => OPERATOR_OPTIONS[value]),
+  };
+}
+
+function pluralize(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
 }
 
 // ── Conversion helpers ──
@@ -394,6 +477,8 @@ function FilterConditionRow({
   onRemove,
   onApply,
 }: FilterConditionRowProps): React.ReactElement {
+  const operatorGroups = getOperatorGroups(draft.column, columns, draft.operator);
+
   return (
     <div className="filter-row">
       <SearchableColumnSelect
@@ -402,11 +487,14 @@ function FilterConditionRow({
         columns={columns}
         placeholder="Column..."
         className="filter-col-select"
+        showType
+        fill
       />
 
       <HTMLSelect
         className="filter-op-select"
         value={draft.operator}
+        aria-label="Filter operator"
         onChange={(e) =>
           onUpdate(draft.id, {
             operator: e.target.value as FilterCondition["operator"],
@@ -417,44 +505,55 @@ function FilterConditionRow({
           })
         }
       >
-        {OPERATORS.map((op) => (
-          <option key={op.value} value={op.value}>
-            {op.label}
-          </option>
-        ))}
+        <optgroup label="Common">
+          {operatorGroups.common.map((op) => (
+            <option key={op.value} value={op.value}>
+              {op.label}
+            </option>
+          ))}
+        </optgroup>
+        <optgroup label="Advanced">
+          {operatorGroups.advanced.map((op) => (
+            <option key={op.value} value={op.value}>
+              {op.label}
+            </option>
+          ))}
+        </optgroup>
       </HTMLSelect>
 
-      {!NO_VALUE_OPS.has(draft.operator) &&
-        (draft.operator === "IN" && activeTable ? (
-          <InValuePicker
-            tableName={activeTable}
-            column={draft.column}
-            selectedValues={draft.value}
-            onChange={(value) => onUpdate(draft.id, { value })}
-          />
-        ) : (
-          <InputGroup
-            className="filter-value-input"
-            value={draft.value}
-            onChange={(e) =>
-              onUpdate(draft.id, { value: e.target.value })
-            }
-            placeholder={
-              draft.operator === "CONTAINS"
-                ? "text or regex"
-                : "value"
-            }
-            onKeyDown={(e) => {
-              if (e.key === "Enter") onApply();
-            }}
-          />
-        ))}
+      {NO_VALUE_OPS.has(draft.operator) ? (
+        <div className="filter-value-empty" />
+      ) : draft.operator === "IN" && activeTable ? (
+        <InValuePicker
+          tableName={activeTable}
+          column={draft.column}
+          selectedValues={draft.value}
+          onChange={(value) => onUpdate(draft.id, { value })}
+        />
+      ) : (
+        <InputGroup
+          className="filter-value-input"
+          value={draft.value}
+          onChange={(e) =>
+            onUpdate(draft.id, { value: e.target.value })
+          }
+          placeholder={
+            draft.operator === "CONTAINS" || draft.operator === "DOES NOT CONTAIN"
+              ? "text or regex"
+              : "value"
+          }
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onApply();
+          }}
+        />
+      )}
 
       <Button
         icon="small-cross"
         minimal
         small
         onClick={() => onRemove(draft.id)}
+        title="Remove condition"
       />
     </div>
   );
@@ -538,31 +637,53 @@ function FilterGroupRenderer({
     onUpdateRoot((root) => removeNodeById(root, group.id));
   };
 
+  const groupConditionCount = countConditions(convertFromDraft(group));
+
   return (
     <div
       className={`filter-group ${isRoot ? "filter-group-root" : "filter-group-nested"}`}
       data-depth={depthIndex}
     >
       <div className="filter-group-header">
-        <Button
-          small
-          minimal
-          className="filter-group-logic-btn"
-          intent={group.logic === "OR" ? Intent.WARNING : Intent.PRIMARY}
-          text={group.logic}
-          onClick={handleToggleLogic}
-          title={`Click to switch to ${group.logic === "AND" ? "OR" : "AND"}`}
-        />
-        {!isRoot && (
+        <div className="filter-group-title">
+          <span className="filter-group-label">{isRoot ? "Root group" : "Nested group"}</span>
           <Button
-            className="filter-group-delete"
-            icon="small-cross"
-            minimal
             small
-            onClick={handleRemoveSelf}
-            title="Remove group"
+            minimal
+            className="filter-group-logic-btn"
+            intent={group.logic === "OR" ? Intent.WARNING : Intent.PRIMARY}
+            text={group.logic}
+            onClick={handleToggleLogic}
+            title={`Click to switch to ${group.logic === "AND" ? "OR" : "AND"}`}
           />
-        )}
+          <span className="filter-group-count">{pluralize(groupConditionCount, "condition")}</span>
+        </div>
+        <div className="filter-group-header-actions">
+          <Button
+            icon="add"
+            text="Condition"
+            small
+            minimal
+            onClick={handleAddCondition}
+          />
+          <Button
+            icon="group-objects"
+            text="Sub-group"
+            small
+            minimal
+            onClick={handleAddSubGroup}
+          />
+          {!isRoot && (
+            <Button
+              className="filter-group-delete"
+              icon="small-cross"
+              minimal
+              small
+              onClick={handleRemoveSelf}
+              title="Remove group"
+            />
+          )}
+        </div>
       </div>
 
       <div className="filter-group-children">
@@ -594,23 +715,6 @@ function FilterGroupRenderer({
             />
           );
         })}
-      </div>
-
-      <div className="filter-group-actions">
-        <Button
-          icon="add"
-          text="Condition"
-          small
-          minimal
-          onClick={handleAddCondition}
-        />
-        <Button
-          icon="group-objects"
-          text="Sub-group"
-          small
-          minimal
-          onClick={handleAddSubGroup}
-        />
       </div>
     </div>
   );
@@ -680,7 +784,7 @@ export function FilterPanel({
   );
   const [panelHeight, setPanelHeight] = useState(DEFAULT_PANEL_HEIGHT);
   const [activeTab, setActiveTab] = useState<"filters" | "colops" | "rowops">("filters");
-  const [splitPercent, setSplitPercent] = useState(55);
+  const [splitPercent, setSplitPercent] = useState(68);
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [saveViewName, setSaveViewName] = useState("");
   const lastSavedViewSnapshot = useRef<string | null>(null);
@@ -772,7 +876,7 @@ export function FilterPanel({
       if (containerWidth === 0) return;
       const deltaX = e.clientX - splitStartX.current;
       const deltaPct = (deltaX / containerWidth) * 100;
-      const newPct = Math.min(80, Math.max(30, splitStartPercent.current + deltaPct));
+      const newPct = Math.min(82, Math.max(48, splitStartPercent.current + deltaPct));
       setSplitPercent(newPct);
     };
 
@@ -817,15 +921,24 @@ export function FilterPanel({
     setShowSaveInput(false);
   };
 
+  const draftFilters = convertFromDraft(draftRoot);
   const isDirty =
-    JSON.stringify(convertFromDraft(draftRoot)) !==
-    JSON.stringify(activeFilters);
+    JSON.stringify(draftFilters) !== JSON.stringify(activeFilters);
 
   const activeCount = countConditions(activeFilters);
+  const draftCount = countConditions(draftFilters);
   const draftHasContent = draftRoot.children.length > 0;
   const viewStateMatchesLastSave =
     lastSavedViewSnapshot.current !== null &&
     lastSavedViewSnapshot.current === JSON.stringify(currentViewState);
+  const canApply = isDirty && (draftCount > 0 || hasActiveFilters(activeFilters));
+  const canClear = draftHasContent || hasActiveFilters(activeFilters);
+  const canSaveView = hasActiveFilters(activeFilters) && !viewStateMatchesLastSave;
+  const statusText = isDirty
+    ? "Draft changes"
+    : hasActiveFilters(activeFilters)
+      ? "Applied"
+      : "Ready";
 
   return (
     <div className="filter-panel" style={{ height: panelHeight }}>
@@ -877,29 +990,30 @@ export function FilterPanel({
               </Tag>
             )}
           </div>
-          {activeTab === "filters" && draftHasContent && (
-            <>
-              <span className="filter-panel-tab-separator" />
-              <Button
-                intent={Intent.PRIMARY}
-                text="Apply Filters"
-                small
-                onClick={applyFilters}
-                disabled={!isDirty && hasActiveFilters(activeFilters)}
-              />
-              <Button
-                icon="cross"
-                text="Clear"
-                small
-                minimal
-                onClick={clearAll}
-              />
-            </>
-          )}
         </div>
-        <div className="filter-panel-header-right">
-          {activeTab === "filters" && hasActiveFilters(activeFilters) && !viewStateMatchesLastSave && (
-            <>
+        <div className="filter-panel-header-right" />
+      </div>
+
+      {/* Filters + Views side-by-side */}
+      <div
+        className="filter-views-split"
+        ref={splitContainerRef}
+        style={{ display: activeTab === "filters" ? "flex" : "none" }}
+      >
+        <div className="filter-views-left" style={{ width: `${splitPercent}%` }}>
+          <div className="filter-toolbar">
+            <div className="filter-status-strip">
+              <Tag
+                minimal
+                icon={isDirty ? "edit" : hasActiveFilters(activeFilters) ? "tick" : "filter"}
+                intent={isDirty ? Intent.WARNING : hasActiveFilters(activeFilters) ? Intent.SUCCESS : undefined}
+              >
+                {statusText}
+              </Tag>
+              <span>{pluralize(draftCount, "draft condition")}</span>
+              <span>{pluralize(activeCount, "applied condition")}</span>
+            </div>
+            <div className="filter-toolbar-actions">
               {showSaveInput ? (
                 <div className="filter-panel-save-inline">
                   <InputGroup
@@ -935,31 +1049,46 @@ export function FilterPanel({
                   text="Save View"
                   small
                   minimal
+                  disabled={!canSaveView}
                   onClick={() => setShowSaveInput(true)}
                 />
               )}
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Filters + Views side-by-side */}
-      <div
-        className="filter-views-split"
-        ref={splitContainerRef}
-        style={{ display: activeTab === "filters" ? "flex" : "none" }}
-      >
-        <div className="filter-views-left" ref={filterScrollRef} style={{ width: `${splitPercent}%` }}>
-          <FilterGroupRenderer
-            group={draftRoot}
-            columns={columns}
-            activeTable={activeTable}
-            depth={0}
-            isRoot={true}
-            onUpdateRoot={handleUpdateRoot}
-            onApply={applyFilters}
-            scrollContainerRef={filterScrollRef}
-          />
+              <Button
+                icon="cross"
+                text="Clear"
+                small
+                minimal
+                disabled={!canClear}
+                onClick={clearAll}
+              />
+              <Button
+                icon="filter"
+                text="Apply"
+                small
+                intent={Intent.PRIMARY}
+                disabled={!canApply}
+                onClick={applyFilters}
+              />
+            </div>
+          </div>
+          <div className="filter-builder-scroll" ref={filterScrollRef}>
+            <div className="filter-row-heading" aria-hidden="true">
+              <span>Column</span>
+              <span>Operator</span>
+              <span>Value</span>
+              <span />
+            </div>
+            <FilterGroupRenderer
+              group={draftRoot}
+              columns={columns}
+              activeTable={activeTable}
+              depth={0}
+              isRoot={true}
+              onUpdateRoot={handleUpdateRoot}
+              onApply={applyFilters}
+              scrollContainerRef={filterScrollRef}
+            />
+          </div>
         </div>
         <div className="filter-views-divider" onMouseDown={onSplitMouseDown}>
           <div className="filter-views-divider-grip" />

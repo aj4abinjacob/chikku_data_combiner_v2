@@ -53,6 +53,11 @@ function buildFilterClause(filter: FilterCondition): string {
     return `regexp_matches(CAST(${col} AS VARCHAR), '${val}', 'i')`;
   }
 
+  if (filter.operator === "DOES NOT CONTAIN") {
+    // Case-insensitive inverse of CONTAINS — keeps the same regex-capable behavior
+    return `NOT regexp_matches(CAST(${col} AS VARCHAR), '${val}', 'i')`;
+  }
+
   if (filter.operator === "IN") {
     // Comma-separated list of values
     const items = filter.value
