@@ -615,14 +615,18 @@ function FilterGroupRenderer({
     }
   };
 
-  const handleAddCondition = () => {
+  const createDefaultCondition = (): DraftFilterCondition => {
     const col = columns.length > 0 ? columns[0].column_name : "";
-    const newCond: DraftFilterCondition = {
+    return {
       id: genId(),
       column: col,
       operator: "CONTAINS",
       value: "",
     };
+  };
+
+  const handleAddCondition = () => {
+    const newCond = createDefaultCondition();
     onUpdateRoot((root) => addChildToGroup(root, group.id, newCond));
     scrollToBottom();
   };
@@ -631,7 +635,7 @@ function FilterGroupRenderer({
     const newGroup: DraftFilterGroup = {
       id: genId(),
       logic: group.logic === "AND" ? "OR" : "AND",
-      children: [],
+      children: [createDefaultCondition()],
     };
     onUpdateRoot((root) => addChildToGroup(root, group.id, newGroup));
     scrollToBottom();
