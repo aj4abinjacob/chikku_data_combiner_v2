@@ -198,40 +198,25 @@ export function Sidebar({
   const allColumnNames = orderedColumns.map((c) => c.column_name);
   const allVisible = visibleColumns.length === allColumnNames.length;
   const noneVisible = visibleColumns.length === 0;
+  const visibleColumnCount = visibleColumns.length;
 
   return (
     <div className="sidebar">
       {/* Loaded tables */}
       <div className="sidebar-section sidebar-section-tables">
         <div className="sidebar-section-header">
-          <h4>Tables</h4>
+          <div className="sidebar-heading-block">
+            <h4>Tables</h4>
+            <span className="sidebar-count">{tables.length}</span>
+          </div>
           <div className="table-header-actions">
-            {tables.length >= 2 && (
-              <>
-                <Button
-                  minimal
-                  small
-                  text="All"
-                  title="Select all tables for combine"
-                  disabled={selectedForCombine.size === tables.length}
-                  onClick={selectAllTablesForCombine}
-                />
-                <Button
-                  minimal
-                  small
-                  text="None"
-                  title="Deselect all tables"
-                  disabled={selectedForCombine.size === 0}
-                  onClick={deselectAllTablesForCombine}
-                />
-              </>
-            )}
             <Button
               icon="chevron-left"
               minimal
               small
               onClick={onHide}
               title="Hide sidebar"
+              className="sidebar-hide-btn"
             />
           </div>
         </div>
@@ -252,35 +237,37 @@ export function Sidebar({
           </div>
         )}
         {tables.length === 0 && (
-          <div style={{ fontSize: 12, color: "#5c7080" }}>No tables loaded</div>
+          <div className="sidebar-empty">No tables loaded</div>
+        )}
+        {tables.length > 0 && filteredTables.length === 0 && (
+          <div className="sidebar-empty">No matching tables</div>
         )}
         {filteredTables.map((t) => (
           <div
             key={t.tableName}
-            className={`table-list-item${t.tableName === activeTable ? " active" : ""}`}
-            style={{ cursor: "pointer" }}
+            className={`table-list-item${t.tableName === activeTable ? " active" : ""}${selectedForCombine.has(t.tableName) ? " selected" : ""}`}
           >
             {tables.length >= 2 && (
               <Checkbox
                 checked={selectedForCombine.has(t.tableName)}
                 onChange={() => toggleCombineSelection(t.tableName)}
                 className="table-combine-checkbox"
-                style={{ marginBottom: 0, marginRight: 4 }}
               />
             )}
             <span
-              className="table-name"
+              className="table-main"
               onClick={() => onSelectTable(t.tableName)}
+              title={t.tableName}
             >
-              <Icon
-                icon="th"
-                size={12}
-                style={{ marginRight: 6, opacity: 0.6 }}
-              />
-              {t.tableName}
-            </span>
-            <span className="row-count">
-              {t.rowCount.toLocaleString()} rows
+              <span className="table-icon">
+                <Icon icon="th" size={12} />
+              </span>
+              <span className="table-text">
+                <span className="table-name">{t.tableName}</span>
+                <span className="row-count">
+                  {t.rowCount.toLocaleString()} rows
+                </span>
+              </span>
             </span>
             <Button
               icon="cross"
@@ -298,14 +285,35 @@ export function Sidebar({
 
       {/* Combine button */}
       {tables.length >= 2 && (
-        <div className="sidebar-section sidebar-actions-inline">
+        <div className="sidebar-section sidebar-combine-bar">
+          <div className="combine-meta">
+            <span className="combine-title">Combine</span>
+            <span className="combine-count">{selectedForCombine.size} selected</span>
+          </div>
+          <div className="combine-select-actions">
+            <Button
+              minimal
+              small
+              text="All"
+              title="Select all tables for combine"
+              disabled={selectedForCombine.size === tables.length}
+              onClick={selectAllTablesForCombine}
+            />
+            <Button
+              minimal
+              small
+              text="None"
+              title="Deselect all tables"
+              disabled={selectedForCombine.size === 0}
+              onClick={deselectAllTablesForCombine}
+            />
+          </div>
           <Button
             intent={Intent.PRIMARY}
             icon="merge-columns"
-            text={`Combine ${selectedForCombine.size} Selected`}
+            text="Combine"
             onClick={() => onCombine([...selectedForCombine])}
             small
-            fill
             disabled={selectedForCombine.size < 2}
           />
         </div>
@@ -315,13 +323,17 @@ export function Sidebar({
       {schema.length > 0 && (
         <div className="sidebar-section sidebar-section-columns">
           <div className="column-header-row">
-            <h4>Columns</h4>
+            <div className="sidebar-heading-block">
+              <h4>Columns</h4>
+              <span className="sidebar-count">{visibleColumnCount}/{allColumnNames.length}</span>
+            </div>
             <div className="column-header-actions">
               <Button
                 minimal
                 small
                 text="All"
                 title="Show all columns"
+                disabled={allVisible}
                 onClick={() => onSetVisibleColumns(allColumnNames)}
                 className="column-visibility-btn"
               />
@@ -330,6 +342,7 @@ export function Sidebar({
                 small
                 text="None"
                 title="Hide all columns"
+                disabled={noneVisible}
                 onClick={() => onSetVisibleColumns([])}
                 className="column-visibility-btn"
               />
@@ -374,15 +387,16 @@ export function Sidebar({
           {filteredColumns.map((col, index) => {
             const sortInfo = sortIndexMap.get(col.column_name);
             const pivotInfo = pivotGroupIndexMap.get(col.column_name);
+            const isVisible = visibleColumns.includes(col.column_name);
             return (
               <div
                 key={col.column_name}
-                className={`column-item${
+                className={`column-item${isVisible ? "" : " column-hidden"}${
                   dropTarget?.index === index
                     ? ` drag-over-${dropTarget.position}`
                     : ""
                 }`}
-                title={col.column_name}
+                title={`${col.column_name} (${col.column_type})`}
                 draggable
                 onDragStart={(e) => handleDragStart(e, index)}
                 onDragOver={(e) => handleDragOver(e, index)}
@@ -396,66 +410,73 @@ export function Sidebar({
                   className="drag-handle"
                 />
                 <Checkbox
-                  checked={visibleColumns.includes(col.column_name)}
+                  checked={isVisible}
                   onChange={() => onToggleColumn(col.column_name)}
-                  style={{ marginBottom: 0 }}
+                  className="column-visibility-checkbox"
                 />
-                <span className="column-name-text">{col.column_name}</span>
-                <span className="column-type">{col.column_type}</span>
-                {/* Group control (left, green) */}
-                <span
-                  className={`column-pivot-indicator${pivotInfo ? " active" : ""}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onPivotGroup(col.column_name, e.shiftKey);
-                  }}
-                  title={
-                    pivotInfo
-                      ? `Group ${pivotInfo.index}: ${pivotInfo.direction}${pivotConfig?.groupSortMode ? ` (sorted by ${pivotConfig.groupSortMode === "count" ? "count" : "name"} ${pivotConfig.groupSortDirection})` : ""} (click to toggle, shift+click for multi-group)`
-                      : "Click to group (shift+click for multi-group)"
-                  }
-                >
-                  {pivotInfo ? (
-                    <>
-                      <span className="column-pivot-number">{pivotInfo.index}</span>
-                      <Icon icon={pivotInfo.direction === "ASC" ? "chevron-up" : "chevron-down"} size={10} />
-                      {pivotConfig?.groupSortMode && (
-                        <Icon
-                          icon={pivotConfig.groupSortMode === "count" ? "sort-numerical" : "sort-alphabetical"}
-                          size={9}
-                          className="column-pivot-sort-mode"
-                        />
-                      )}
-                    </>
-                  ) : (
-                    <Icon icon="layers" size={10} className="column-pivot-idle" />
-                  )}
+                <span className="column-meta">
+                  <span className="column-name-text">{col.column_name}</span>
+                  <span className="column-type">{col.column_type}</span>
                 </span>
-                {/* Sort control (right, blue) */}
-                <span
-                  className={`column-sort-indicator${sortInfo ? " active" : ""}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSort(col.column_name, e.shiftKey);
-                  }}
-                  title={
-                    sortInfo
-                      ? `Sort ${sortInfo.index}: ${sortInfo.direction} (click to toggle, shift+click for multi-sort)`
-                      : "Click to sort (shift+click for multi-sort)"
-                  }
-                >
-                  {sortInfo ? (
-                    <>
-                      <span className="column-sort-number">{sortInfo.index}</span>
-                      <Icon icon={sortInfo.direction === "ASC" ? "chevron-up" : "chevron-down"} size={10} />
-                    </>
-                  ) : (
-                    <Icon icon="double-caret-vertical" size={10} className="column-sort-idle" />
-                  )}
+                <span className="column-tools">
+                  {/* Group control (left, green) */}
+                  <span
+                    className={`column-pivot-indicator${pivotInfo ? " active" : ""}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onPivotGroup(col.column_name, e.shiftKey);
+                    }}
+                    title={
+                      pivotInfo
+                        ? `Group ${pivotInfo.index}: ${pivotInfo.direction}${pivotConfig?.groupSortMode ? ` (sorted by ${pivotConfig.groupSortMode === "count" ? "count" : "name"} ${pivotConfig.groupSortDirection})` : ""} (click to toggle, shift+click for multi-group)`
+                        : "Click to group (shift+click for multi-group)"
+                    }
+                  >
+                    {pivotInfo ? (
+                      <>
+                        <span className="column-pivot-number">{pivotInfo.index}</span>
+                        <Icon icon={pivotInfo.direction === "ASC" ? "chevron-up" : "chevron-down"} size={10} />
+                        {pivotConfig?.groupSortMode && (
+                          <Icon
+                            icon={pivotConfig.groupSortMode === "count" ? "sort-numerical" : "sort-alphabetical"}
+                            size={9}
+                            className="column-pivot-sort-mode"
+                          />
+                        )}
+                      </>
+                    ) : (
+                      <Icon icon="layers" size={10} className="column-pivot-idle" />
+                    )}
+                  </span>
+                  {/* Sort control (right, blue) */}
+                  <span
+                    className={`column-sort-indicator${sortInfo ? " active" : ""}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSort(col.column_name, e.shiftKey);
+                    }}
+                    title={
+                      sortInfo
+                        ? `Sort ${sortInfo.index}: ${sortInfo.direction} (click to toggle, shift+click for multi-sort)`
+                        : "Click to sort (shift+click for multi-sort)"
+                    }
+                  >
+                    {sortInfo ? (
+                      <>
+                        <span className="column-sort-number">{sortInfo.index}</span>
+                        <Icon icon={sortInfo.direction === "ASC" ? "chevron-up" : "chevron-down"} size={10} />
+                      </>
+                    ) : (
+                      <Icon icon="double-caret-vertical" size={10} className="column-sort-idle" />
+                    )}
+                  </span>
                 </span>
               </div>
             );
           })}
+          {orderedColumns.length > 0 && filteredColumns.length === 0 && (
+            <div className="sidebar-empty">No matching columns</div>
+          )}
         </div>
       )}
 
@@ -467,51 +488,48 @@ export function Sidebar({
             text="Aggregate"
             onClick={() => setAggregateDialogOpen(true)}
             small
-            fill
           />
           <Button
             icon="pivot-table"
-            text="Pivot Table"
+            text="Pivot"
+            title="Pivot Table"
             onClick={() => setPivotDialogOpen(true)}
             small
-            fill
           />
           {tables.length >= 2 && (
             <Button
               icon="data-lineage"
-              text="Lookup Merge"
+              text="Lookup"
+              title="Lookup Merge"
               onClick={() => setMergeDialogOpen(true)}
               small
-              fill
             />
           )}
           <Button
             icon="column-layout"
-            text="Data Operations"
+            text="Data Ops"
+            title="Data Operations"
             onClick={() => setDataOpDialogOpen(true)}
             small
-            fill
           />
           <Button
             icon="calendar"
-            text="Date Conversion"
+            text="Dates"
+            title="Date Conversion"
             onClick={() => setDateConvDialogOpen(true)}
             small
-            fill
           />
           <Button
             icon="history"
             text="History"
             onClick={onOpenHistory}
             small
-            fill
           />
           <Button
             icon="export"
             text="Export"
             onClick={onExport}
             small
-            fill
           />
         </div>
       )}
