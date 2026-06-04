@@ -119,7 +119,10 @@ export function SearchableColumnSelect({
     : "";
 
   const popoverContent = (
-    <div className="col-select-popover" onKeyDown={handleKeyDown}>
+    <div
+      className={`col-select-popover${fill ? " col-select-popover-fill" : ""}`}
+      onKeyDown={handleKeyDown}
+    >
       <div className="col-select-search">
         <InputGroup
           inputRef={searchRef}

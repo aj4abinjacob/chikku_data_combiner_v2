@@ -638,6 +638,36 @@ function FilterGroupRenderer({
   };
 
   const groupConditionCount = countConditions(convertFromDraft(group));
+  const isEmptyRoot = isRoot && group.children.length === 0;
+
+  if (isEmptyRoot) {
+    return (
+      <div className="filter-empty-state">
+        <div className="filter-empty-copy">
+          <span className="filter-empty-title">No filters yet</span>
+          <span className="filter-empty-text">Start with a condition, then apply it to the table.</span>
+        </div>
+        <div className="filter-empty-actions">
+          <Button
+            icon="add"
+            text="Add condition"
+            small
+            intent={Intent.PRIMARY}
+            disabled={columns.length === 0}
+            onClick={handleAddCondition}
+          />
+          <Button
+            icon="group-objects"
+            text="Add sub-group"
+            small
+            minimal
+            disabled={columns.length === 0}
+            onClick={handleAddSubGroup}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -1071,13 +1101,18 @@ export function FilterPanel({
               />
             </div>
           </div>
-          <div className="filter-builder-scroll" ref={filterScrollRef}>
-            <div className="filter-row-heading" aria-hidden="true">
-              <span>Column</span>
-              <span>Operator</span>
-              <span>Value</span>
-              <span />
-            </div>
+          <div
+            className={`filter-builder-scroll${draftHasContent ? "" : " filter-builder-scroll-empty"}`}
+            ref={filterScrollRef}
+          >
+            {draftHasContent && (
+              <div className="filter-row-heading" aria-hidden="true">
+                <span>Column</span>
+                <span>Operator</span>
+                <span>Value</span>
+                <span />
+              </div>
+            )}
             <FilterGroupRenderer
               group={draftRoot}
               columns={columns}
