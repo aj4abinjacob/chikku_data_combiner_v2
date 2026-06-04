@@ -4,6 +4,7 @@ import {
   Button,
   Checkbox,
   HTMLSelect,
+  Icon,
   InputGroup,
   Intent,
   Tag,
@@ -161,6 +162,11 @@ function getOperatorGroups(
 
 function pluralize(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function countDraftConditions(node: DraftFilterNode): number {
+  if (!isDraftGroup(node)) return 1;
+  return node.children.reduce((total, child) => total + countDraftConditions(child), 0);
 }
 
 // ── Conversion helpers ──
@@ -464,6 +470,7 @@ interface FilterConditionRowProps {
   draft: DraftFilterCondition;
   columns: ColumnInfo[];
   activeTable: string | null;
+  connectorLabel: "Where" | "And" | "Or";
   onUpdate: (id: string, patch: Partial<DraftFilterCondition>) => void;
   onRemove: (id: string) => void;
   onApply: () => void;
@@ -473,14 +480,20 @@ function FilterConditionRow({
   draft,
   columns,
   activeTable,
+  connectorLabel,
   onUpdate,
   onRemove,
   onApply,
 }: FilterConditionRowProps): React.ReactElement {
   const operatorGroups = getOperatorGroups(draft.column, columns, draft.operator);
+  const connectorClass = connectorLabel.toLowerCase();
 
   return (
     <div className="filter-row">
+      <span className={`filter-row-connector filter-row-connector-${connectorClass}`}>
+        {connectorLabel}
+      </span>
+
       <SearchableColumnSelect
         value={draft.column}
         onChange={(val) => onUpdate(draft.id, { column: val, value: "" })}
@@ -553,7 +566,7 @@ function FilterConditionRow({
         minimal
         small
         onClick={() => onRemove(draft.id)}
-        title="Remove condition"
+        title="Remove filter"
       />
     </div>
   );
@@ -584,11 +597,12 @@ function FilterGroupRenderer({
 }: FilterGroupRendererProps): React.ReactElement {
   const depthIndex = depth % 4;
 
-  const handleToggleLogic = () => {
+  const handleSetLogic = (logic: DraftFilterGroup["logic"]) => {
+    if (group.logic === logic) return;
     onUpdateRoot((root) =>
       updateNodeById(root, group.id, (node) => ({
         ...(node as DraftFilterGroup),
-        logic: (node as DraftFilterGroup).logic === "AND" ? "OR" : "AND",
+        logic,
       })) as DraftFilterGroup
     );
   };
@@ -637,33 +651,47 @@ function FilterGroupRenderer({
     onUpdateRoot((root) => removeNodeById(root, group.id));
   };
 
-  const groupConditionCount = countConditions(convertFromDraft(group));
+  const groupDraftConditionCount = countDraftConditions(group);
   const isEmptyRoot = isRoot && group.children.length === 0;
+  const filterCountLabel = pluralize(groupDraftConditionCount, "filter");
+  const matchTargetLabel = isRoot
+    ? (group.logic === "AND" ? "filters" : "filter")
+    : `of ${filterCountLabel}`;
+  const getConnectorLabel = (index: number): "Where" | "And" | "Or" => {
+    if (index === 0) return "Where";
+    return group.logic === "AND" ? "And" : "Or";
+  };
 
   if (isEmptyRoot) {
     return (
       <div className="filter-empty-state">
-        <div className="filter-empty-copy">
-          <span className="filter-empty-title">No filters yet</span>
-          <span className="filter-empty-text">Start with a condition, then apply it to the table.</span>
+        <div className="filter-empty-icon" aria-hidden="true">
+          <Icon icon="filter" iconSize={18} />
         </div>
-        <div className="filter-empty-actions">
-          <Button
-            icon="add"
-            text="Add condition"
-            small
-            intent={Intent.PRIMARY}
-            disabled={columns.length === 0}
-            onClick={handleAddCondition}
-          />
-          <Button
-            icon="group-objects"
-            text="Add sub-group"
-            small
-            minimal
-            disabled={columns.length === 0}
-            onClick={handleAddSubGroup}
-          />
+        <div className="filter-empty-main">
+          <div className="filter-empty-copy">
+            <span className="filter-empty-title">Narrow this table</span>
+            <span className="filter-empty-text">Add a filter to show only matching rows.</span>
+          </div>
+          <div className="filter-empty-actions">
+            <Button
+              icon="add"
+              text="Add filter"
+              small
+              intent={Intent.PRIMARY}
+              disabled={columns.length === 0}
+              onClick={handleAddCondition}
+            />
+            <Button
+              icon="group-objects"
+              text="Filter group"
+              small
+              minimal
+              disabled={columns.length === 0}
+              onClick={handleAddSubGroup}
+              title="Add a group of filters with its own all/any match"
+            />
+          </div>
         </div>
       </div>
     );
@@ -676,32 +704,47 @@ function FilterGroupRenderer({
     >
       <div className="filter-group-header">
         <div className="filter-group-title">
-          <span className="filter-group-label">{isRoot ? "Root group" : "Nested group"}</span>
-          <Button
-            small
-            minimal
-            className="filter-group-logic-btn"
-            intent={group.logic === "OR" ? Intent.WARNING : Intent.PRIMARY}
-            text={group.logic}
-            onClick={handleToggleLogic}
-            title={`Click to switch to ${group.logic === "AND" ? "OR" : "AND"}`}
-          />
-          <span className="filter-group-count">{pluralize(groupConditionCount, "condition")}</span>
+          <span className="filter-group-label">{isRoot ? "Show rows that match" : "Filter group: match"}</span>
+          <div className="filter-group-logic-switch" role="group" aria-label="Filter match mode">
+            <button
+              type="button"
+              className={`filter-group-logic-option filter-group-logic-option-all${group.logic === "AND" ? " active" : ""}`}
+              aria-pressed={group.logic === "AND"}
+              onClick={() => handleSetLogic("AND")}
+              title="Match all filters"
+            >
+              All
+            </button>
+            <button
+              type="button"
+              className={`filter-group-logic-option filter-group-logic-option-any${group.logic === "OR" ? " active" : ""}`}
+              aria-pressed={group.logic === "OR"}
+              onClick={() => handleSetLogic("OR")}
+              title="Match any filter"
+            >
+              Any
+            </button>
+          </div>
+          <span className="filter-group-count">
+            {matchTargetLabel}
+          </span>
         </div>
         <div className="filter-group-header-actions">
           <Button
             icon="add"
-            text="Condition"
+            text="Filter"
             small
             minimal
             onClick={handleAddCondition}
+            title="Add filter"
           />
           <Button
             icon="group-objects"
-            text="Sub-group"
+            text="Filter group"
             small
             minimal
             onClick={handleAddSubGroup}
+            title="Add a filter group with its own all/any match"
           />
           {!isRoot && (
             <Button
@@ -710,35 +753,48 @@ function FilterGroupRenderer({
               minimal
               small
               onClick={handleRemoveSelf}
-              title="Remove group"
+              title="Remove filter group"
             />
           )}
         </div>
       </div>
 
       <div className="filter-group-children">
-        {group.children.map((child) => {
+        {group.children.length === 0 ? (
+          <div className="filter-group-empty-inline">
+            <Icon icon="filter" iconSize={12} />
+            <span>Empty group</span>
+          </div>
+        ) : group.children.map((child, index) => {
+          const connectorLabel = getConnectorLabel(index);
+
           if (isDraftGroup(child)) {
             return (
-              <FilterGroupRenderer
-                key={child.id}
-                group={child}
-                columns={columns}
-                activeTable={activeTable}
-                depth={depth + 1}
-                isRoot={false}
-                onUpdateRoot={onUpdateRoot}
-                onApply={onApply}
-                scrollContainerRef={scrollContainerRef}
-              />
+              <div className="filter-group-relation" key={child.id}>
+                <span className={`filter-row-connector filter-row-connector-${connectorLabel.toLowerCase()}`}>
+                  {connectorLabel}
+                </span>
+                <FilterGroupRenderer
+                  group={child}
+                  columns={columns}
+                  activeTable={activeTable}
+                  depth={depth + 1}
+                  isRoot={false}
+                  onUpdateRoot={onUpdateRoot}
+                  onApply={onApply}
+                  scrollContainerRef={scrollContainerRef}
+                />
+              </div>
             );
           }
+
           return (
             <FilterConditionRow
               key={child.id}
               draft={child}
               columns={columns}
               activeTable={activeTable}
+              connectorLabel={connectorLabel}
               onUpdate={handleUpdateCondition}
               onRemove={handleRemoveChild}
               onApply={onApply}
@@ -816,6 +872,7 @@ export function FilterPanel({
   const [activeTab, setActiveTab] = useState<"filters" | "colops" | "rowops">("filters");
   const [splitPercent, setSplitPercent] = useState(68);
   const [showSaveInput, setShowSaveInput] = useState(false);
+  const [viewsPaneOpen, setViewsPaneOpen] = useState(savedViews.length > 0);
   const [saveViewName, setSaveViewName] = useState("");
   const lastSavedViewSnapshot = useRef<string | null>(null);
   const isSplitDragging = useRef(false);
@@ -836,6 +893,10 @@ export function FilterPanel({
   useEffect(() => {
     lastSavedViewSnapshot.current = null;
   }, [activeTable]);
+
+  useEffect(() => {
+    setViewsPaneOpen(savedViews.length > 0);
+  }, [savedViews.length]);
 
   // Header + resize handle take ~36px; content gets the rest
   const PANEL_CHROME_HEIGHT = 42;
@@ -958,17 +1019,33 @@ export function FilterPanel({
   const activeCount = countConditions(activeFilters);
   const draftCount = countConditions(draftFilters);
   const draftHasContent = draftRoot.children.length > 0;
+  const draftRowCount = countDraftConditions(draftRoot);
+  const incompleteDraftCount = Math.max(0, draftRowCount - draftCount);
   const viewStateMatchesLastSave =
     lastSavedViewSnapshot.current !== null &&
     lastSavedViewSnapshot.current === JSON.stringify(currentViewState);
   const canApply = isDirty && (draftCount > 0 || hasActiveFilters(activeFilters));
   const canClear = draftHasContent || hasActiveFilters(activeFilters);
   const canSaveView = hasActiveFilters(activeFilters) && !viewStateMatchesLastSave;
+  const showSaveViewAction = showSaveInput || canSaveView;
+  const showViewsPane = viewsPaneOpen && savedViews.length > 0;
   const statusText = isDirty
-    ? "Draft changes"
+    ? "Draft"
     : hasActiveFilters(activeFilters)
       ? "Applied"
-      : "Ready";
+      : draftHasContent
+        ? "Editing"
+        : "Ready";
+  const statusDetail = isDirty
+    ? [
+        draftCount > 0 ? pluralize(draftCount, "complete filter") : null,
+        incompleteDraftCount > 0 ? pluralize(incompleteDraftCount, "incomplete filter") : null,
+      ].filter(Boolean).join(", ")
+    : hasActiveFilters(activeFilters)
+      ? pluralize(activeCount, "filter")
+      : draftHasContent
+        ? pluralize(draftRowCount, "incomplete filter")
+        : "No filters";
 
   return (
     <div className="filter-panel" style={{ height: panelHeight }}>
@@ -1030,20 +1107,32 @@ export function FilterPanel({
         ref={splitContainerRef}
         style={{ display: activeTab === "filters" ? "flex" : "none" }}
       >
-        <div className="filter-views-left" style={{ width: `${splitPercent}%` }}>
+        <div
+          className={`filter-views-left${showViewsPane ? "" : " filter-views-left-full"}`}
+          style={{ width: showViewsPane ? `${splitPercent}%` : "100%" }}
+        >
           <div className="filter-toolbar">
             <div className="filter-status-strip">
               <Tag
                 minimal
-                icon={isDirty ? "edit" : hasActiveFilters(activeFilters) ? "tick" : "filter"}
+                icon={isDirty || (!hasActiveFilters(activeFilters) && draftHasContent) ? "edit" : hasActiveFilters(activeFilters) ? "tick" : "filter"}
                 intent={isDirty ? Intent.WARNING : hasActiveFilters(activeFilters) ? Intent.SUCCESS : undefined}
               >
                 {statusText}
               </Tag>
-              <span>{pluralize(draftCount, "draft condition")}</span>
-              <span>{pluralize(activeCount, "applied condition")}</span>
+              <span>{statusDetail}</span>
             </div>
             <div className="filter-toolbar-actions">
+              {savedViews.length > 0 && (
+                <Button
+                  icon="bookmark"
+                  small
+                  minimal
+                  active={showViewsPane}
+                  onClick={() => setViewsPaneOpen((open) => !open)}
+                  title={showViewsPane ? "Hide saved views" : "Show saved views"}
+                />
+              )}
               {showSaveInput ? (
                 <div className="filter-panel-save-inline">
                   <InputGroup
@@ -1073,7 +1162,7 @@ export function FilterPanel({
                     onClick={() => { setShowSaveInput(false); setSaveViewName(""); }}
                   />
                 </div>
-              ) : (
+              ) : showSaveViewAction ? (
                 <Button
                   icon="bookmark"
                   text="Save View"
@@ -1082,15 +1171,16 @@ export function FilterPanel({
                   disabled={!canSaveView}
                   onClick={() => setShowSaveInput(true)}
                 />
+              ) : null}
+              {canClear && (
+                <Button
+                  icon="cross"
+                  text="Clear"
+                  small
+                  minimal
+                  onClick={clearAll}
+                />
               )}
-              <Button
-                icon="cross"
-                text="Clear"
-                small
-                minimal
-                disabled={!canClear}
-                onClick={clearAll}
-              />
               <Button
                 icon="filter"
                 text="Apply"
@@ -1105,14 +1195,6 @@ export function FilterPanel({
             className={`filter-builder-scroll${draftHasContent ? "" : " filter-builder-scroll-empty"}`}
             ref={filterScrollRef}
           >
-            {draftHasContent && (
-              <div className="filter-row-heading" aria-hidden="true">
-                <span>Column</span>
-                <span>Operator</span>
-                <span>Value</span>
-                <span />
-              </div>
-            )}
             <FilterGroupRenderer
               group={draftRoot}
               columns={columns}
@@ -1125,19 +1207,23 @@ export function FilterPanel({
             />
           </div>
         </div>
-        <div className="filter-views-divider" onMouseDown={onSplitMouseDown}>
-          <div className="filter-views-divider-grip" />
-        </div>
-        <div className="filter-views-right" style={{ width: `${100 - splitPercent}%` }}>
-          <ViewsPanel
-            savedViews={savedViews}
-            schema={columns}
-            onApplyView={onApplyView}
-            onUpdateView={onUpdateView}
-            onDeleteView={onDeleteView}
-            onRenameView={onRenameView}
-          />
-        </div>
+        {showViewsPane && (
+          <>
+            <div className="filter-views-divider" onMouseDown={onSplitMouseDown}>
+              <div className="filter-views-divider-grip" />
+            </div>
+            <div className="filter-views-right" style={{ width: `${100 - splitPercent}%` }}>
+              <ViewsPanel
+                savedViews={savedViews}
+                schema={columns}
+                onApplyView={onApplyView}
+                onUpdateView={onUpdateView}
+                onDeleteView={onDeleteView}
+                onRenameView={onRenameView}
+              />
+            </div>
+          </>
+        )}
       </div>
       <ColumnOpsPanel
         columns={columns}
