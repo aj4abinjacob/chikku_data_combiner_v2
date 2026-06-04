@@ -35,6 +35,14 @@ const filterMap: Record<string, { name: string; extensions: string[] }[]> = {
   xls: [{ name: "Excel Files", extensions: ["xls"] }],
 };
 
+const dataFileFilters = [
+  { name: "Data Files", extensions: ["csv", "tsv", "json", "jsonl", "ndjson", "parquet", "xlsx", "xls"] },
+  { name: "CSV / TSV", extensions: ["csv", "tsv"] },
+  { name: "JSON", extensions: ["json", "jsonl", "ndjson"] },
+  { name: "Parquet", extensions: ["parquet"] },
+  { name: "Excel", extensions: ["xlsx", "xls"] },
+];
+
 function installTauriApi() {
   const api: DbApi = {
     loadCSV: (filePath: string, tableName: string) =>
@@ -77,6 +85,16 @@ function installTauriApi() {
       const filters = filterMap[format] ?? filterMap.csv;
       const result = await saveDialog({ filters });
       return result ?? null;
+    },
+
+    openDataFileDialog: async () => {
+      const selected = await openDialog({
+        multiple: true,
+        filters: dataFileFilters,
+      });
+      if (!selected) return null;
+      return (Array.isArray(selected) ? selected : [selected])
+        .filter((path): path is string => typeof path === "string");
     },
 
     getFreeMemory: () => invoke("free_memory"),

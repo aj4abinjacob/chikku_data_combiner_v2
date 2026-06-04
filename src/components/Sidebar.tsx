@@ -39,6 +39,7 @@ interface SidebarProps {
   onLookupMerge: (sql: string, options: { replaceActive: boolean }) => void;
   onExport: () => void;
   onOpenHistory: () => void;
+  onOpenFiles: () => void;
   onHide: () => void;
 }
 
@@ -67,6 +68,7 @@ export function Sidebar({
   onLookupMerge,
   onExport,
   onOpenHistory,
+  onOpenFiles,
   onHide,
 }: SidebarProps): React.ReactElement {
   const [dataOpDialogOpen, setDataOpDialogOpen] = useState(false);
@@ -237,7 +239,15 @@ export function Sidebar({
           </div>
         )}
         {tables.length === 0 && (
-          <div className="sidebar-empty">No tables loaded</div>
+          <div className="sidebar-empty sidebar-empty-action">
+            <span>No tables loaded</span>
+            <Button
+              icon="folder-open"
+              text="Open files"
+              small
+              onClick={onOpenFiles}
+            />
+          </div>
         )}
         {tables.length > 0 && filteredTables.length === 0 && (
           <div className="sidebar-empty">No matching tables</div>

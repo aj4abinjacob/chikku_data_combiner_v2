@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Button } from "@blueprintjs/core";
+import { Button, Icon, Intent } from "@blueprintjs/core";
 import { LoadedTable, ViewState, ColumnInfo, FilterGroup, SheetInfo, hasActiveFilters, countConditions, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions } from "../types";
 import { Sidebar } from "./Sidebar";
 import { DataGrid } from "./DataGrid";
@@ -471,6 +471,12 @@ export function App(): React.ReactElement {
     },
     [pendingRetry, loadSingleFile, loadFiles, finalizeLoadedTables]
   );
+
+  const handleChooseFiles = useCallback(async () => {
+    const filePaths = await window.api.openDataFileDialog();
+    if (!filePaths || filePaths.length === 0) return;
+    await loadFiles(filePaths, false);
+  }, [loadFiles]);
 
   // Register IPC listeners once on mount
   useEffect(() => {
@@ -1627,6 +1633,7 @@ export function App(): React.ReactElement {
             onLookupMerge={handleLookupMerge}
             onExport={() => setExportDialogOpen(true)}
             onOpenHistory={() => setHistoryDialogOpen(true)}
+            onOpenFiles={handleChooseFiles}
             onHide={() => setSidebarVisible(false)}
           />
         ) : (
@@ -1710,9 +1717,47 @@ export function App(): React.ReactElement {
             </>
           ) : (
             <div className="welcome">
-              <h2>Chikku Parser</h2>
-              <p>Open files to get started (Cmd+O / Ctrl+O)</p>
-              <p>Add more files to combine them (Cmd+Shift+O / Ctrl+Shift+O)</p>
+              <div className="welcome-content">
+                <div className="welcome-mark" aria-hidden="true">
+                  <Icon icon="th" size={22} />
+                </div>
+                <div className="welcome-copy">
+                  <span className="welcome-kicker">No tables loaded</span>
+                  <h2>Open a data file</h2>
+                  <p>CSV, TSV, Excel, JSON, and Parquet files are ready to load.</p>
+                </div>
+                <div className="welcome-actions">
+                  <Button
+                    intent={Intent.PRIMARY}
+                    icon="folder-open"
+                    text="Open data files"
+                    large
+                    onClick={handleChooseFiles}
+                  />
+                  <Button
+                    icon="add"
+                    text="Add multiple files"
+                    large
+                    onClick={handleChooseFiles}
+                  />
+                </div>
+                <div className="welcome-path">
+                  <div className="welcome-path-item">
+                    <Icon icon="document-open" size={13} />
+                    <span>Import</span>
+                  </div>
+                  <div className="welcome-path-line" />
+                  <div className="welcome-path-item">
+                    <Icon icon="column-layout" size={13} />
+                    <span>Clean</span>
+                  </div>
+                  <div className="welcome-path-line" />
+                  <div className="welcome-path-item">
+                    <Icon icon="export" size={13} />
+                    <span>Export</span>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>

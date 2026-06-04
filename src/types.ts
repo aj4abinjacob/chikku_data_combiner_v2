@@ -17,6 +17,7 @@ export interface DbApi {
   exportExcelMulti: (sheets: { sheetName: string; sql: string }[], filePath: string) => Promise<boolean>;
   saveDialog: () => Promise<string | null>;
   saveFileDialog: (format: string) => Promise<string | null>;
+  openDataFileDialog: () => Promise<string[] | null>;
   getFreeMemory: () => Promise<number>;
   getRegexPatterns: () => Promise<RegexPattern[]>;
   saveUserPattern: (pattern: RegexPattern) => Promise<boolean>;
