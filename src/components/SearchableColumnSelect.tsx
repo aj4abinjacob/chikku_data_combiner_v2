@@ -8,6 +8,7 @@ interface SearchableColumnSelectProps {
   onChange: (value: string) => void;
   columns: ColumnInfo[];
   placeholder?: string;
+  leftIcon?: React.ComponentProps<typeof Icon>["icon"];
   showType?: boolean;
   fill?: boolean;
   className?: string;
@@ -20,6 +21,7 @@ export function SearchableColumnSelect({
   onChange,
   columns,
   placeholder = "Select column...",
+  leftIcon,
   showType = false,
   fill = false,
   className = "",
@@ -174,6 +176,7 @@ export function SearchableColumnSelect({
         className={`col-select-trigger ${fill ? "col-select-trigger-fill" : ""} ${className}`}
         onClick={() => setIsOpen((v) => !v)}
       >
+        {leftIcon && <Icon icon={leftIcon} iconSize={13} className="col-select-trigger-left-icon" />}
         <span className={`col-select-trigger-text ${!displayText ? "col-select-trigger-placeholder" : ""}`}>
           {displayText || placeholder}
         </span>

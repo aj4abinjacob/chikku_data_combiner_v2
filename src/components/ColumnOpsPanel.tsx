@@ -443,12 +443,6 @@ export function ColumnOpsPanel({
     return { tag: "Draft", intent: Intent.WARNING, icon: "edit" as const, detail: `${opLabel} on "${selectedColumn}" — ready to apply` };
   })();
 
-  const focusColumnPicker = () => {
-    const el = configRef.current?.querySelector<HTMLElement>(".colops-col-select button, .colops-col-select input");
-    el?.click();
-    el?.focus();
-  };
-
   return (
     <div className="colops-body" style={{ display: visible ? "flex" : "none" }}>
       {/* Toolbar — matches filter-toolbar */}
@@ -611,13 +605,13 @@ export function ColumnOpsPanel({
                 </div>
                 {!selectedColumn && (
                   <div className="colops-empty-actions">
-                    <Button
-                      icon="th"
-                      text="Choose column"
-                      small
-                      intent={Intent.PRIMARY}
-                      disabled={columns.length === 0}
-                      onClick={focusColumnPicker}
+                    <SearchableColumnSelect
+                      value={selectedColumn}
+                      onChange={setSelectedColumn}
+                      columns={columns}
+                      placeholder="Choose column"
+                      leftIcon="th"
+                      className="colops-empty-choose-select"
                     />
                   </div>
                 )}
