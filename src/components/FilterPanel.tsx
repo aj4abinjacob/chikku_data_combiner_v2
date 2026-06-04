@@ -3,12 +3,12 @@ import ReactDOM from "react-dom";
 import {
   Button,
   Checkbox,
-  HTMLSelect,
   Icon,
   InputGroup,
   Intent,
   Tag,
 } from "@blueprintjs/core";
+import { Popover2 } from "@blueprintjs/popover2";
 import {
   ColumnInfo,
   FilterCondition,
@@ -464,6 +464,73 @@ function InValuePicker({
   );
 }
 
+// ── Operator picker ──
+
+interface OperatorSelectProps {
+  value: FilterOperator;
+  groups: { common: OperatorOption[]; advanced: OperatorOption[] };
+  onChange: (operator: FilterOperator) => void;
+}
+
+function OperatorSelect({
+  value,
+  groups,
+  onChange,
+}: OperatorSelectProps): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  const selectedLabel = OPERATOR_LABELS[value];
+
+  const renderGroup = (label: string, options: OperatorOption[]) => (
+    <div className="filter-op-menu-group" key={label}>
+      <div className="filter-op-menu-label">{label}</div>
+      {options.map((op) => (
+        <button
+          key={op.value}
+          type="button"
+          className={`filter-op-option${op.value === value ? " active" : ""}`}
+          onClick={() => {
+            onChange(op.value);
+            setOpen(false);
+          }}
+          role="menuitemradio"
+          aria-checked={op.value === value}
+        >
+          <span className="filter-op-option-text">{op.label}</span>
+          {op.value === value && <Icon icon="tick" iconSize={12} />}
+        </button>
+      ))}
+    </div>
+  );
+
+  return (
+    <Popover2
+      content={
+        <div className="filter-op-menu" role="menu" aria-label="Filter operator">
+          {renderGroup("Common", groups.common)}
+          {groups.advanced.length > 0 && renderGroup("Advanced", groups.advanced)}
+        </div>
+      }
+      isOpen={open}
+      onInteraction={(nextOpen) => setOpen(nextOpen)}
+      placement="bottom-start"
+      minimal
+      matchTargetWidth
+    >
+      <button
+        type="button"
+        className="filter-op-trigger"
+        aria-label="Filter operator"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="filter-op-trigger-text">{selectedLabel}</span>
+        <Icon icon={open ? "caret-up" : "caret-down"} iconSize={12} className="filter-op-trigger-caret" />
+      </button>
+    </Popover2>
+  );
+}
+
 // ── Filter Condition Row (leaf) ──
 
 interface FilterConditionRowProps {
@@ -504,35 +571,19 @@ function FilterConditionRow({
         fill
       />
 
-      <HTMLSelect
-        className="filter-op-select"
+      <OperatorSelect
         value={draft.operator}
-        aria-label="Filter operator"
-        onChange={(e) =>
+        groups={operatorGroups}
+        onChange={(operator) =>
           onUpdate(draft.id, {
-            operator: e.target.value as FilterCondition["operator"],
+            operator,
             value:
-              e.target.value === "IN" || draft.operator === "IN"
+              operator === "IN" || draft.operator === "IN"
                 ? ""
                 : draft.value,
           })
         }
-      >
-        <optgroup label="Common">
-          {operatorGroups.common.map((op) => (
-            <option key={op.value} value={op.value}>
-              {op.label}
-            </option>
-          ))}
-        </optgroup>
-        <optgroup label="Advanced">
-          {operatorGroups.advanced.map((op) => (
-            <option key={op.value} value={op.value}>
-              {op.label}
-            </option>
-          ))}
-        </optgroup>
-      </HTMLSelect>
+      />
 
       {NO_VALUE_OPS.has(draft.operator) ? (
         <div className="filter-value-empty" />
@@ -562,11 +613,13 @@ function FilterConditionRow({
       )}
 
       <Button
+        className="filter-row-remove"
         icon="small-cross"
         minimal
         small
         onClick={() => onRemove(draft.id)}
         title="Remove filter"
+        aria-label="Remove filter"
       />
     </div>
   );
@@ -735,29 +788,32 @@ function FilterGroupRenderer({
         </div>
         <div className="filter-group-header-actions">
           <Button
+            className="filter-group-action-button"
             icon="add"
-            text="Filter"
             small
             minimal
             onClick={handleAddCondition}
             title="Add filter"
+            aria-label="Add filter"
           />
           <Button
+            className="filter-group-action-button"
             icon="group-objects"
-            text="Filter group"
             small
             minimal
             onClick={handleAddSubGroup}
             title="Add a filter group with its own all/any match"
+            aria-label="Add filter group"
           />
           {!isRoot && (
             <Button
-              className="filter-group-delete"
+              className="filter-group-action-button filter-group-delete"
               icon="small-cross"
               minimal
               small
               onClick={handleRemoveSelf}
               title="Remove filter group"
+              aria-label="Remove filter group"
             />
           )}
         </div>
