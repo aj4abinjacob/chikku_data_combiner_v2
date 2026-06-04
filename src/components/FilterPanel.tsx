@@ -790,6 +790,7 @@ function FilterGroupRenderer({
           <Button
             className="filter-group-action-button"
             icon="add"
+            text="Add filter"
             small
             minimal
             onClick={handleAddCondition}
@@ -799,6 +800,7 @@ function FilterGroupRenderer({
           <Button
             className="filter-group-action-button"
             icon="group-objects"
+            text="Add group"
             small
             minimal
             onClick={handleAddSubGroup}
