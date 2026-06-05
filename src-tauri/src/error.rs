@@ -28,6 +28,9 @@ pub enum AppError {
 
     #[error(transparent)]
     Tauri(#[from] tauri::Error),
+
+    #[error(transparent)]
+    Updater(#[from] tauri_plugin_updater::Error),
 }
 
 impl AppError {

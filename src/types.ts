@@ -33,7 +33,25 @@ export interface DbApi {
   onExportCSV: (callback: () => void) => void;
   onSetDarkMode: (callback: (isDark: boolean) => void) => void;
   syncTheme: (isDark: boolean) => void;
+  getAppVersion: () => Promise<string>;
+  checkForUpdate: () => Promise<AppUpdateInfo | null>;
+  claimUpdateNotice: (version: string) => Promise<boolean>;
+  releaseUpdateNotice: (version: string) => Promise<boolean>;
+  installUpdate: (onProgress: (event: UpdateDownloadEvent) => void) => Promise<void>;
+  restartApp: () => Promise<void>;
 }
+
+export interface AppUpdateInfo {
+  currentVersion: string;
+  version: string;
+  date: string | null;
+  body: string | null;
+}
+
+export type UpdateDownloadEvent =
+  | { event: "Started"; data: { contentLength?: number | null } }
+  | { event: "Progress"; data: { chunkLength: number } }
+  | { event: "Finished"; data?: null };
 
 export interface ColumnInfo {
   column_name: string;

@@ -11,6 +11,7 @@ interface StatusBarProps {
   onToggleFilterPanel: () => void;
   activeFilterCount: number;
   sidebarVisible: boolean;
+  updateNotice?: React.ReactNode;
 }
 
 export function StatusBar({
@@ -23,6 +24,7 @@ export function StatusBar({
   onToggleFilterPanel,
   activeFilterCount,
   sidebarVisible,
+  updateNotice,
 }: StatusBarProps): React.ReactElement {
   const isFiltered = unfilteredRows !== null && totalRows !== unfilteredRows;
   const rowsDisplay = isFiltered
@@ -43,6 +45,7 @@ export function StatusBar({
           ? `${rowsDisplay}${groupDisplay}${pivotDisplay}`
           : "No table selected"}
       </span>
+      {updateNotice && <div className="status-bar-update">{updateNotice}</div>}
       {activeTable && (
         <div
           className={`filter-toggle${filterPanelOpen ? " active" : ""}`}

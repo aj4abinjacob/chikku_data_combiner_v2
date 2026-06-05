@@ -11,6 +11,7 @@ import { ExcelSheetPickerDialog } from "./ExcelSheetPickerDialog";
 import { ImportRetryDialog } from "./ImportRetryDialog";
 import { ExportDialog } from "./ExportDialog";
 import { HistoryDialog } from "./HistoryDialog";
+import { UpdateNotice } from "./UpdateNotice";
 import { buildCombineQuery } from "../utils/sqlBuilder";
 import { buildColOpUpdateSQL, buildStepDescription } from "../utils/colOpsSQL";
 import { buildRowOpSQL, buildRowOpStepDescription } from "../utils/rowOpsSQL";
@@ -1776,6 +1777,7 @@ export function App(): React.ReactElement {
         onToggleFilterPanel={() => setFilterPanelOpen((v) => !v)}
         activeFilterCount={countConditions(viewState.filters)}
         sidebarVisible={sidebarVisible}
+        updateNotice={<UpdateNotice />}
       />
       <CombineDialog
         isOpen={combineDialogOpen}

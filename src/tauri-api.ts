@@ -5,11 +5,11 @@
  * backed by Tauri commands and event listeners.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
-import type { DbApi } from "./types";
+import type { AppUpdateInfo, DbApi, UpdateDownloadEvent } from "./types";
 
 interface RegexPattern {
   id: string;
@@ -177,6 +177,23 @@ function installTauriApi() {
     syncTheme: (_isDark: boolean) => {
       // Native menu sync is not wired in this scaffold pass; intentionally no-op.
     },
+
+    getAppVersion: () => invoke("get_app_version"),
+
+    checkForUpdate: () => invoke<AppUpdateInfo | null>("check_for_update"),
+
+    claimUpdateNotice: (version: string) =>
+      invoke<boolean>("claim_update_notice", { version }),
+
+    releaseUpdateNotice: (version: string) =>
+      invoke<boolean>("release_update_notice", { version }),
+
+    installUpdate: async (onProgress: (event: UpdateDownloadEvent) => void) => {
+      const onEvent = new Channel<UpdateDownloadEvent>((event) => onProgress(event));
+      await invoke("install_update", { onEvent });
+    },
+
+    restartApp: () => invoke("restart_app"),
   };
 
   (window as any).api = api;

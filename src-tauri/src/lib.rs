@@ -1,3 +1,4 @@
+mod app_updates;
 mod commands;
 mod db;
 mod error;
@@ -6,6 +7,7 @@ mod menu;
 mod patterns;
 mod window_mgr;
 
+use app_updates::*;
 use commands::*;
 use db::DbState;
 use menu::MenuState;
@@ -46,7 +48,9 @@ pub fn run() {
                 log::warn!("spawn_windows_for_files failed: {e}");
             }
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(DbState::default())
+        .manage(UpdateState::default())
         .manage(PatternState::default())
         .manage(PendingFiles::default())
         .manage(MenuState::default())
@@ -71,6 +75,12 @@ pub fn run() {
             open_new_window,
             close_db,
             take_pending_files,
+            get_app_version,
+            check_for_update,
+            claim_update_notice,
+            release_update_notice,
+            install_update,
+            restart_app,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
