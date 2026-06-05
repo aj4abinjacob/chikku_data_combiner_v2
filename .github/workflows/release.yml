@@ -99,8 +99,7 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: Chikku Parser ${{ github.ref_name }}
           generateReleaseNotes: true
-          uploadUpdaterJson: true
-          uploadUpdaterSignatures: true
+          includeUpdaterJson: true
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
