@@ -6,6 +6,8 @@ import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode } from "
 const TOOLTIP_DELAY = 600; // ms before tooltip appears
 
 const ROW_HEIGHT = 28;
+const DEFAULT_COLUMN_WIDTH = 150;
+const MIN_COLUMN_WIDTH = 50;
 const PIVOT_GROUP_COL_WIDTH = 250;
 const PIVOT_GROUP_COL_KEY = "__pivot_group__";
 
@@ -253,21 +255,16 @@ export function DataGrid({
     rangeRef.current = null; // force ensureRange to re-fire
   }, [resetKey]);
 
-  // Calculate column widths — preserve existing widths, only compute defaults for new columns
+  // Calculate column widths — preserve existing widths, only assign fixed defaults for new columns
   useEffect(() => {
     if (columns.length === 0) return;
-    const container = containerRef.current;
-    if (!container) return;
-    const firstColWidth = pivotMode ? PIVOT_GROUP_COL_WIDTH : 50;
-    const availableWidth = container.clientWidth - firstColWidth;
-    const defaultWidth = Math.max(150, Math.floor(availableWidth / columns.length));
     setColumnWidths((prev) => {
       const widths: Record<string, number> = {};
       if (pivotMode) {
         widths[PIVOT_GROUP_COL_KEY] = prev[PIVOT_GROUP_COL_KEY] ?? PIVOT_GROUP_COL_WIDTH;
       }
       for (const col of columns) {
-        widths[col] = prev[col] ?? defaultWidth;
+        widths[col] = prev[col] ?? DEFAULT_COLUMN_WIDTH;
       }
       return widths;
     });
@@ -278,14 +275,14 @@ export function DataGrid({
   // Use dataColumns (excludes grouped cols) for pivot mode width
   const displayColumns = pivotMode ? dataColumns : columns;
   const totalWidth =
-    groupColWidth + displayColumns.reduce((sum, col) => sum + (columnWidths[col] ?? 150), 0);
+    groupColWidth + displayColumns.reduce((sum, col) => sum + (columnWidths[col] ?? DEFAULT_COLUMN_WIDTH), 0);
 
   // Document-level drag listeners for column resize
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (!isDragging.current || !dragColRef.current) return;
       const delta = e.clientX - dragStartX.current;
-      const newWidth = Math.max(50, dragStartWidth.current + delta);
+      const newWidth = Math.max(MIN_COLUMN_WIDTH, dragStartWidth.current + delta);
       setColumnWidths((prev) => ({
         ...prev,
         [dragColRef.current!]: newWidth,
@@ -380,7 +377,7 @@ export function DataGrid({
       isDragging.current = true;
       dragColRef.current = col;
       dragStartX.current = e.clientX;
-      dragStartWidth.current = columnWidths[col] ?? 150;
+      dragStartWidth.current = columnWidths[col] ?? DEFAULT_COLUMN_WIDTH;
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
     },
@@ -400,12 +397,7 @@ export function DataGrid({
       // If already auto-fitted, revert to default width
       if (autoFittedCols.current.has(col)) {
         autoFittedCols.current.delete(col);
-        const container = containerRef.current;
-        if (!container) return;
-        const firstColWidth = pivotMode ? PIVOT_GROUP_COL_WIDTH : 50;
-        const availableWidth = container.clientWidth - firstColWidth;
-        const defaultWidth = Math.max(150, Math.floor(availableWidth / columns.length));
-        setColumnWidths((prev) => ({ ...prev, [col]: defaultWidth }));
+        setColumnWidths((prev) => ({ ...prev, [col]: DEFAULT_COLUMN_WIDTH }));
         return;
       }
 
@@ -419,8 +411,6 @@ export function DataGrid({
 
       const CELL_PADDING = 24; // 12px left + 12px right
       const HEADER_EXTRA = 30; // room for sort indicator + resize handle
-      const MIN_WIDTH = 50;
-
       // Measure header text (bold)
       ctx.font = 'bold 13px "SF Mono", Menlo, Monaco, monospace';
       let maxWidth = ctx.measureText(col).width + CELL_PADDING + HEADER_EXTRA;
@@ -447,7 +437,7 @@ export function DataGrid({
         }
       }
 
-      const fitWidth = Math.max(MIN_WIDTH, Math.ceil(maxWidth));
+      const fitWidth = Math.max(MIN_COLUMN_WIDTH, Math.ceil(maxWidth));
       autoFittedCols.current.add(col);
       setColumnWidths((prev) => ({ ...prev, [col]: fitWidth }));
     },
@@ -700,7 +690,7 @@ export function DataGrid({
                   ]
                     .filter(Boolean)
                     .join(" ")}
-                  style={{ width: columnWidths[col] ?? 150 }}
+                  style={{ width: columnWidths[col] ?? DEFAULT_COLUMN_WIDTH }}
                   draggable={!pivotMode && !!onReorderColumns}
                   onClick={(e) => { if (!justFinishedResize.current) onSort(col, e.shiftKey); }}
                   onDragStart={(e) => handleHeaderDragStart(e, col)}
@@ -793,7 +783,7 @@ export function DataGrid({
                             className={`dg-cell${cellText ? " dg-pivot-agg-value" : ""}${flatRow.expanded ? " dg-pivot-agg-faded" : ""}${
                               selected.has(cellKey(virtualRow.index, col)) ? " cell-selected" : ""
                             }`}
-                            style={{ width: columnWidths[col] ?? 150 }}
+                            style={{ width: columnWidths[col] ?? DEFAULT_COLUMN_WIDTH }}
                             onMouseDown={(e) =>
                               handleCellMouseDown(virtualRow.index, col, e)
                             }
@@ -847,7 +837,7 @@ export function DataGrid({
                           ]
                             .filter(Boolean)
                             .join(" ")}
-                          style={{ width: columnWidths[col] ?? 150 }}
+                          style={{ width: columnWidths[col] ?? DEFAULT_COLUMN_WIDTH }}
                           onMouseDown={(e) =>
                             handleCellMouseDown(virtualRow.index, col, e)
                           }
@@ -899,7 +889,7 @@ export function DataGrid({
                         ]
                           .filter(Boolean)
                           .join(" ")}
-                        style={{ width: columnWidths[col] ?? 150 }}
+                        style={{ width: columnWidths[col] ?? DEFAULT_COLUMN_WIDTH }}
                         onMouseDown={(e) =>
                           handleCellMouseDown(virtualRow.index, col, e)
                         }
@@ -944,7 +934,7 @@ export function DataGrid({
                   <div
                     key={col}
                     className={`dg-cell${cellText ? " dg-pivot-agg-value" : ""}`}
-                    style={{ width: columnWidths[col] ?? 150 }}
+                    style={{ width: columnWidths[col] ?? DEFAULT_COLUMN_WIDTH }}
                   >
                     {cellText}
                   </div>
