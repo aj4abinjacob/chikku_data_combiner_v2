@@ -916,7 +916,7 @@ export function App(): React.ReactElement {
       try {
         const existingNames = new Set(tablesRef.current.map((t) => t.tableName));
         const sampleName = nextSampleName(existingNames);
-        const sampleClause = isPercent ? `${n} PERCENT` : `${n} ROWS`;
+        const sampleClause = isPercent ? `${n} PERCENT (reservoir)` : `${n} ROWS`;
         await window.api.exec(
           `CREATE TABLE "${sampleName}" AS SELECT * FROM "${activeTable}" USING SAMPLE ${sampleClause}`
         );
