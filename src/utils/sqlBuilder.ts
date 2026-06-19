@@ -44,6 +44,8 @@ function buildFilterClause(filter: FilterCondition): string {
 
   if (filter.operator === "IS NULL") return `${col} IS NULL`;
   if (filter.operator === "IS NOT NULL") return `${col} IS NOT NULL`;
+  if (filter.operator === "IS TRUE") return `${col} IS TRUE`;
+  if (filter.operator === "IS FALSE") return `${col} IS FALSE`;
 
   // Escape single quotes in value
   const val = filter.value.replace(/'/g, "''");

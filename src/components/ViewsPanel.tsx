@@ -100,7 +100,7 @@ function renderFilterPills(group: FilterGroup): React.ReactNode[] {
         </span>
       );
     } else {
-      const needsValue = child.operator !== "IS NULL" && child.operator !== "IS NOT NULL";
+      const needsValue = child.operator !== "IS NULL" && child.operator !== "IS NOT NULL" && child.operator !== "IS TRUE" && child.operator !== "IS FALSE";
       nodes.push(
         <span key={`cond-${i}`}>
           <span className="views-inline-detail-col">{child.column}</span>

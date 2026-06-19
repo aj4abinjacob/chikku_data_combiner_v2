@@ -42,6 +42,8 @@ const OPERATOR_LABELS: Record<FilterOperator, string> = {
   IN: "in list",
   "IS NULL": "is empty",
   "IS NOT NULL": "is not empty",
+  "IS TRUE": "is true",
+  "IS FALSE": "is false",
   ">": "greater than",
   "<": "less than",
   "STARTS WITH": "starts with",
@@ -75,7 +77,7 @@ const COMMON_OPERATORS_BY_KIND: Record<ColumnKind, FilterOperator[]> = {
   ],
   number: ["=", "!=", ">", "<", "IN", "IS NULL", "IS NOT NULL"],
   date: ["=", "!=", ">", "<", "IN", "IS NULL", "IS NOT NULL"],
-  boolean: ["=", "!=", "IS NULL", "IS NOT NULL"],
+  boolean: ["IS TRUE", "IS FALSE", "=", "!=", "IS NULL", "IS NOT NULL"],
   unknown: ["CONTAINS", "DOES NOT CONTAIN", "=", "!=", "IN", "IS NULL", "IS NOT NULL", ">", "<"],
 };
 
@@ -95,7 +97,7 @@ const ADVANCED_OPERATOR_ORDER: FilterOperator[] = [
   "<",
 ];
 
-const NO_VALUE_OPS = new Set<FilterOperator>(["IS NULL", "IS NOT NULL"]);
+const NO_VALUE_OPS = new Set<FilterOperator>(["IS NULL", "IS NOT NULL", "IS TRUE", "IS FALSE"]);
 
 const MIN_PANEL_HEIGHT = 80;
 const MAX_PANEL_HEIGHT = 500;
