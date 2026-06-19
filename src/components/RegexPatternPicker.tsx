@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from "react";
-import { Button, InputGroup, Icon, Intent } from "@blueprintjs/core";
+import { Button, Icon, Intent } from "@blueprintjs/core";
 import { Popover2 } from "@blueprintjs/popover2";
 import { RegexPattern } from "../types";
+import { SearchInput } from "./SearchInput";
 
 interface RegexPatternPickerProps {
   onSelect: (pattern: string) => void;
@@ -78,11 +79,10 @@ export function RegexPatternPicker({ onSelect, onOpenManager }: RegexPatternPick
   const popoverContent = (
     <div className="regex-picker-popover">
       <div className="regex-picker-search">
-        <InputGroup
-          leftIcon="search"
+        <SearchInput
           placeholder="Search patterns..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={setSearch}
           small
           autoFocus
         />

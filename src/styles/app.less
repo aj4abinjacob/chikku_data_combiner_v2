@@ -1984,6 +1984,20 @@ html, body, #root {
   text-align: center;
 }
 
+.rowops-column-picker-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  min-height: 0;
+}
+
+.rowops-column-picker-count {
+  align-self: flex-end;
+  font-size: 11px;
+  color: #8a9ba8;
+}
+
 // ── Column operations dialog ──
 .column-op-form {
   display: flex;
@@ -2650,6 +2664,8 @@ html, body, #root {
   font-size: 13px;
   border-radius: var(--control-radius);
   border: 1px solid transparent;
+  cursor: pointer;
+  outline: none;
   transition: background 0.12s, border-color 0.12s;
 
   &:hover {
@@ -2657,12 +2673,17 @@ html, body, #root {
     border-color: #e1e8ed;
   }
 
+  &:focus-visible {
+    box-shadow: 0 0 0 1px #137cbd, 0 0 0 3px rgba(19, 124, 189, 0.15);
+    border-color: #137cbd;
+  }
+
   &.selected {
     background: rgba(19, 124, 189, 0.06);
     border-color: rgba(19, 124, 189, 0.2);
   }
 
-  .bp4-control {
+  .bp4-control-indicator {
     flex-shrink: 0;
   }
 
@@ -2684,6 +2705,33 @@ html, body, #root {
   .aggregate-col-hint {
     color: #bf7326;
     font-size: 10px;
+  }
+
+  .column-check-list-muted-hint {
+    color: #8a9ba8;
+    font-size: 10px;
+    font-style: italic;
+    margin-left: 4px;
+  }
+
+  .column-check-list-order-badge {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: transparent;
+    color: transparent;
+    font-size: 10px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 4px;
+
+    &.visible {
+      background: #137cbd;
+      color: #fff;
+    }
   }
 }
 

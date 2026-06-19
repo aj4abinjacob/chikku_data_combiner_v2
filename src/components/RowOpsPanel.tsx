@@ -2,9 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import ReactDOM from "react-dom";
 import {
   Button,
-  Checkbox,
   HTMLSelect,
-  InputGroup,
   Intent,
   Alert,
   Icon,
@@ -13,6 +11,7 @@ import {
   Tag,
 } from "@blueprintjs/core";
 import { ColumnInfo, RowOpType, RowOpStep, UndoStrategy, FilterGroup, hasActiveFilters } from "../types";
+import { ColumnCheckList } from "./ColumnCheckList";
 
 const OP_OPTIONS: { value: RowOpType; label: string; description: string }[] = [
   { value: "delete_filtered", label: "Delete Filtered Rows", description: "Remove rows that match the current filter" },
@@ -50,7 +49,6 @@ const COLUMN_DROPDOWN_MIN_USABLE_HEIGHT = 160;
 
 function ColumnMultiPicker({ columns, selected, onChange, placeholderAll }: ColumnMultiPickerProps): React.ReactElement {
   const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
   const [pos, setPos] = useState<ColumnDropdownPosition>({
     top: 0,
     left: 0,
@@ -59,6 +57,13 @@ function ColumnMultiPicker({ columns, selected, onChange, placeholderAll }: Colu
   });
   const dropdownRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
+  const items = React.useMemo(
+    () =>
+      [...columns]
+        .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }))
+        .map((c) => ({ name: c.column_name, type: c.column_type })),
+    [columns]
+  );
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -113,25 +118,6 @@ function ColumnMultiPicker({ columns, selected, onChange, placeholderAll }: Colu
     };
   }, [open]);
 
-  const toggle = (name: string) => {
-    const next = new Set(selected);
-    if (next.has(name)) next.delete(name);
-    else next.add(name);
-    onChange(next);
-  };
-
-  const filtered = columns
-    .filter((c) => !search || c.column_name.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }));
-
-  const selectAll = () => {
-    const next = new Set(selected);
-    for (const c of filtered) next.add(c.column_name);
-    onChange(next);
-  };
-
-  const clearAll = () => onChange(new Set());
-
   const label = selected.size === 0
     ? placeholderAll
     : selected.size === 1
@@ -151,39 +137,24 @@ function ColumnMultiPicker({ columns, selected, onChange, placeholderAll }: Colu
             ...(pos.top !== undefined ? { top: pos.top } : { bottom: pos.bottom }),
           }}
         >
-          <div className="in-value-dropdown-header">
-            <InputGroup
-              placeholder="Search columns..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              small
-              leftIcon="search"
-              autoFocus
+          <div className="rowops-column-picker-content">
+            <ColumnCheckList
+              items={items}
+              selected={selected}
+              onChange={onChange}
+              search
+              searchPlaceholder="Search columns..."
+              autoFocusSearch
+              selectAllScope="filtered"
+              selectAllMode="merge"
+              maxHeight={Math.max(96, pos.maxHeight - 74)}
+              emptyMeans="all"
+              emptyAllText="All columns will be used."
+              className="rowops-column-check-list"
             />
-            <div className="in-value-dropdown-actions">
-              <Button small minimal text="All" onClick={selectAll} />
-              <Button small minimal text="None" onClick={clearAll} />
-              <span className="in-value-dropdown-count">
-                {selected.size} / {columns.length}
-              </span>
+            <div className="rowops-column-picker-count">
+              {selected.size} / {columns.length}
             </div>
-          </div>
-          <div className="in-value-dropdown-list">
-            {filtered.length === 0 ? (
-              <div className="in-value-dropdown-empty">No columns</div>
-            ) : (
-              filtered.map((c) => (
-                <label key={c.column_name} className="in-value-dropdown-item">
-                  <Checkbox
-                    checked={selected.has(c.column_name)}
-                    onChange={() => toggle(c.column_name)}
-                    style={{ marginBottom: 0 }}
-                  />
-                  <span className="in-value-dropdown-label" title={c.column_name}>{c.column_name}</span>
-                  <span className="rowops-picker-type">{c.column_type}</span>
-                </label>
-              ))
-            )}
           </div>
         </div>,
         document.body

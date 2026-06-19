@@ -1,5 +1,6 @@
 import * as React from "react";
-import { Button, Checkbox, InputGroup } from "@blueprintjs/core";
+import { Button, Checkbox } from "@blueprintjs/core";
+import { SearchInput } from "./SearchInput";
 
 /**
  * Shared column/table/sheet checkbox list.
@@ -31,8 +32,11 @@ export interface ColumnCheckListProps {
   /** Show the search box. Defaults to on when there are more than 8 items. */
   search?: boolean;
   searchPlaceholder?: string;
+  autoFocusSearch?: boolean;
   /** Show Select All / Deselect All buttons. */
   showSelectAll?: boolean;
+  selectAllScope?: "all" | "filtered";
+  selectAllMode?: "replace" | "merge";
   /**
    * When provided, enables a "Select All Numeric" action and appends the
    * numeric-only hint to non-matching rows. Receives each item's `type`.
@@ -43,6 +47,8 @@ export interface ColumnCheckListProps {
   emptyMeans?: "all" | "invalid";
   /** Inline hint shown while nothing is selected and `emptyMeans="all"`. */
   emptyAllText?: string;
+  renderItemHint?: (item: ColumnCheckItem) => React.ReactNode;
+  renderItemBadge?: (item: ColumnCheckItem, isSelected: boolean) => React.ReactNode;
   maxHeight?: number;
   className?: string;
 }
@@ -56,11 +62,16 @@ export function ColumnCheckList({
   onChange,
   search,
   searchPlaceholder = "Search...",
+  autoFocusSearch = false,
   showSelectAll = true,
+  selectAllScope = "all",
+  selectAllMode = "replace",
   isNumeric,
   numericHint = DEFAULT_NUMERIC_HINT,
   emptyMeans = "invalid",
   emptyAllText = "All items will be used.",
+  renderItemHint,
+  renderItemBadge,
   maxHeight = 200,
   className,
 }: ColumnCheckListProps) {
@@ -84,14 +95,30 @@ export function ColumnCheckList({
     [selected, onChange]
   );
 
-  const selectAll = React.useCallback(
-    () => onChange(new Set(items.map((it) => it.name))),
-    [items, onChange]
-  );
+  const selectAll = React.useCallback(() => {
+    const source = selectAllScope === "filtered" ? filtered : items;
+    if (selectAllMode === "merge") {
+      const next = new Set(selected);
+      source.forEach((it) => next.add(it.name));
+      onChange(next);
+    } else {
+      onChange(new Set(source.map((it) => it.name)));
+    }
+  }, [filtered, items, onChange, selectAllMode, selectAllScope, selected]);
   const deselectAll = React.useCallback(() => onChange(new Set()), [onChange]);
   const selectNumeric = React.useCallback(
     () => onChange(new Set(items.filter((it) => isNumeric?.(it.type)).map((it) => it.name))),
     [items, isNumeric, onChange]
+  );
+
+  const handleItemKeyDown = React.useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>, name: string) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        toggle(name);
+      }
+    },
+    [toggle]
   );
 
   const showToolbar = showSearch || showSelectAll || Boolean(isNumeric);
@@ -101,24 +128,13 @@ export function ColumnCheckList({
       {showToolbar && (
         <div className="column-check-list-toolbar">
           {showSearch ? (
-            <InputGroup
+            <SearchInput
               small
-              leftIcon="search"
               placeholder={searchPlaceholder}
               value={query}
-              onChange={(e) => setQuery(e.currentTarget.value)}
-              rightElement={
-                query ? (
-                  <Button
-                    minimal
-                    small
-                    icon="cross"
-                    aria-label="Clear search"
-                    onClick={() => setQuery("")}
-                  />
-                ) : undefined
-              }
+              onChange={setQuery}
               className="column-check-list-search"
+              autoFocus={autoFocusSearch}
             />
           ) : (
             <span className="column-check-list-spacer" />
@@ -143,27 +159,34 @@ export function ColumnCheckList({
           <div className="column-check-list-empty">No matches</div>
         ) : (
           filtered.map((it) => {
+            const isSelected = selected.has(it.name);
             const numeric = isNumeric ? isNumeric(it.type) : true;
+            const itemHint = renderItemHint?.(it);
             return (
-              <div
+              <Checkbox
                 key={it.name}
-                className={`aggregate-col-item${selected.has(it.name) ? " selected" : ""}`}
-              >
-                <Checkbox
-                  checked={selected.has(it.name)}
-                  onChange={() => toggle(it.name)}
-                  style={{ marginBottom: 0 }}
-                />
-                <span className="aggregate-col-name">{it.name}</span>
-                {it.type !== undefined && (
-                  <span className="aggregate-col-type">
-                    {it.type}
-                    {isNumeric && !numeric && (
-                      <span className="aggregate-col-hint">{numericHint}</span>
+                className={`aggregate-col-item${isSelected ? " selected" : ""}`}
+                checked={isSelected}
+                onChange={() => toggle(it.name)}
+                onKeyDown={(event) => handleItemKeyDown(event, it.name)}
+                style={{ marginBottom: 0 }}
+                title={it.name}
+                labelElement={
+                  <>
+                    <span className="aggregate-col-name">{it.name}</span>
+                    {(it.type !== undefined || itemHint) && (
+                      <span className="aggregate-col-type">
+                        {it.type}
+                        {isNumeric && !numeric && (
+                          <span className="aggregate-col-hint">{numericHint}</span>
+                        )}
+                        {itemHint}
+                      </span>
                     )}
-                  </span>
-                )}
-              </div>
+                    {renderItemBadge?.(it, isSelected)}
+                  </>
+                }
+              />
             );
           })
         )}

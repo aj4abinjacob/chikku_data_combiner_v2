@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
   Button,
-  Checkbox,
+  Callout,
   Intent,
   HTMLSelect,
   InputGroup,
@@ -15,6 +15,7 @@ import {
 import { ColumnInfo, ColOpTargetMode } from "../types";
 import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import { SearchableColumnSelect } from "./SearchableColumnSelect";
+import { ColumnCheckList, ColumnCheckItem } from "./ColumnCheckList";
 
 type OpType =
   | "substring"
@@ -77,17 +78,12 @@ export function DataOperationsDialog({
   const [param1, setParam1] = useState("");
   const [param2, setParam2] = useState("");
   const [combineSourceCols, setCombineSourceCols] = useState<string[]>([]);
-  const [combineSearch, setCombineSearch] = useState("");
   const [renameRows, setRenameRows] = useState<Array<{ sourceCol: string; newName: string }>>([{ sourceCol: "", newName: "" }]);
   const [deleteColumns, setDeleteColumns] = useState<string[]>([]);
   const [dedupColumns, setDedupColumns] = useState<string[]>([]);
-  const [dedupSearch, setDedupSearch] = useState("");
   const [emptyNullColumns, setEmptyNullColumns] = useState<string[]>([]);
-  const [emptyNullSearch, setEmptyNullSearch] = useState("");
   const [sentinelNullColumns, setSentinelNullColumns] = useState<string[]>([]);
-  const [sentinelNullSearch, setSentinelNullSearch] = useState("");
   const [removeEmptyColumns, setRemoveEmptyColumns] = useState<string[]>([]);
-  const [removeEmptySearch, setRemoveEmptySearch] = useState("");
   const [removeEmptyMode, setRemoveEmptyMode] = useState<"all" | "any">("any");
   const [removeEmptyPreview, setRemoveEmptyPreview] = useState<{ before: number; after: number } | null>(null);
   const [sampleMode, setSampleMode] = useState<"rows" | "percent">("rows");
@@ -104,6 +100,24 @@ export function DataOperationsDialog({
     schema.forEach((col) => map.set(col.column_name, col.column_type));
     return map;
   }, [schema]);
+
+  const schemaItems = React.useMemo<ColumnCheckItem[]>(
+    () => schema.map((col) => ({ name: col.column_name, type: col.column_type })),
+    [schema]
+  );
+
+  const sortedSchemaItems = React.useMemo<ColumnCheckItem[]>(
+    () =>
+      [...schema]
+        .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }))
+        .map((col) => ({ name: col.column_name, type: col.column_type })),
+    [schema]
+  );
+
+  const isVarcharType = React.useCallback(
+    (type: string | undefined) => /^(VARCHAR|TEXT|STRING|CHAR)/i.test(type ?? ""),
+    []
+  );
 
   const buildExpression = (op: OpType, col: string, p1: string, p2: string): string | null => {
     // For string-based ops, cast to VARCHAR if the column isn't already a string type
@@ -349,19 +363,14 @@ export function DataOperationsDialog({
     setParam1("");
     setParam2("");
     setCombineSourceCols([]);
-    setCombineSearch("");
     setRenameRows([{ sourceCol: "", newName: "" }]);
     setDeleteColumns([]);
     setDedupColumns([]);
-    setDedupSearch("");
     setRemoveEmptyColumns([]);
-    setRemoveEmptySearch("");
     setRemoveEmptyMode("any");
     setRemoveEmptyPreview(null);
     setEmptyNullColumns([]);
-    setEmptyNullSearch("");
     setSentinelNullColumns([]);
-    setSentinelNullSearch("");
     setSampleMode("rows");
     setCaseConditions([{ column: "", operator: "=", value: "", result: "" }]);
     setCaseDefault("");
@@ -656,38 +665,21 @@ export function DataOperationsDialog({
           {opType === "delete_column" && (
             <>
               <FormGroup label="Columns to Delete" helperText="Select one or more columns to remove.">
-                <div className="combine-col-list">
-                  <div className="combine-col-items">
-                    {schema.map((col) => {
-                      const isSelected = deleteColumns.includes(col.column_name);
-                      return (
-                        <div key={col.column_name} className={`combine-col-item${isSelected ? " selected" : ""}`}>
-                          <Checkbox
-                            checked={isSelected}
-                            onChange={() => {
-                              if (isSelected) {
-                                setDeleteColumns((prev) => prev.filter((c) => c !== col.column_name));
-                              } else {
-                                setDeleteColumns((prev) => [...prev, col.column_name]);
-                              }
-                            }}
-                            style={{ marginBottom: 0 }}
-                          />
-                          <span className="combine-col-name">{col.column_name}</span>
-                          <span className="column-type">{col.column_type}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                <ColumnCheckList
+                  items={schemaItems}
+                  selected={new Set(deleteColumns)}
+                  onChange={(next) => setDeleteColumns(Array.from(next))}
+                  showSelectAll={false}
+                  maxHeight={240}
+                />
               </FormGroup>
               {deleteColumns.length > 0 && (
-                <div className="bp4-callout bp4-intent-warning" style={{ marginBottom: 10 }}>
+                <Callout intent={Intent.WARNING} style={{ marginBottom: 10 }}>
                   <p style={{ margin: 0 }}>
                     This will permanently remove {deleteColumns.length} column{deleteColumns.length > 1 ? "s" : ""} from the table.
                     {deleteColumns.length >= schema.length && " Cannot delete all columns — at least one must remain."}
                   </p>
-                </div>
+                </Callout>
               )}
             </>
           )}
@@ -769,46 +761,23 @@ export function DataOperationsDialog({
           {opType === "combine_columns" && (
             <>
               <FormGroup label="Columns to Combine" helperText="Select 2 or more columns. They will be concatenated in the order selected.">
-                <div className="combine-col-list">
-                  <div className="combine-col-search">
-                    <InputGroup
-                      leftIcon="search"
-                      placeholder="Search columns..."
-                      value={combineSearch}
-                      onChange={(e) => setCombineSearch(e.target.value)}
-                      small
-                    />
-                  </div>
-                  <div className="combine-col-items">
-                    {[...schema]
-                      .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }))
-                      .filter((col) => col.column_name.toLowerCase().includes(combineSearch.toLowerCase()))
-                      .map((col) => {
-                        const isSelected = combineSourceCols.includes(col.column_name);
-                        const orderIndex = combineSourceCols.indexOf(col.column_name);
-                        return (
-                          <div key={col.column_name} className={`combine-col-item${isSelected ? " selected" : ""}`}>
-                            <Checkbox
-                              checked={isSelected}
-                              onChange={() => {
-                                if (isSelected) {
-                                  setCombineSourceCols((prev) => prev.filter((c) => c !== col.column_name));
-                                } else {
-                                  setCombineSourceCols((prev) => [...prev, col.column_name]);
-                                }
-                              }}
-                              style={{ marginBottom: 0 }}
-                            />
-                            <span className="combine-col-name">{col.column_name}</span>
-                            <span className="column-type">{col.column_type}</span>
-                            <span className={`combine-order-badge${isSelected ? " visible" : ""}`}>
-                              {isSelected ? orderIndex + 1 : ""}
-                            </span>
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
+                <ColumnCheckList
+                  items={sortedSchemaItems}
+                  selected={new Set(combineSourceCols)}
+                  onChange={(next) => setCombineSourceCols(Array.from(next))}
+                  search
+                  searchPlaceholder="Search columns..."
+                  showSelectAll={false}
+                  maxHeight={240}
+                  renderItemBadge={(item, isSelected) => {
+                    const orderIndex = combineSourceCols.indexOf(item.name);
+                    return (
+                      <span className={`column-check-list-order-badge${isSelected ? " visible" : ""}`}>
+                        {isSelected ? orderIndex + 1 : ""}
+                      </span>
+                    );
+                  }}
+                />
               </FormGroup>
               <FormGroup label="Separator" helperText="String to insert between column values (can be empty)">
                 <InputGroup
@@ -852,62 +821,21 @@ export function DataOperationsDialog({
           {opType === "remove_duplicates" && (
             <>
               <FormGroup label="Deduplicate by Columns" helperText="Select columns to check for duplicates. Rows with identical values in these columns will be deduplicated.">
-                <div className="combine-col-list">
-                  <div className="combine-col-search" style={{ display: "flex", gap: 4 }}>
-                    <InputGroup
-                      leftIcon="search"
-                      placeholder="Search columns..."
-                      value={dedupSearch}
-                      onChange={(e) => setDedupSearch(e.target.value)}
-                      small
-                      style={{ flex: 1 }}
-                    />
-                    <Button
-                      small
-                      minimal
-                      text={dedupColumns.length === schema.length ? "Deselect All" : "Select All"}
-                      onClick={() => {
-                        if (dedupColumns.length === schema.length) {
-                          setDedupColumns([]);
-                        } else {
-                          setDedupColumns(schema.map((c) => c.column_name));
-                        }
-                      }}
-                    />
-                  </div>
-                  <div className="combine-col-items">
-                    {[...schema]
-                      .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }))
-                      .filter((col) => col.column_name.toLowerCase().includes(dedupSearch.toLowerCase()))
-                      .map((col) => {
-                        const isSelected = dedupColumns.includes(col.column_name);
-                        return (
-                          <div key={col.column_name} className={`combine-col-item${isSelected ? " selected" : ""}`}>
-                            <Checkbox
-                              checked={isSelected}
-                              onChange={() => {
-                                if (isSelected) {
-                                  setDedupColumns((prev) => prev.filter((c) => c !== col.column_name));
-                                } else {
-                                  setDedupColumns((prev) => [...prev, col.column_name]);
-                                }
-                              }}
-                              style={{ marginBottom: 0 }}
-                            />
-                            <span className="combine-col-name">{col.column_name}</span>
-                            <span className="column-type">{col.column_type}</span>
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
+                <ColumnCheckList
+                  items={sortedSchemaItems}
+                  selected={new Set(dedupColumns)}
+                  onChange={(next) => setDedupColumns(Array.from(next))}
+                  search
+                  searchPlaceholder="Search columns..."
+                  maxHeight={240}
+                />
               </FormGroup>
               {dedupPreview && (
-                <div className="bp4-callout bp4-intent-primary" style={{ marginBottom: 10 }}>
+                <Callout intent={Intent.PRIMARY} style={{ marginBottom: 10 }}>
                   <p style={{ margin: 0 }}>
                     {dedupPreview.before.toLocaleString()} rows → {dedupPreview.after.toLocaleString()} rows ({(dedupPreview.before - dedupPreview.after).toLocaleString()} duplicate{dedupPreview.before - dedupPreview.after !== 1 ? "s" : ""} will be removed)
                   </p>
-                </div>
+                </Callout>
               )}
             </>
           )}
@@ -926,62 +854,23 @@ export function DataOperationsDialog({
                 </RadioGroup>
               </FormGroup>
               <FormGroup label="Columns" helperText="Select columns to check for empty values, or leave empty to check all columns.">
-                <div className="combine-col-list">
-                  <div className="combine-col-search" style={{ display: "flex", gap: 4 }}>
-                    <InputGroup
-                      leftIcon="search"
-                      placeholder="Search columns..."
-                      value={removeEmptySearch}
-                      onChange={(e) => setRemoveEmptySearch(e.target.value)}
-                      small
-                      style={{ flex: 1 }}
-                    />
-                    <Button
-                      small
-                      minimal
-                      text={removeEmptyColumns.length === schema.length ? "Deselect All" : "Select All"}
-                      onClick={() => {
-                        if (removeEmptyColumns.length === schema.length) {
-                          setRemoveEmptyColumns([]);
-                        } else {
-                          setRemoveEmptyColumns(schema.map((c) => c.column_name));
-                        }
-                      }}
-                    />
-                  </div>
-                  <div className="combine-col-items">
-                    {[...schema]
-                      .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }))
-                      .filter((col) => col.column_name.toLowerCase().includes(removeEmptySearch.toLowerCase()))
-                      .map((col) => {
-                        const isSelected = removeEmptyColumns.includes(col.column_name);
-                        return (
-                          <div key={col.column_name} className={`combine-col-item${isSelected ? " selected" : ""}`}>
-                            <Checkbox
-                              checked={isSelected}
-                              onChange={() => {
-                                if (isSelected) {
-                                  setRemoveEmptyColumns((prev) => prev.filter((c) => c !== col.column_name));
-                                } else {
-                                  setRemoveEmptyColumns((prev) => [...prev, col.column_name]);
-                                }
-                              }}
-                              style={{ marginBottom: 0 }}
-                            />
-                            <span className="combine-col-name">{col.column_name}</span>
-                            <span className="column-type">{col.column_type}</span>
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
+                <ColumnCheckList
+                  items={sortedSchemaItems}
+                  selected={new Set(removeEmptyColumns)}
+                  onChange={(next) => setRemoveEmptyColumns(Array.from(next))}
+                  search
+                  searchPlaceholder="Search columns..."
+                  emptyMeans="all"
+                  emptyAllText="All columns will be checked."
+                  maxHeight={240}
+                />
               </FormGroup>
               {removeEmptyPreview && (
-                <div className="bp4-callout bp4-intent-primary" style={{ marginBottom: 10 }}>
+                <Callout intent={Intent.PRIMARY} style={{ marginBottom: 10 }}>
                   <p style={{ margin: 0 }}>
                     {removeEmptyPreview.before.toLocaleString()} rows → {removeEmptyPreview.after.toLocaleString()} rows ({(removeEmptyPreview.before - removeEmptyPreview.after).toLocaleString()} empty row{removeEmptyPreview.before - removeEmptyPreview.after !== 1 ? "s" : ""} will be removed)
                   </p>
-                </div>
+                </Callout>
               )}
             </>
           )}
@@ -993,57 +882,21 @@ export function DataOperationsDialog({
                 label="Columns"
                 helperText="Select columns to clean, or leave empty to apply to all VARCHAR columns. Replaces empty and whitespace-only strings with actual NULL."
               >
-                <div className="combine-col-list">
-                  <div className="combine-col-search" style={{ display: "flex", gap: 4 }}>
-                    <InputGroup
-                      leftIcon="search"
-                      placeholder="Search columns..."
-                      value={emptyNullSearch}
-                      onChange={(e) => setEmptyNullSearch(e.target.value)}
-                      small
-                      style={{ flex: 1 }}
-                    />
-                    <Button
-                      small
-                      minimal
-                      text={emptyNullColumns.length === schema.length ? "Deselect All" : "Select All"}
-                      onClick={() => {
-                        if (emptyNullColumns.length === schema.length) {
-                          setEmptyNullColumns([]);
-                        } else {
-                          setEmptyNullColumns(schema.map((c) => c.column_name));
-                        }
-                      }}
-                    />
-                  </div>
-                  <div className="combine-col-items">
-                    {[...schema]
-                      .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }))
-                      .filter((col) => col.column_name.toLowerCase().includes(emptyNullSearch.toLowerCase()))
-                      .map((col) => {
-                        const isSelected = emptyNullColumns.includes(col.column_name);
-                        const isVarchar = /^(VARCHAR|TEXT|STRING|CHAR)/i.test(col.column_type);
-                        return (
-                          <div key={col.column_name} className={`combine-col-item${isSelected ? " selected" : ""}${!isVarchar ? " non-varchar" : ""}`}>
-                            <Checkbox
-                              checked={isSelected}
-                              onChange={() => {
-                                if (isSelected) {
-                                  setEmptyNullColumns((prev) => prev.filter((c) => c !== col.column_name));
-                                } else {
-                                  setEmptyNullColumns((prev) => [...prev, col.column_name]);
-                                }
-                              }}
-                              style={{ marginBottom: 0 }}
-                            />
-                            <span className="combine-col-name">{col.column_name}</span>
-                            <span className="column-type">{col.column_type}</span>
-                            {!isVarchar && <span style={{ fontSize: 10, color: "#8a9ba8", fontStyle: "italic" }}>(skipped)</span>}
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
+                <ColumnCheckList
+                  items={sortedSchemaItems}
+                  selected={new Set(emptyNullColumns)}
+                  onChange={(next) => setEmptyNullColumns(Array.from(next))}
+                  search
+                  searchPlaceholder="Search columns..."
+                  emptyMeans="all"
+                  emptyAllText="All VARCHAR columns will be cleaned."
+                  maxHeight={240}
+                  renderItemHint={(item) =>
+                    !isVarcharType(item.type) ? (
+                      <span className="column-check-list-muted-hint">(skipped)</span>
+                    ) : null
+                  }
+                />
               </FormGroup>
             </>
           )}
@@ -1055,57 +908,21 @@ export function DataOperationsDialog({
                 label="Columns"
                 helperText="Select columns to clean, or leave empty to apply to all VARCHAR columns. Replaces None, NaN, NULL, N/A, #N/A, etc. with actual NULL."
               >
-                <div className="combine-col-list">
-                  <div className="combine-col-search" style={{ display: "flex", gap: 4 }}>
-                    <InputGroup
-                      leftIcon="search"
-                      placeholder="Search columns..."
-                      value={sentinelNullSearch}
-                      onChange={(e) => setSentinelNullSearch(e.target.value)}
-                      small
-                      style={{ flex: 1 }}
-                    />
-                    <Button
-                      small
-                      minimal
-                      text={sentinelNullColumns.length === schema.length ? "Deselect All" : "Select All"}
-                      onClick={() => {
-                        if (sentinelNullColumns.length === schema.length) {
-                          setSentinelNullColumns([]);
-                        } else {
-                          setSentinelNullColumns(schema.map((c) => c.column_name));
-                        }
-                      }}
-                    />
-                  </div>
-                  <div className="combine-col-items">
-                    {[...schema]
-                      .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" }))
-                      .filter((col) => col.column_name.toLowerCase().includes(sentinelNullSearch.toLowerCase()))
-                      .map((col) => {
-                        const isSelected = sentinelNullColumns.includes(col.column_name);
-                        const isVarchar = /^(VARCHAR|TEXT|STRING|CHAR)/i.test(col.column_type);
-                        return (
-                          <div key={col.column_name} className={`combine-col-item${isSelected ? " selected" : ""}${!isVarchar ? " non-varchar" : ""}`}>
-                            <Checkbox
-                              checked={isSelected}
-                              onChange={() => {
-                                if (isSelected) {
-                                  setSentinelNullColumns((prev) => prev.filter((c) => c !== col.column_name));
-                                } else {
-                                  setSentinelNullColumns((prev) => [...prev, col.column_name]);
-                                }
-                              }}
-                              style={{ marginBottom: 0 }}
-                            />
-                            <span className="combine-col-name">{col.column_name}</span>
-                            <span className="column-type">{col.column_type}</span>
-                            {!isVarchar && <span style={{ fontSize: 10, color: "#8a9ba8", fontStyle: "italic" }}>(skipped)</span>}
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
+                <ColumnCheckList
+                  items={sortedSchemaItems}
+                  selected={new Set(sentinelNullColumns)}
+                  onChange={(next) => setSentinelNullColumns(Array.from(next))}
+                  search
+                  searchPlaceholder="Search columns..."
+                  emptyMeans="all"
+                  emptyAllText="All VARCHAR columns will be cleaned."
+                  maxHeight={240}
+                  renderItemHint={(item) =>
+                    !isVarcharType(item.type) ? (
+                      <span className="column-check-list-muted-hint">(skipped)</span>
+                    ) : null
+                  }
+                />
               </FormGroup>
             </>
           )}

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Button, InputGroup, Icon } from "@blueprintjs/core";
+import { Icon } from "@blueprintjs/core";
 import { Popover2 } from "@blueprintjs/popover2";
 import { ColumnInfo } from "../types";
+import { SearchInput } from "./SearchInput";
 
 interface SearchableColumnSelectProps {
   value: string;
@@ -33,12 +34,15 @@ export function SearchableColumnSelect({
   const [highlightIndex, setHighlightIndex] = useState(-1);
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const openHighlightRef = useRef<number | null>(null);
+  const listId = React.useId();
 
   // Reset search and highlight when opening
   useEffect(() => {
     if (isOpen) {
       setSearch("");
-      setHighlightIndex(-1);
+      setHighlightIndex(openHighlightRef.current ?? -1);
+      openHighlightRef.current = null;
       // Auto-focus search input after popover renders
       requestAnimationFrame(() => {
         searchRef.current?.focus();
@@ -81,6 +85,17 @@ export function SearchableColumnSelect({
     },
     [onChange]
   );
+
+  const handleTriggerKeyDown = useCallback((e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openHighlightRef.current = 0;
+      setIsOpen(true);
+      setHighlightIndex(0);
+    } else if (e.key === "Escape") {
+      setIsOpen(false);
+    }
+  }, []);
 
   // Scroll highlighted item into view
   useEffect(() => {
@@ -126,31 +141,37 @@ export function SearchableColumnSelect({
       onKeyDown={handleKeyDown}
     >
       <div className="col-select-search">
-        <InputGroup
+        <SearchInput
           inputRef={searchRef}
-          leftIcon="search"
           placeholder="Search columns..."
           value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
+          onChange={(value) => {
+            setSearch(value);
             setHighlightIndex(0);
           }}
+          onClear={() => setHighlightIndex(0)}
           small
-          rightElement={
-            search ? (
-              <Button icon="cross" minimal small onClick={() => setSearch("")} />
-            ) : undefined
+          role="combobox"
+          aria-controls={listId}
+          aria-expanded={isOpen}
+          aria-activedescendant={
+            highlightIndex >= 0 && highlightIndex < items.length
+              ? `${listId}-option-${highlightIndex}`
+              : undefined
           }
         />
       </div>
-      <div className="col-select-list" ref={listRef}>
+      <div className="col-select-list" ref={listRef} id={listId} role="listbox">
         {items.length === 0 && (
           <div className="col-select-empty">No columns found</div>
         )}
         {items.map((item, idx) => (
           <div
             key={item.value || "__empty__"}
+            id={`${listId}-option-${idx}`}
             className={`col-select-item${item.value === value ? " col-select-item-selected" : ""}${idx === highlightIndex ? " col-select-item-highlight" : ""}`}
+            role="option"
+            aria-selected={item.value === value}
             onClick={() => handleSelect(item.value)}
             onMouseEnter={() => setHighlightIndex(idx)}
           >
@@ -166,7 +187,10 @@ export function SearchableColumnSelect({
     <Popover2
       content={popoverContent}
       isOpen={isOpen}
-      onInteraction={(nextOpen) => setIsOpen(nextOpen)}
+      onInteraction={(nextOpen) => {
+        if (nextOpen) openHighlightRef.current = null;
+        setIsOpen(nextOpen);
+      }}
       placement="bottom-start"
       minimal
       matchTargetWidth={fill}
@@ -174,7 +198,14 @@ export function SearchableColumnSelect({
       <button
         type="button"
         className={`col-select-trigger ${fill ? "col-select-trigger-fill" : ""} ${className}`}
-        onClick={() => setIsOpen((v) => !v)}
+        onClick={() => {
+          openHighlightRef.current = null;
+          setIsOpen((v) => !v);
+        }}
+        onKeyDown={handleTriggerKeyDown}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-controls={isOpen ? listId : undefined}
       >
         {leftIcon && <Icon icon={leftIcon} iconSize={13} className="col-select-trigger-left-icon" />}
         <span className={`col-select-trigger-text ${!displayText ? "col-select-trigger-placeholder" : ""}`}>

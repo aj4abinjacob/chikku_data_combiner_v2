@@ -30,6 +30,7 @@ import { ColumnOpsPanel } from "./ColumnOpsPanel";
 import { RowOpsPanel } from "./RowOpsPanel";
 import { ViewsPanel } from "./ViewsPanel";
 import { SearchableColumnSelect } from "./SearchableColumnSelect";
+import { SearchInput } from "./SearchInput";
 
 type ColumnKind = "text" | "number" | "date" | "boolean" | "unknown";
 type OperatorOption = { value: FilterOperator; label: string };
@@ -404,12 +405,11 @@ function InValuePicker({
           }}
         >
           <div className="in-value-dropdown-header">
-            <InputGroup
+            <SearchInput
               placeholder="Search values..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={setSearch}
               small
-              leftIcon="search"
               autoFocus
             />
             <div className="in-value-dropdown-actions">

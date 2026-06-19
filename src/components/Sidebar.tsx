@@ -4,7 +4,6 @@ import {
   Button,
   Checkbox,
   Icon,
-  InputGroup,
   Intent,
 } from "@blueprintjs/core";
 import { LoadedTable, ColumnInfo, SortColumn, PivotViewConfig } from "../types";
@@ -13,6 +12,7 @@ import { AggregateDialog } from "./AggregateDialog";
 import { PivotDialog } from "./PivotDialog";
 import { LookupMergeDialog } from "./LookupMergeDialog";
 import { DateConversionDialog } from "./DateConversionDialog";
+import { SearchInput } from "./SearchInput";
 
 interface SidebarProps {
   tables: LoadedTable[];
@@ -224,16 +224,10 @@ export function Sidebar({
         </div>
         {tables.length > 8 && (
           <div className="table-search">
-            <InputGroup
-              leftIcon="search"
+            <SearchInput
               placeholder="Search tables..."
               value={tableSearch}
-              onChange={(e) => setTableSearch(e.target.value)}
-              rightElement={
-                tableSearch ? (
-                  <Button icon="cross" minimal small onClick={() => setTableSearch("")} />
-                ) : undefined
-              }
+              onChange={setTableSearch}
               small
             />
           </div>
@@ -380,16 +374,10 @@ export function Sidebar({
           </div>
           {orderedColumns.length > 8 && (
             <div className="column-search">
-              <InputGroup
-                leftIcon="search"
+              <SearchInput
                 placeholder="Search columns..."
                 value={columnSearch}
-                onChange={(e) => setColumnSearch(e.target.value)}
-                rightElement={
-                  columnSearch ? (
-                    <Button icon="cross" minimal small onClick={() => setColumnSearch("")} />
-                  ) : undefined
-                }
+                onChange={setColumnSearch}
                 small
               />
             </div>

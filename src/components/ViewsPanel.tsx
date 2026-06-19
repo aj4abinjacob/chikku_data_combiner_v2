@@ -13,6 +13,7 @@ import {
   extractFilterColumns,
   isColumnComparisonOperator,
 } from "../types";
+import { SearchInput } from "./SearchInput";
 
 interface ViewsPanelProps {
   savedViews: SavedView[];
@@ -184,18 +185,12 @@ export function ViewsPanel({
     <div className="views-body">
       <div className="views-top">
         <div className="views-op-row">
-          <InputGroup
+          <SearchInput
             className="views-name-input"
             placeholder="Search views..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            leftIcon="search"
+            onChange={setSearchQuery}
             small
-            rightElement={
-              searchQuery ? (
-                <Button icon="cross" minimal small onClick={() => setSearchQuery("")} />
-              ) : undefined
-            }
           />
         </div>
       </div>
