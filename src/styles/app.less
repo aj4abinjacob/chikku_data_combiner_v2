@@ -2687,6 +2687,44 @@ html, body, #root {
   }
 }
 
+.column-check-list {
+  .column-check-list-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .column-check-list-search {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .column-check-list-spacer {
+    flex: 1;
+  }
+
+  .column-check-list-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+
+  .column-check-list-empty {
+    padding: 12px 8px;
+    text-align: center;
+    color: #8a9ba8;
+    font-size: 12px;
+  }
+
+  .column-check-list-hint {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #8a9ba8;
+  }
+}
+
 .aggregate-results-wrapper {
   border: 1px solid #d8e1e8;
   border-radius: var(--surface-radius);

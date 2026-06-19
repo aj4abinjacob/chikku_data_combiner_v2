@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Button,
-  Checkbox,
   HTMLSelect,
   Intent,
   Dialog,
@@ -11,6 +10,7 @@ import {
 } from "@blueprintjs/core";
 import { ColumnInfo } from "../types";
 import { PreviewTableDialog } from "./PreviewTableDialog";
+import { ColumnCheckList } from "./ColumnCheckList";
 
 const NUMERIC_RE =
   /^(TINYINT|SMALLINT|INTEGER|INT|BIGINT|HUGEINT|FLOAT|REAL|DOUBLE|DECIMAL|NUMERIC)/i;
@@ -154,30 +154,15 @@ export function PivotDialog({
     };
   }, [pivotColumn, activeTable]);
 
-  const numericCols = schema.filter((c) => isNumeric(c.column_type));
   const allColNames = schema.map((c) => c.column_name);
 
   // Columns available for pivot (exclude row fields)
   const pivotColumnOptions = allColNames.filter((c) => !rowFields.has(c));
 
-  const toggleRowField = useCallback(
-    (col: string) => {
-      setRowFields((prev) => {
-        const next = new Set(prev);
-        if (next.has(col)) next.delete(col);
-        else next.add(col);
-        return next;
-      });
-      setResults(null);
-      // If the removed/added column is the current pivot column, clear it
-      setPivotColumn((prev) => {
-        // We need to check if the column being toggled will make the current
-        // pivot column invalid. If adding col to rowFields and col === pivotColumn, clear it.
-        return prev;
-      });
-    },
-    []
-  );
+  const handleRowFieldsChange = useCallback((next: Set<string>) => {
+    setRowFields(next);
+    setResults(null);
+  }, []);
 
   // Clear pivot column if it becomes a row field
   useEffect(() => {
@@ -186,23 +171,8 @@ export function PivotDialog({
     }
   }, [rowFields, pivotColumn]);
 
-  const toggleValueField = useCallback((col: string) => {
-    setValueFields((prev) => {
-      const next = new Set(prev);
-      if (next.has(col)) next.delete(col);
-      else next.add(col);
-      return next;
-    });
-    setResults(null);
-  }, []);
-
-  const selectAllNumeric = useCallback(() => {
-    setValueFields(new Set(numericCols.map((c) => c.column_name)));
-    setResults(null);
-  }, [numericCols]);
-
-  const deselectAll = useCallback(() => {
-    setValueFields(new Set());
+  const handleValueFieldsChange = useCallback((next: Set<string>) => {
+    setValueFields(next);
     setResults(null);
   }, []);
 
@@ -293,17 +263,13 @@ export function PivotDialog({
             <div className="aggregate-section-header">
               Row Fields (optional — becomes GROUP BY)
             </div>
-            <div className="aggregate-checkbox-list">
-              {allColNames.map((col) => (
-                <Checkbox
-                  key={col}
-                  checked={rowFields.has(col)}
-                  onChange={() => toggleRowField(col)}
-                  label={col}
-                  style={{ marginBottom: 0 }}
-                />
-              ))}
-            </div>
+            <ColumnCheckList
+              items={schema.map((c) => ({ name: c.column_name }))}
+              selected={rowFields}
+              onChange={handleRowFieldsChange}
+              emptyMeans="all"
+              emptyAllText="No row grouping — values are aggregated across all rows."
+            />
           </div>
 
           {/* Pivot Column Section */}
@@ -383,50 +349,18 @@ export function PivotDialog({
           <div className="aggregate-section">
             <div className="aggregate-section-header">
               <span>Value Fields (required — columns to aggregate)</span>
-              <span className="aggregate-section-actions">
-                <Button
-                  minimal
-                  small
-                  text="Select All Numeric"
-                  onClick={selectAllNumeric}
-                />
-                <Button
-                  minimal
-                  small
-                  text="Deselect All"
-                  onClick={deselectAll}
-                />
-              </span>
             </div>
-            <div className="aggregate-col-grid">
-              {schema.map((col) => {
-                const numeric = isNumeric(col.column_type);
-                return (
-                  <div
-                    key={col.column_name}
-                    className={`aggregate-col-item${valueFields.has(col.column_name) ? " selected" : ""}`}
-                  >
-                    <Checkbox
-                      checked={valueFields.has(col.column_name)}
-                      onChange={() => toggleValueField(col.column_name)}
-                      style={{ marginBottom: 0 }}
-                    />
-                    <span className="aggregate-col-name">
-                      {col.column_name}
-                    </span>
-                    <span className="aggregate-col-type">
-                      {col.column_type}
-                      {!numeric && (
-                        <span className="aggregate-col-hint">
-                          {" "}
-                          (count/min/max/first only)
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+            <ColumnCheckList
+              items={schema.map((c) => ({
+                name: c.column_name,
+                type: c.column_type,
+              }))}
+              selected={valueFields}
+              onChange={handleValueFieldsChange}
+              isNumeric={(t) => isNumeric(t ?? "")}
+              numericHint=" (count/min/max/first only)"
+              emptyMeans="invalid"
+            />
           </div>
 
           {/* Aggregate Function Section */}

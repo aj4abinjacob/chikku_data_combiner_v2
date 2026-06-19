@@ -1,12 +1,12 @@
 import React, { useState } from "react";
 import {
   Button,
-  Checkbox,
   Classes,
   Dialog,
   Intent,
 } from "@blueprintjs/core";
 import { SheetInfo } from "../types";
+import { ColumnCheckList } from "./ColumnCheckList";
 
 interface ExcelSheetPickerDialogProps {
   isOpen: boolean;
@@ -27,18 +27,6 @@ export function ExcelSheetPickerDialog({
     () => new Set(sheets.map((s) => s.name))
   );
 
-  const toggleSheet = (name: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  };
-
-  const selectAll = () => setSelected(new Set(sheets.map((s) => s.name)));
-  const deselectAll = () => setSelected(new Set());
-
   return (
     <Dialog
       isOpen={isOpen}
@@ -50,29 +38,16 @@ export function ExcelSheetPickerDialog({
         <div className="aggregate-section">
           <div className="aggregate-section-header">
             <span>Select sheets to import</span>
-            <div className="aggregate-section-actions">
-              <Button minimal small text="Select All" onClick={selectAll} />
-              <Button minimal small text="Deselect All" onClick={deselectAll} />
-            </div>
           </div>
-          <div className="aggregate-col-grid">
-            {sheets.map((sheet) => (
-              <div
-                key={sheet.name}
-                className={`aggregate-col-item${selected.has(sheet.name) ? " selected" : ""}`}
-              >
-                <Checkbox
-                  checked={selected.has(sheet.name)}
-                  onChange={() => toggleSheet(sheet.name)}
-                  style={{ marginBottom: 0 }}
-                />
-                <span className="aggregate-col-name">{sheet.name}</span>
-                <span className="aggregate-col-type">
-                  ~{sheet.rowCount.toLocaleString()} rows
-                </span>
-              </div>
-            ))}
-          </div>
+          <ColumnCheckList
+            items={sheets.map((sheet) => ({
+              name: sheet.name,
+              type: `~${sheet.rowCount.toLocaleString()} rows`,
+            }))}
+            selected={selected}
+            onChange={setSelected}
+            emptyMeans="invalid"
+          />
         </div>
       </div>
       <div className={Classes.DIALOG_FOOTER}>

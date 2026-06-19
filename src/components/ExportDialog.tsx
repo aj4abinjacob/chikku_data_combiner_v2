@@ -2,7 +2,6 @@ import React, { useState, useMemo } from "react";
 import {
   Button,
   Callout,
-  Checkbox,
   Classes,
   Dialog,
   Intent,
@@ -12,6 +11,7 @@ import {
 } from "@blueprintjs/core";
 import { LoadedTable, ViewState, EXCEL_MAX_ROWS, EXCEL_MAX_COLS, FileFormat, hasActiveFilters } from "../types";
 import { buildSelectQuery } from "../utils/sqlBuilder";
+import { ColumnCheckList } from "./ColumnCheckList";
 
 interface ExportDialogProps {
   isOpen: boolean;
@@ -74,15 +74,6 @@ export function ExportDialog({
     if (format !== "xlsx") return false;
     return exportTables.some((t) => t.schema.length > EXCEL_MAX_COLS);
   }, [format, exportTables]);
-
-  const toggleTable = (name: string) => {
-    setSelectedTables((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  };
 
   const canExport = exportTables.length > 0 && !exporting;
 
@@ -172,21 +163,15 @@ export function ExportDialog({
           </RadioGroup>
 
           {tableMode === "select" && (
-            <div className="export-table-grid">
-              {tables.map((t) => (
-                <div key={t.tableName} className={`aggregate-col-item${selectedTables.has(t.tableName) ? " selected" : ""}`}>
-                  <Checkbox
-                    checked={selectedTables.has(t.tableName)}
-                    onChange={() => toggleTable(t.tableName)}
-                    style={{ marginBottom: 0 }}
-                  />
-                  <span className="aggregate-col-name">{t.tableName}</span>
-                  <span className="aggregate-col-type">
-                    {t.rowCount.toLocaleString()} rows
-                  </span>
-                </div>
-              ))}
-            </div>
+            <ColumnCheckList
+              items={tables.map((t) => ({
+                name: t.tableName,
+                type: `${t.rowCount.toLocaleString()} rows`,
+              }))}
+              selected={selectedTables}
+              onChange={setSelectedTables}
+              emptyMeans="invalid"
+            />
           )}
         </div>
 

@@ -10,6 +10,7 @@ import {
 } from "@blueprintjs/core";
 import { ColumnInfo } from "../types";
 import { PreviewTableDialog } from "./PreviewTableDialog";
+import { ColumnCheckList } from "./ColumnCheckList";
 
 const NUMERIC_RE = /^(TINYINT|SMALLINT|INTEGER|INT|BIGINT|HUGEINT|FLOAT|REAL|DOUBLE|DECIMAL|NUMERIC)/i;
 
@@ -82,7 +83,6 @@ export function AggregateDialog({
     }
   }, [isOpen, activeTable]);
 
-  const numericCols = schema.filter((c) => isNumeric(c.column_type));
   const allColNames = schema.map((c) => c.column_name);
 
   const toggleGroupBy = useCallback((col: string) => {
@@ -95,13 +95,8 @@ export function AggregateDialog({
     setResults(null);
   }, []);
 
-  const toggleCol = useCallback((col: string) => {
-    setSelectedCols((prev) => {
-      const next = new Set(prev);
-      if (next.has(col)) next.delete(col);
-      else next.add(col);
-      return next;
-    });
+  const handleColsChange = useCallback((next: Set<string>) => {
+    setSelectedCols(next);
     setResults(null);
   }, []);
 
@@ -112,16 +107,6 @@ export function AggregateDialog({
       else next.add(fn);
       return next;
     });
-    setResults(null);
-  }, []);
-
-  const selectAllNumeric = useCallback(() => {
-    setSelectedCols(new Set(numericCols.map((c) => c.column_name)));
-    setResults(null);
-  }, [numericCols]);
-
-  const deselectAll = useCallback(() => {
-    setSelectedCols(new Set());
     setResults(null);
   }, []);
 
@@ -252,33 +237,15 @@ export function AggregateDialog({
           <div className="aggregate-section">
             <div className="aggregate-section-header">
               <span>Columns</span>
-              <span className="aggregate-section-actions">
-                <Button minimal small text="Select All Numeric" onClick={selectAllNumeric} />
-                <Button minimal small text="Deselect All" onClick={deselectAll} />
-              </span>
             </div>
-            <div className="aggregate-col-grid">
-              {schema.map((col) => {
-                const numeric = isNumeric(col.column_type);
-                return (
-                  <div
-                    key={col.column_name}
-                    className={`aggregate-col-item${selectedCols.has(col.column_name) ? " selected" : ""}`}
-                  >
-                    <Checkbox
-                      checked={selectedCols.has(col.column_name)}
-                      onChange={() => toggleCol(col.column_name)}
-                      style={{ marginBottom: 0 }}
-                    />
-                    <span className="aggregate-col-name">{col.column_name}</span>
-                    <span className="aggregate-col-type">
-                      {col.column_type}
-                      {!numeric && <span className="aggregate-col-hint"> (count/count null/min/max only)</span>}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+            <ColumnCheckList
+              items={schema.map((col) => ({ name: col.column_name, type: col.column_type }))}
+              selected={selectedCols}
+              onChange={handleColsChange}
+              isNumeric={(type) => isNumeric(type ?? "")}
+              numericHint=" (count/count null/min/max only)"
+              emptyMeans="invalid"
+            />
           </div>
 
           {/* Error */}

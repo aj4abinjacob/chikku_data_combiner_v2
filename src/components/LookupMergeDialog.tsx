@@ -15,6 +15,7 @@ import {
 import { ColumnInfo, LoadedTable } from "../types";
 import { PreviewTableDialog } from "./PreviewTableDialog";
 import { SearchableColumnSelect } from "./SearchableColumnSelect";
+import { ColumnCheckList } from "./ColumnCheckList";
 
 function escapeIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
@@ -206,24 +207,9 @@ export function LookupMergeDialog({
     []
   );
 
-  // Column toggle
-  const toggleCol = useCallback((col: string) => {
-    setSelectedCols((prev) => {
-      const next = new Set(prev);
-      if (next.has(col)) next.delete(col);
-      else next.add(col);
-      return next;
-    });
-    setResults(null);
-  }, []);
-
-  const selectAllCols = useCallback(() => {
-    setSelectedCols(new Set(mergeableColumns.map((c) => c.column_name)));
-    setResults(null);
-  }, [mergeableColumns]);
-
-  const deselectAllCols = useCallback(() => {
-    setSelectedCols(new Set());
+  // Column selection change (from ColumnCheckList)
+  const handleColsChange = useCallback((next: Set<string>) => {
+    setSelectedCols(next);
     setResults(null);
   }, []);
 
@@ -499,32 +485,22 @@ export function LookupMergeDialog({
             <div className="aggregate-section">
               <div className="aggregate-section-header">
                 <span>Columns to Merge</span>
-                <span className="aggregate-section-actions">
-                  <Button minimal small text="Select All" onClick={selectAllCols} />
-                  <Button minimal small text="Deselect All" onClick={deselectAllCols} />
-                </span>
               </div>
-              <div className="aggregate-col-grid">
-                {mergeableColumns.map((col) => (
-                  <div
-                    key={col.column_name}
-                    className={`aggregate-col-item${selectedCols.has(col.column_name) ? " selected" : ""}`}
-                  >
-                    <Checkbox
-                      checked={selectedCols.has(col.column_name)}
-                      onChange={() => toggleCol(col.column_name)}
-                      style={{ marginBottom: 0 }}
-                    />
-                    <span className="aggregate-col-name">{col.column_name}</span>
-                    <span className="aggregate-col-type">{col.column_type}</span>
-                  </div>
-                ))}
-                {mergeableColumns.length === 0 && rightSchema.length > 0 && (
-                  <div style={{ fontSize: 12, color: "#5c7080", padding: 8 }}>
-                    All right-table columns are used as keys. Add more columns to the right table or remove key pairs.
-                  </div>
-                )}
-              </div>
+              {mergeableColumns.length === 0 && rightSchema.length > 0 ? (
+                <div style={{ fontSize: 12, color: "#5c7080", padding: 8 }}>
+                  All right-table columns are used as keys. Add more columns to the right table or remove key pairs.
+                </div>
+              ) : (
+                <ColumnCheckList
+                  items={mergeableColumns.map((c) => ({
+                    name: c.column_name,
+                    type: c.column_type,
+                  }))}
+                  selected={selectedCols}
+                  onChange={handleColsChange}
+                  emptyMeans="invalid"
+                />
+              )}
             </div>
           )}
 
