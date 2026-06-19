@@ -20,7 +20,7 @@ jobs:
           - platform: macos-latest
             rust_target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
-          - platform: windows-latest
+          - platform: windows-2022
             rust_target: ""
             args: ""
           - platform: ubuntu-22.04
@@ -93,7 +93,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          "CXXFLAGS=/std:c++17" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "CXXFLAGS=/std:c++17 /EHsc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
