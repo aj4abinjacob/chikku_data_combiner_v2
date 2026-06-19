@@ -44,13 +44,21 @@ const OP_GROUPS: { label: string; ops: { value: ColOpType; label: string }[] }[]
       { value: "clear_null", label: "Clear to NULL" },
     ],
   },
+  {
+    label: "Manage",
+    ops: [
+      { value: "rename_column", label: "Rename Column" },
+      { value: "delete_column", label: "Delete Column" },
+    ],
+  },
 ];
 
 const ALL_OPS = OP_GROUPS.flatMap((g) => g.ops);
 
-const NO_PARAM_OPS = new Set<ColOpType>(["trim", "upper", "lower", "clear_null"]);
-const NO_TARGET_OPS = new Set<ColOpType>(["clear_null"]);
+const NO_PARAM_OPS = new Set<ColOpType>(["trim", "upper", "lower", "clear_null", "delete_column"]);
+const NO_TARGET_OPS = new Set<ColOpType>(["clear_null", "rename_column", "delete_column"]);
 const NO_EXISTING_TARGET_OPS = new Set<ColOpType>(["assign_value"]);
+const SCHEMA_OPS = new Set<ColOpType>(["rename_column", "delete_column"]);
 
 interface ColumnOpsPanelProps {
   columns: ColumnInfo[];
@@ -93,6 +101,7 @@ export function ColumnOpsPanel({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [patternManagerOpen, setPatternManagerOpen] = useState(false);
   const [patternRefreshKey, setPatternRefreshKey] = useState(0);
   const [previews, setPreviews] = useState<Array<{ original: string; result: string }>>([]);
@@ -117,7 +126,7 @@ export function ColumnOpsPanel({
       return;
     }
 
-    if (opType === "clear_null") {
+    if (opType === "clear_null" || SCHEMA_OPS.has(opType)) {
       setPreviews([]);
       setPreviewError(null);
       return;
@@ -163,9 +172,16 @@ export function ColumnOpsPanel({
   const isUnchangedSinceApply = lastAppliedKey === currentConfigKey;
 
   const opLabel = ALL_OPS.find((o) => o.value === opType)?.label ?? opType;
+  const newColumnName = (params.newName ?? "").trim();
+  const renameDuplicate = opType === "rename_column"
+    && !!newColumnName
+    && columns.some((c) => c.column_name === newColumnName && c.column_name !== selectedColumn);
+  const renameSameName = opType === "rename_column" && !!newColumnName && newColumnName === selectedColumn;
+  const deleteWouldRemoveLastColumn = opType === "delete_column" && columns.length <= 1;
 
   const paramsMissing = (() => {
     if (!needsParams) return false;
+    if (opType === "rename_column") return !newColumnName;
     if (opType === "assign_value") return !params.value;
     if (opType === "find_replace") return !params.pattern;
     if (opType === "regex_extract") return !params.pattern;
@@ -173,8 +189,14 @@ export function ColumnOpsPanel({
     return false;
   })();
 
-  const handleApply = async () => {
+  const handleApply = async (confirmedDelete = false) => {
     if (!selectedColumn || !activeTable) return;
+    if (opType === "rename_column" && (!newColumnName || renameDuplicate || renameSameName)) return;
+    if (opType === "delete_column" && deleteWouldRemoveLastColumn) return;
+    if (opType === "delete_column" && !confirmedDelete) {
+      setDeleteConfirmOpen(true);
+      return;
+    }
     const effectiveTargetMode = showTargetMode ? targetMode : "replace";
     const effectiveTargetCol = showTargetMode ? targetColumn : "";
     if (effectiveTargetMode === "new_column" && !effectiveTargetCol.trim()) return;
@@ -188,10 +210,20 @@ export function ColumnOpsPanel({
       const fullParams = { ...params, targetMode: effectiveTargetMode, targetColumn: effectiveTargetCol };
       await onApply(opType, selectedColumn, fullParams);
       setLastAppliedKey(currentConfigKey);
-      const targetLabel = effectiveTargetMode === "new_column" ? ` → new "${effectiveTargetCol}"`
-        : effectiveTargetMode === "existing_column" ? ` → "${effectiveTargetCol}"`
-        : "";
-      setSuccessMsg(`${appliedOp} applied to "${appliedCol}"${targetLabel}`);
+      if (opType === "rename_column") {
+        setSelectedColumn(newColumnName);
+        setParams({});
+        setSuccessMsg(`Renamed "${appliedCol}" to "${newColumnName}"`);
+      } else if (opType === "delete_column") {
+        setSelectedColumn("");
+        setParams({});
+        setSuccessMsg(`Deleted "${appliedCol}"`);
+      } else {
+        const targetLabel = effectiveTargetMode === "new_column" ? ` → new "${effectiveTargetCol}"`
+          : effectiveTargetMode === "existing_column" ? ` → "${effectiveTargetCol}"`
+          : "";
+        setSuccessMsg(`${appliedOp} applied to "${appliedCol}"${targetLabel}`);
+      }
       setTimeout(() => setSuccessMsg(null), 3000);
     } catch (err: any) {
       setError(typeof err === "string" ? err : err?.message || String(err));
@@ -425,13 +457,47 @@ export function ColumnOpsPanel({
             </div>
           </>
         );
+      case "rename_column":
+        return (
+          <div className="colops-field">
+            <label>New name</label>
+            <InputGroup
+              value={params.newName ?? ""}
+              onChange={(e) => updateParam("newName", e.target.value)}
+              placeholder={selectedColumn ? `${selectedColumn}_renamed` : "New column name..."}
+              intent={renameDuplicate || renameSameName ? Intent.DANGER : Intent.NONE}
+              onKeyDown={(e) => { if (e.key === "Enter") handleApply(); }}
+              fill
+            />
+            {renameDuplicate && (
+              <span className="colops-field-hint colops-field-hint-danger">A column named "{newColumnName}" already exists.</span>
+            )}
+            {renameSameName && (
+              <span className="colops-field-hint colops-field-hint-danger">Use a different name.</span>
+            )}
+          </div>
+        );
+      case "delete_column":
+        return (
+          <div className="colops-danger-note">
+            <Icon icon="warning-sign" iconSize={14} />
+            <span>
+              {deleteWouldRemoveLastColumn
+                ? "At least one column must remain."
+                : selectedColumn
+                  ? `Delete "${selectedColumn}" from the current table.`
+                  : "Select a column to delete."}
+            </span>
+          </div>
+        );
       default:
         return null;
     }
   };
 
   const applyDisabled =
-    !selectedColumn || loading || isUnchangedSinceApply || paramsMissing
+    !selectedColumn || loading || (!SCHEMA_OPS.has(opType) && isUnchangedSinceApply) || paramsMissing
+    || renameDuplicate || renameSameName || deleteWouldRemoveLastColumn
     || (showTargetMode && targetMode === "new_column" && (!targetColumn.trim() || columns.some((c) => c.column_name === targetColumn.trim())))
     || (showTargetMode && targetMode === "existing_column" && !targetColumn);
 
@@ -440,6 +506,11 @@ export function ColumnOpsPanel({
     if (error) return { tag: "Error", intent: Intent.DANGER, icon: "error" as const, detail: error };
     if (loading) return { tag: "Working", intent: Intent.PRIMARY, icon: "refresh" as const, detail: "Applying..." };
     if (!selectedColumn) return { tag: "Ready", intent: undefined, icon: "edit" as const, detail: "Pick a column to start" };
+    if (opType === "rename_column" && paramsMissing) return { tag: "Editing", intent: Intent.WARNING, icon: "edit" as const, detail: `Rename "${selectedColumn}" — enter a new name` };
+    if (renameDuplicate) return { tag: "Error", intent: Intent.DANGER, icon: "error" as const, detail: `"${newColumnName}" already exists` };
+    if (renameSameName) return { tag: "Editing", intent: Intent.WARNING, icon: "edit" as const, detail: "Choose a different name" };
+    if (deleteWouldRemoveLastColumn) return { tag: "Blocked", intent: Intent.DANGER, icon: "error" as const, detail: "At least one column must remain" };
+    if (opType === "delete_column") return { tag: "Confirm", intent: Intent.DANGER, icon: "trash" as const, detail: `Delete "${selectedColumn}"` };
     if (paramsMissing) return { tag: "Editing", intent: Intent.WARNING, icon: "edit" as const, detail: `${opLabel} on "${selectedColumn}" — fill required fields` };
     if (isUnchangedSinceApply) return { tag: "Applied", intent: Intent.SUCCESS, icon: "tick" as const, detail: `${opLabel} on "${selectedColumn}"` };
     return { tag: "Draft", intent: Intent.WARNING, icon: "edit" as const, detail: `${opLabel} on "${selectedColumn}" — ready to apply` };
@@ -467,11 +538,11 @@ export function ColumnOpsPanel({
         </div>
         <div className="colops-toolbar-actions">
           <Button
-            intent={Intent.PRIMARY}
-            icon="tick"
-            text="Apply"
+            intent={opType === "delete_column" ? Intent.DANGER : Intent.PRIMARY}
+            icon={opType === "delete_column" ? "trash" : "tick"}
+            text={opType === "delete_column" ? "Delete" : "Apply"}
             small
-            onClick={handleApply}
+            onClick={() => handleApply()}
             loading={loading}
             disabled={applyDisabled}
           />
@@ -591,6 +662,10 @@ export function ColumnOpsPanel({
                       ? "Transform a column"
                       : paramsMissing
                         ? `Configure ${opLabel}`
+                        : opType === "rename_column"
+                          ? "Ready to rename column"
+                          : opType === "delete_column"
+                            ? "Ready to delete column"
                         : opType === "clear_null"
                           ? "Ready to clear values to NULL"
                           : "Preview will appear here"}
@@ -600,6 +675,10 @@ export function ColumnOpsPanel({
                       ? "Pick a column and an action to preview before applying."
                       : paramsMissing
                         ? "Fill the parameters on the left to see how rows will change."
+                        : opType === "rename_column"
+                          ? `Apply will rename "${selectedColumn}" to "${newColumnName}".`
+                          : opType === "delete_column"
+                            ? `Delete will remove "${selectedColumn}" from the table schema.`
                         : opType === "clear_null"
                           ? `Apply will set "${selectedColumn}" to NULL on every row in scope.`
                           : "No distinct values to preview yet."}
@@ -705,6 +784,21 @@ export function ColumnOpsPanel({
         cancelButtonText="Cancel"
       >
         <p>Revert the table to its state before any column operations were applied?</p>
+      </Alert>
+
+      <Alert
+        isOpen={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        onConfirm={() => {
+          setDeleteConfirmOpen(false);
+          handleApply(true);
+        }}
+        intent={Intent.DANGER}
+        icon="trash"
+        confirmButtonText="Delete Column"
+        cancelButtonText="Cancel"
+      >
+        <p>Delete column <strong>{selectedColumn}</strong> from the current table?</p>
       </Alert>
 
       <RegexPatternManagerDialog

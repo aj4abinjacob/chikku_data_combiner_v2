@@ -211,7 +211,8 @@ export interface SheetInfo {
 }
 
 export type ColOpType = "assign_value" | "find_replace" | "regex_extract"
-  | "extract_numbers" | "trim" | "upper" | "lower" | "clear_null" | "prefix_suffix";
+  | "extract_numbers" | "trim" | "upper" | "lower" | "clear_null" | "prefix_suffix"
+  | "rename_column" | "delete_column";
 
 export type ColOpTargetMode = "replace" | "new_column" | "existing_column";
 

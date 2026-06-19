@@ -132,6 +132,10 @@ export function buildStepDescription(
 ): string {
   const targetSuffix = targetColumn && targetColumn !== column ? ` → "${targetColumn}"` : "";
   switch (opType) {
+    case "rename_column":
+      return `Rename "${column}" to "${params.newName ?? targetColumn ?? ""}"`;
+    case "delete_column":
+      return `Delete "${column}"`;
     case "assign_value":
       return `Set "${column}" to "${params.value ?? ""}"${targetSuffix}`;
     case "find_replace":

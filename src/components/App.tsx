@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Button, Icon, Intent } from "@blueprintjs/core";
-import { LoadedTable, ViewState, ColumnInfo, FilterGroup, SheetInfo, hasActiveFilters, countConditions, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions } from "../types";
+import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions } from "../types";
 import { Sidebar } from "./Sidebar";
 import { DataGrid } from "./DataGrid";
 import { FilterPanel } from "./FilterPanel";
@@ -82,6 +82,73 @@ function nextMergeName(existingNames: Set<string>): string {
 
 function escapeIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
+}
+
+function mapFilterColumns(
+  group: FilterGroup,
+  mapColumn: (column: string) => string | null
+): FilterGroup {
+  const children: FilterNode[] = [];
+
+  for (const child of group.children) {
+    if (isFilterGroup(child)) {
+      const nested = mapFilterColumns(child, mapColumn);
+      if (nested.children.length > 0) children.push(nested);
+      continue;
+    }
+
+    const column = mapColumn(child.column);
+    if (!column) continue;
+
+    const next = { ...child, column };
+    const operator = child.operator as string;
+    if ((operator === "EQUALS COLUMN" || operator === "DOES NOT EQUAL COLUMN") && child.value) {
+      const value = mapColumn(child.value);
+      if (!value) continue;
+      next.value = value;
+    }
+    children.push(next);
+  }
+
+  return { ...group, children };
+}
+
+function renameColumnInViewState(viewState: ViewState, from: string, to: string): ViewState {
+  return {
+    ...viewState,
+    visibleColumns: viewState.visibleColumns.map((c) => c === from ? to : c),
+    columnOrder: viewState.columnOrder.map((c) => c === from ? to : c),
+    sortColumns: viewState.sortColumns.map((sc) => sc.column === from ? { ...sc, column: to } : sc),
+    filters: mapFilterColumns(viewState.filters, (column) => column === from ? to : column),
+    pivotConfig: viewState.pivotConfig
+      ? {
+        ...viewState.pivotConfig,
+        groupColumns: viewState.pivotConfig.groupColumns.map((gc) => gc.column === from ? { ...gc, column: to } : gc),
+      }
+      : null,
+  };
+}
+
+function deleteColumnFromViewState(viewState: ViewState, column: string): ViewState {
+  const pivotConfig = viewState.pivotConfig
+    ? {
+      ...viewState.pivotConfig,
+      groupColumns: viewState.pivotConfig.groupColumns.filter((gc) => gc.column !== column),
+    }
+    : null;
+
+  return {
+    ...viewState,
+    visibleColumns: viewState.visibleColumns.filter((c) => c !== column),
+    columnOrder: viewState.columnOrder.filter((c) => c !== column),
+    sortColumns: viewState.sortColumns.filter((sc) => sc.column !== column),
+    filters: mapFilterColumns(viewState.filters, (c) => c === column ? null : c),
+    pivotConfig,
+  };
+}
+
+function isSchemaColOp(opType: ColOpType): boolean {
+  return opType === "rename_column" || opType === "delete_column";
 }
 
 interface PendingExcelImport {
@@ -1117,6 +1184,12 @@ export function App(): React.ReactElement {
 
       const stepId = colOpsNextId;
       let backupName = "";
+      const renameTarget = opType === "rename_column" ? params.newName?.trim() : undefined;
+
+      if (opType === "rename_column") {
+        if (!renameTarget || renameTarget === column || schema.some((c) => c.column_name === renameTarget && c.column_name !== column)) return;
+      }
+      if (opType === "delete_column" && schema.length <= 1) return;
 
       try {
         if (strategy === "per-step") {
@@ -1131,56 +1204,78 @@ export function App(): React.ReactElement {
           );
         }
 
-        // Determine target column from params (backward compatible)
-        const targetMode = (params.targetMode as "replace" | "new_column" | "existing_column") || "replace";
-        const targetColumn = targetMode === "replace" ? undefined : params.targetColumn;
-
         // Collect SQL statements for history
         const executedSql: string[] = [];
+        let targetMode: "replace" | "new_column" | "existing_column" = "replace";
+        let targetColumn: string | undefined;
+        let description: string;
 
-        // Determine column type for new_column mode
-        // extract_numbers with integer/float in "first" mode produces numeric types
-        const extractNumType = opType === "extract_numbers" && params.mode !== "all"
-          ? params.numberType ?? "any"
-          : null;
-        const newColType = extractNumType === "integer" ? "BIGINT"
-          : extractNumType === "float" ? "DOUBLE"
-          : "VARCHAR";
+        if (opType === "rename_column") {
+          const cols = schema
+            .map((c) => c.column_name === column ? `${escapeIdent(c.column_name)} AS ${escapeIdent(renameTarget!)}` : escapeIdent(c.column_name))
+            .join(", ");
+          const sql = `CREATE OR REPLACE TABLE ${escapeIdent(currentTable)} AS SELECT ${cols} FROM ${escapeIdent(currentTable)}`;
+          await window.api.exec(sql);
+          executedSql.push(sql);
+          description = buildStepDescription(opType, column, params, renameTarget);
+        } else if (opType === "delete_column") {
+          const otherCols = schema
+            .filter((c) => c.column_name !== column)
+            .map((c) => escapeIdent(c.column_name))
+            .join(", ");
+          const sql = `CREATE OR REPLACE TABLE ${escapeIdent(currentTable)} AS SELECT ${otherCols} FROM ${escapeIdent(currentTable)}`;
+          await window.api.exec(sql);
+          executedSql.push(sql);
+          description = buildStepDescription(opType, column, params);
+        } else {
+          // Determine target column from params (backward compatible)
+          targetMode = (params.targetMode as "replace" | "new_column" | "existing_column") || "replace";
+          targetColumn = targetMode === "replace" ? undefined : params.targetColumn;
 
-        // For "new_column" mode, add the column first
-        if (targetMode === "new_column" && targetColumn) {
-          const addColSql = `ALTER TABLE "${currentTable}" ADD COLUMN "${targetColumn}" ${newColType}`;
-          await window.api.exec(addColSql);
-          executedSql.push(addColSql);
-        }
+          // Determine column type for new_column mode
+          // extract_numbers with integer/float in "first" mode produces numeric types
+          const extractNumType = opType === "extract_numbers" && params.mode !== "all"
+            ? params.numberType ?? "any"
+            : null;
+          const newColType = extractNumType === "integer" ? "BIGINT"
+            : extractNumType === "float" ? "DOUBLE"
+            : "VARCHAR";
 
-        // If the operation produces string output, ensure the target column is VARCHAR
-        const STRING_OPS: Set<ColOpType> = new Set([
-          "prefix_suffix", "find_replace", "regex_extract", "upper", "lower", "trim", "assign_value",
-        ]);
-        // extract_numbers in "all" mode or "any" type also produces string output
-        const isStringOp = STRING_OPS.has(opType)
-          || (opType === "extract_numbers" && (params.mode === "all" || (params.numberType ?? "any") === "any"));
-        if (isStringOp) {
-          // For "existing_column" mode, promote the target column; otherwise promote the source column
-          const colToPromote = (targetMode === "existing_column" && targetColumn) ? targetColumn : column;
-          const colInfo = schema.find((c) => c.column_name === colToPromote);
-          const colType = colInfo?.column_type?.toUpperCase() ?? "";
-          // Skip promotion for new_column (already set to correct type)
-          if (targetMode !== "new_column" && colType && !colType.startsWith("VARCHAR") && colType !== "TEXT" && colType !== "STRING") {
-            const alterSql = `ALTER TABLE "${currentTable}" ALTER COLUMN "${colToPromote}" TYPE VARCHAR`;
-            await window.api.exec(alterSql);
-            executedSql.push(alterSql);
+          // For "new_column" mode, add the column first
+          if (targetMode === "new_column" && targetColumn) {
+            const addColSql = `ALTER TABLE "${currentTable}" ADD COLUMN "${targetColumn}" ${newColType}`;
+            await window.api.exec(addColSql);
+            executedSql.push(addColSql);
           }
-        }
 
-        // Execute the UPDATE
-        const sql = buildColOpUpdateSQL(currentTable, column, opType, params, viewState.filters, targetColumn);
-        await window.api.exec(sql);
-        executedSql.push(sql);
+          // If the operation produces string output, ensure the target column is VARCHAR
+          const STRING_OPS: Set<ColOpType> = new Set([
+            "prefix_suffix", "find_replace", "regex_extract", "upper", "lower", "trim", "assign_value",
+          ]);
+          // extract_numbers in "all" mode or "any" type also produces string output
+          const isStringOp = STRING_OPS.has(opType)
+            || (opType === "extract_numbers" && (params.mode === "all" || (params.numberType ?? "any") === "any"));
+          if (isStringOp) {
+            // For "existing_column" mode, promote the target column; otherwise promote the source column
+            const colToPromote = (targetMode === "existing_column" && targetColumn) ? targetColumn : column;
+            const colInfo = schema.find((c) => c.column_name === colToPromote);
+            const colType = colInfo?.column_type?.toUpperCase() ?? "";
+            // Skip promotion for new_column (already set to correct type)
+            if (targetMode !== "new_column" && colType && !colType.startsWith("VARCHAR") && colType !== "TEXT" && colType !== "STRING") {
+              const alterSql = `ALTER TABLE "${currentTable}" ALTER COLUMN "${colToPromote}" TYPE VARCHAR`;
+              await window.api.exec(alterSql);
+              executedSql.push(alterSql);
+            }
+          }
+
+          // Execute the UPDATE
+          const sql = buildColOpUpdateSQL(currentTable, column, opType, params, viewState.filters, targetColumn);
+          await window.api.exec(sql);
+          executedSql.push(sql);
+          description = buildStepDescription(opType, column, params, targetColumn);
+        }
 
         // Record step
-        const description = buildStepDescription(opType, column, params, targetColumn);
         const step: ColOpStep = {
           id: stepId,
           opType,
@@ -1201,9 +1296,19 @@ export function App(): React.ReactElement {
         // Refresh schema (column type may have changed from ALTER)
         const newSchema = await window.api.describe(currentTable);
         setSchema(newSchema);
+        setTables((prev) =>
+          prev.map((t) =>
+            t.tableName === currentTable
+              ? { ...t, schema: newSchema }
+              : t
+          )
+        );
 
-        // If a new column was added, include it in visibleColumns and columnOrder
-        if (targetMode === "new_column" && targetColumn) {
+        if (opType === "rename_column" && renameTarget) {
+          setViewState((prev) => renameColumnInViewState(prev, column, renameTarget));
+        } else if (opType === "delete_column") {
+          setViewState((prev) => deleteColumnFromViewState(prev, column));
+        } else if (targetMode === "new_column" && targetColumn) {
           setViewState((prev) => ({
             ...prev,
             visibleColumns: prev.visibleColumns.includes(targetColumn) ? prev.visibleColumns : [...prev.visibleColumns, targetColumn],
@@ -1238,8 +1343,22 @@ export function App(): React.ReactElement {
       // Refresh schema
       const newSchema = await window.api.describe(activeTable);
       setSchema(newSchema);
+      setTables((prev) =>
+        prev.map((t) =>
+          t.tableName === activeTable
+            ? { ...t, schema: newSchema }
+            : t
+        )
+      );
       const allCols = newSchema.map((c: ColumnInfo) => c.column_name);
-      setViewState((prev) => ({ ...prev, visibleColumns: allCols, columnOrder: allCols }));
+      setViewState((prev) => ({
+        ...prev,
+        filters: isSchemaColOp(lastStep.opType) ? { logic: "AND", children: [] } : prev.filters,
+        visibleColumns: allCols,
+        columnOrder: allCols,
+        sortColumns: isSchemaColOp(lastStep.opType) ? [] : prev.sortColumns,
+        pivotConfig: isSchemaColOp(lastStep.opType) ? null : prev.pivotConfig,
+      }));
     },
     [activeTable, colOpsSteps]
   );
@@ -1261,8 +1380,23 @@ export function App(): React.ReactElement {
       // Refresh schema
       const newSchema = await window.api.describe(activeTable);
       setSchema(newSchema);
+      setTables((prev) =>
+        prev.map((t) =>
+          t.tableName === activeTable
+            ? { ...t, schema: newSchema }
+            : t
+        )
+      );
       const allCols = newSchema.map((c: ColumnInfo) => c.column_name);
-      setViewState((prev) => ({ ...prev, visibleColumns: allCols, columnOrder: allCols }));
+      const hadSchemaOps = colOpsSteps.some((step) => isSchemaColOp(step.opType));
+      setViewState((prev) => ({
+        ...prev,
+        filters: hadSchemaOps ? { logic: "AND", children: [] } : prev.filters,
+        visibleColumns: allCols,
+        columnOrder: allCols,
+        sortColumns: hadSchemaOps ? [] : prev.sortColumns,
+        pivotConfig: hadSchemaOps ? null : prev.pivotConfig,
+      }));
     },
     [activeTable, colOpsSteps]
   );
