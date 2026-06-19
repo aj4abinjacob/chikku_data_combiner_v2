@@ -11,6 +11,7 @@ import {
   countConditions,
   hasActiveFilters,
   extractFilterColumns,
+  isColumnComparisonOperator,
 } from "../types";
 
 interface ViewsPanelProps {
@@ -101,11 +102,12 @@ function renderFilterPills(group: FilterGroup): React.ReactNode[] {
       );
     } else {
       const needsValue = child.operator !== "IS NULL" && child.operator !== "IS NOT NULL" && child.operator !== "IS TRUE" && child.operator !== "IS FALSE";
+      const isColumnValue = isColumnComparisonOperator(child.operator);
       nodes.push(
         <span key={`cond-${i}`}>
           <span className="views-inline-detail-col">{child.column}</span>
           {" "}{child.operator.toLowerCase()}
-          {needsValue && <> <span className="views-inline-detail-val">{child.value}</span></>}
+          {needsValue && <> <span className={isColumnValue ? "views-inline-detail-col" : "views-inline-detail-val"}>{child.value}</span></>}
         </span>
       );
     }

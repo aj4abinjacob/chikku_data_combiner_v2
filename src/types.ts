@@ -77,9 +77,34 @@ export interface ColumnOperation {
   params: Record<string, string>;
 }
 
+export type FilterOperator =
+  | "="
+  | "!="
+  | ">"
+  | "<"
+  | ">="
+  | "<="
+  | "LIKE"
+  | "NOT LIKE"
+  | "IS NULL"
+  | "IS NOT NULL"
+  | "IS TRUE"
+  | "IS FALSE"
+  | "CONTAINS"
+  | "DOES NOT CONTAIN"
+  | "IN"
+  | "STARTS WITH"
+  | "NOT STARTS WITH"
+  | "ENDS WITH"
+  | "NOT ENDS WITH"
+  | "EQUALS COLUMN"
+  | "DOES NOT EQUAL COLUMN"
+  | "EQUALS IGNORE CASE"
+  | "DOES NOT EQUAL IGNORE CASE";
+
 export interface FilterCondition {
   column: string;
-  operator: "=" | "!=" | ">" | "<" | ">=" | "<=" | "LIKE" | "NOT LIKE" | "IS NULL" | "IS NOT NULL" | "IS TRUE" | "IS FALSE" | "CONTAINS" | "DOES NOT CONTAIN" | "IN" | "STARTS WITH" | "NOT STARTS WITH" | "ENDS WITH" | "NOT ENDS WITH";
+  operator: FilterOperator;
   value: string;
 }
 
@@ -106,6 +131,10 @@ export function countConditions(group: FilterGroup): number {
   return count;
 }
 
+export function isColumnComparisonOperator(operator: FilterOperator): boolean {
+  return operator === "EQUALS COLUMN" || operator === "DOES NOT EQUAL COLUMN";
+}
+
 export function extractFilterColumns(group: FilterGroup): Set<string> {
   const cols = new Set<string>();
   for (const child of group.children) {
@@ -113,6 +142,7 @@ export function extractFilterColumns(group: FilterGroup): Set<string> {
       for (const c of extractFilterColumns(child)) cols.add(c);
     } else {
       if (child.column) cols.add(child.column);
+      if (isColumnComparisonOperator(child.operator) && child.value) cols.add(child.value);
     }
   }
   return cols;

@@ -11,12 +11,13 @@ import {
 import { Popover2 } from "@blueprintjs/popover2";
 import {
   ColumnInfo,
-  FilterCondition,
   FilterGroup,
   FilterNode,
+  FilterOperator,
   isFilterGroup,
   hasActiveFilters,
   countConditions,
+  isColumnComparisonOperator,
   ColOpType,
   ColOpStep,
   RowOpType,
@@ -30,7 +31,6 @@ import { RowOpsPanel } from "./RowOpsPanel";
 import { ViewsPanel } from "./ViewsPanel";
 import { SearchableColumnSelect } from "./SearchableColumnSelect";
 
-type FilterOperator = FilterCondition["operator"];
 type ColumnKind = "text" | "number" | "date" | "boolean" | "unknown";
 type OperatorOption = { value: FilterOperator; label: string };
 
@@ -39,6 +39,10 @@ const OPERATOR_LABELS: Record<FilterOperator, string> = {
   "DOES NOT CONTAIN": "does not contain",
   "=": "equals",
   "!=": "not equal",
+  "EQUALS IGNORE CASE": "equals, ignore case",
+  "DOES NOT EQUAL IGNORE CASE": "not equal, ignore case",
+  "EQUALS COLUMN": "equals column",
+  "DOES NOT EQUAL COLUMN": "not equal column",
   IN: "in list",
   "IS NULL": "is empty",
   "IS NOT NULL": "is not empty",
@@ -69,19 +73,27 @@ const COMMON_OPERATORS_BY_KIND: Record<ColumnKind, FilterOperator[]> = {
     "DOES NOT CONTAIN",
     "=",
     "!=",
+    "EQUALS IGNORE CASE",
+    "DOES NOT EQUAL IGNORE CASE",
+    "EQUALS COLUMN",
+    "DOES NOT EQUAL COLUMN",
     "IN",
     "STARTS WITH",
     "ENDS WITH",
     "IS NULL",
     "IS NOT NULL",
   ],
-  number: ["=", "!=", ">", "<", "IN", "IS NULL", "IS NOT NULL"],
-  date: ["=", "!=", ">", "<", "IN", "IS NULL", "IS NOT NULL"],
-  boolean: ["IS TRUE", "IS FALSE", "=", "!=", "IS NULL", "IS NOT NULL"],
-  unknown: ["CONTAINS", "DOES NOT CONTAIN", "=", "!=", "IN", "IS NULL", "IS NOT NULL", ">", "<"],
+  number: ["=", "!=", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", ">", "<", "IN", "IS NULL", "IS NOT NULL"],
+  date: ["=", "!=", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", ">", "<", "IN", "IS NULL", "IS NOT NULL"],
+  boolean: ["IS TRUE", "IS FALSE", "=", "!=", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", "IS NULL", "IS NOT NULL"],
+  unknown: ["CONTAINS", "DOES NOT CONTAIN", "=", "!=", "EQUALS IGNORE CASE", "DOES NOT EQUAL IGNORE CASE", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", "IN", "IS NULL", "IS NOT NULL", ">", "<"],
 };
 
 const ADVANCED_OPERATOR_ORDER: FilterOperator[] = [
+  "EQUALS IGNORE CASE",
+  "DOES NOT EQUAL IGNORE CASE",
+  "EQUALS COLUMN",
+  "DOES NOT EQUAL COLUMN",
   "LIKE",
   "NOT LIKE",
   ">=",
@@ -108,7 +120,7 @@ const DEFAULT_PANEL_HEIGHT = 260;
 interface DraftFilterCondition {
   id: string;
   column: string;
-  operator: FilterCondition["operator"];
+  operator: FilterOperator;
   value: string;
 }
 
@@ -556,6 +568,7 @@ function FilterConditionRow({
 }: FilterConditionRowProps): React.ReactElement {
   const operatorGroups = getOperatorGroups(draft.column, columns, draft.operator);
   const connectorClass = connectorLabel.toLowerCase();
+  const isColumnComparison = isColumnComparisonOperator(draft.operator);
 
   return (
     <div className="filter-row">
@@ -576,15 +589,19 @@ function FilterConditionRow({
       <OperatorSelect
         value={draft.operator}
         groups={operatorGroups}
-        onChange={(operator) =>
+        onChange={(operator) => {
+          const wasColumnComparison = isColumnComparisonOperator(draft.operator);
+          const nextIsColumnComparison = isColumnComparisonOperator(operator);
           onUpdate(draft.id, {
             operator,
             value:
-              operator === "IN" || draft.operator === "IN"
+              operator === "IN" ||
+              draft.operator === "IN" ||
+              wasColumnComparison !== nextIsColumnComparison
                 ? ""
                 : draft.value,
-          })
-        }
+          });
+        }}
       />
 
       {NO_VALUE_OPS.has(draft.operator) ? (
@@ -595,6 +612,16 @@ function FilterConditionRow({
           column={draft.column}
           selectedValues={draft.value}
           onChange={(value) => onUpdate(draft.id, { value })}
+        />
+      ) : isColumnComparison ? (
+        <SearchableColumnSelect
+          value={draft.value}
+          onChange={(value) => onUpdate(draft.id, { value })}
+          columns={columns}
+          placeholder="Compare column..."
+          className="filter-value-col-select"
+          showType
+          fill
         />
       ) : (
         <InputGroup

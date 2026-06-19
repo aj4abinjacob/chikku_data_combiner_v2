@@ -47,8 +47,25 @@ function buildFilterClause(filter: FilterCondition): string {
   if (filter.operator === "IS TRUE") return `${col} IS TRUE`;
   if (filter.operator === "IS FALSE") return `${col} IS FALSE`;
 
+  if (filter.operator === "EQUALS COLUMN" || filter.operator === "DOES NOT EQUAL COLUMN") {
+    const otherCol = escapeIdent(filter.value);
+    const left = `CAST(${col} AS VARCHAR)`;
+    const right = `CAST(${otherCol} AS VARCHAR)`;
+    return filter.operator === "EQUALS COLUMN"
+      ? `${left} IS NOT DISTINCT FROM ${right}`
+      : `${left} IS DISTINCT FROM ${right}`;
+  }
+
   // Escape single quotes in value
   const val = filter.value.replace(/'/g, "''");
+
+  if (filter.operator === "EQUALS IGNORE CASE") {
+    return `LOWER(CAST(${col} AS VARCHAR)) = LOWER('${val}')`;
+  }
+
+  if (filter.operator === "DOES NOT EQUAL IGNORE CASE") {
+    return `LOWER(CAST(${col} AS VARCHAR)) != LOWER('${val}')`;
+  }
 
   if (filter.operator === "CONTAINS") {
     // Case-insensitive regex match — supports plain text and regex patterns
