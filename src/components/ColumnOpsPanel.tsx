@@ -13,6 +13,7 @@ import {
 } from "@blueprintjs/core";
 import { ColumnInfo, ColOpType, ColOpStep, UndoStrategy, FilterGroup, ColOpTargetMode } from "../types";
 import { buildColOpExpr } from "../utils/colOpsSQL";
+import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import { buildFilterGroupClause } from "../utils/sqlBuilder";
 import { RegexPatternPicker } from "./RegexPatternPicker";
 import { RegexPatternManagerDialog } from "./RegexPatternManagerDialog";
@@ -332,6 +333,7 @@ export function ColumnOpsPanel({
                     const val = parseInt(e.target.value, 10);
                     updateParam("groupIndex", String(isNaN(val) || val < 0 ? 0 : val));
                   }}
+                  onWheel={(e) => stepNumberInputOnWheel(e, (value) => updateParam("groupIndex", value))}
                   type="number"
                   min={0}
                   fill

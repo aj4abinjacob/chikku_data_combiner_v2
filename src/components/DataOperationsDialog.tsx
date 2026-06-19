@@ -13,6 +13,7 @@ import {
   Radio,
 } from "@blueprintjs/core";
 import { ColumnInfo, ColOpTargetMode } from "../types";
+import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import { SearchableColumnSelect } from "./SearchableColumnSelect";
 
 type OpType =
@@ -839,6 +840,7 @@ export function DataOperationsDialog({
                 <InputGroup
                   value={param1}
                   onChange={(e) => setParam1(e.target.value)}
+                  onWheel={(e) => stepNumberInputOnWheel(e, setParam1)}
                   placeholder={sampleMode === "rows" ? "100" : "10"}
                   type="number"
                 />
