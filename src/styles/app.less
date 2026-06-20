@@ -2760,8 +2760,31 @@ html, body, #root {
   .column-check-list-actions {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
     flex-shrink: 0;
+
+    .bp4-button.bp4-minimal {
+      min-height: 24px;
+      padding: 0 8px;
+      border: 1px solid #ccd6df;
+      background: #fff;
+      box-shadow: 0 1px 2px rgba(17, 20, 24, 0.04);
+      color: #30404d;
+      font-weight: 600;
+
+      &:hover {
+        border-color: #b9c5cf;
+        background: #f3f6f9;
+        color: #182026;
+      }
+
+      &:active,
+      &.bp4-active {
+        border-color: rgba(19, 124, 189, 0.35);
+        background: #e9f4ff;
+        color: #106ba3;
+      }
+    }
   }
 
   .column-check-list-empty {
@@ -6111,6 +6134,23 @@ html.dark-theme #root {
     }
   }
 
+  .colops-config .colops-col-select.col-select-trigger,
+  .colops-config .colops-target-col-select.col-select-trigger {
+    border-color: @dark-border-1;
+    background: @dark-bg-3;
+    color: @dark-text-1;
+
+    &:hover {
+      border-color: @dark-text-4;
+      background: @dark-bg-4;
+    }
+
+    &:focus {
+      box-shadow: 0 0 0 1px @dark-accent, 0 0 0 3px rgba(76, 154, 255, 0.2);
+      border-color: @dark-accent;
+    }
+  }
+
   .colops-field > label,
   .colops-field-half > label {
     color: @dark-text-3;
@@ -6570,6 +6610,26 @@ html.dark-theme #root {
   .date-conv-group-hint,
   .date-conv-detecting {
     color: @dark-text-3;
+  }
+
+  .column-check-list-actions .bp4-button.bp4-minimal {
+    border-color: @dark-border-1;
+    background: @dark-bg-4;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+    color: @dark-text-1;
+
+    &:hover {
+      border-color: @dark-accent-border;
+      background: @dark-accent-bg-subtle;
+      color: @dark-accent;
+    }
+
+    &:active,
+    &.bp4-active {
+      border-color: @dark-accent-border;
+      background: @dark-accent-bg;
+      color: @dark-accent;
+    }
   }
 
   .aggregate-results-wrapper {
