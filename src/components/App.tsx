@@ -1841,6 +1841,7 @@ export function App(): React.ReactElement {
               onOpenHistory={() => setHistoryDialogOpen(true)}
               onOpenFiles={handleChooseFiles}
               onHide={() => setSidebarVisible(false)}
+              jsonWorkspaceActive={jsonWorkspaceActive}
             />
           </div>
           <div className="sidebar-shell-strip" aria-hidden={sidebarVisible}>

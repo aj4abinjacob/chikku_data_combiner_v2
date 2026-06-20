@@ -41,6 +41,7 @@ interface SidebarProps {
   onOpenHistory: () => void;
   onOpenFiles: () => void;
   onHide: () => void;
+  jsonWorkspaceActive?: boolean;
 }
 
 export function Sidebar({
@@ -70,6 +71,7 @@ export function Sidebar({
   onOpenHistory,
   onOpenFiles,
   onHide,
+  jsonWorkspaceActive = false,
 }: SidebarProps): React.ReactElement {
   const [dataOpDialogOpen, setDataOpDialogOpen] = useState(false);
   const [aggregateDialogOpen, setAggregateDialogOpen] = useState(false);
@@ -324,7 +326,7 @@ export function Sidebar({
       )}
 
       {/* Column visibility */}
-      {schema.length > 0 && (
+      {!jsonWorkspaceActive && schema.length > 0 && (
         <div className="sidebar-section sidebar-section-columns">
           <div className="column-header-row">
             <div className="sidebar-heading-block">
@@ -479,7 +481,7 @@ export function Sidebar({
       )}
 
       {/* Data operation + filter buttons */}
-      {activeTable && schema.length > 0 && (
+      {!jsonWorkspaceActive && activeTable && schema.length > 0 && (
         <div className="sidebar-section sidebar-actions">
           <Button
             icon="grouped-bar-chart"
