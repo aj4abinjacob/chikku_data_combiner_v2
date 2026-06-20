@@ -93,6 +93,7 @@ export type FilterOperator =
   | "CONTAINS"
   | "DOES NOT CONTAIN"
   | "IN"
+  | "NOT IN"
   | "STARTS WITH"
   | "NOT STARTS WITH"
   | "ENDS WITH"

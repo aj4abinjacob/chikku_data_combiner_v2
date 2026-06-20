@@ -77,15 +77,15 @@ function buildFilterClause(filter: FilterCondition): string {
     return `NOT regexp_matches(CAST(${col} AS VARCHAR), '${val}', 'i')`;
   }
 
-  if (filter.operator === "IN") {
+  if (filter.operator === "IN" || filter.operator === "NOT IN") {
     // Comma-separated list of values
     const items = filter.value
       .split(",")
       .map((v) => v.trim().replace(/'/g, "''"))
       .filter((v) => v.length > 0)
       .map((v) => `'${v}'`);
-    if (items.length === 0) return "1=0";
-    return `${col} IN (${items.join(", ")})`;
+    if (items.length === 0) return filter.operator === "IN" ? "1=0" : "1=1";
+    return `${col} ${filter.operator} (${items.join(", ")})`;
   }
 
   if (filter.operator === "STARTS WITH") {

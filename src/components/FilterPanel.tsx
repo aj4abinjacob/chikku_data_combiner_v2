@@ -45,6 +45,7 @@ const OPERATOR_LABELS: Record<FilterOperator, string> = {
   "EQUALS COLUMN": "equals column",
   "DOES NOT EQUAL COLUMN": "not equal column",
   IN: "in list",
+  "NOT IN": "is not in list",
   "IS NULL": "is empty",
   "IS NOT NULL": "is not empty",
   "IS TRUE": "is true",
@@ -79,36 +80,39 @@ const COMMON_OPERATORS_BY_KIND: Record<ColumnKind, FilterOperator[]> = {
     "EQUALS COLUMN",
     "DOES NOT EQUAL COLUMN",
     "IN",
+    "NOT IN",
     "STARTS WITH",
     "ENDS WITH",
     "IS NULL",
     "IS NOT NULL",
   ],
-  number: ["=", "!=", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", ">", "<", "IN", "IS NULL", "IS NOT NULL"],
-  date: ["=", "!=", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", ">", "<", "IN", "IS NULL", "IS NOT NULL"],
+  number: ["=", "!=", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", ">", "<", "IN", "NOT IN", "IS NULL", "IS NOT NULL"],
+  date: ["=", "!=", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", ">", "<", "IN", "NOT IN", "IS NULL", "IS NOT NULL"],
   boolean: ["IS TRUE", "IS FALSE", "=", "!=", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", "IS NULL", "IS NOT NULL"],
-  unknown: ["CONTAINS", "DOES NOT CONTAIN", "=", "!=", "EQUALS IGNORE CASE", "DOES NOT EQUAL IGNORE CASE", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", "IN", "IS NULL", "IS NOT NULL", ">", "<"],
+  unknown: ["CONTAINS", "DOES NOT CONTAIN", "=", "!=", "EQUALS IGNORE CASE", "DOES NOT EQUAL IGNORE CASE", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", "IN", "NOT IN", "IS NULL", "IS NOT NULL", ">", "<"],
 };
 
-const ADVANCED_OPERATOR_ORDER: FilterOperator[] = [
-  "EQUALS IGNORE CASE",
-  "DOES NOT EQUAL IGNORE CASE",
-  "EQUALS COLUMN",
-  "DOES NOT EQUAL COLUMN",
-  "LIKE",
-  "NOT LIKE",
-  ">=",
-  "<=",
-  "STARTS WITH",
-  "ENDS WITH",
-  "NOT STARTS WITH",
-  "NOT ENDS WITH",
-  "CONTAINS",
-  "DOES NOT CONTAIN",
-  "IN",
-  ">",
-  "<",
-];
+const ADVANCED_OPERATORS_BY_KIND: Record<ColumnKind, FilterOperator[]> = {
+  text: [
+    "LIKE",
+    "NOT LIKE",
+    "NOT STARTS WITH",
+    "NOT ENDS WITH",
+  ],
+  number: [">=", "<="],
+  date: [">=", "<="],
+  boolean: [],
+  unknown: [
+    "LIKE",
+    "NOT LIKE",
+    ">=",
+    "<=",
+    "STARTS WITH",
+    "ENDS WITH",
+    "NOT STARTS WITH",
+    "NOT ENDS WITH",
+  ],
+};
 
 const NO_VALUE_OPS = new Set<FilterOperator>(["IS NULL", "IS NOT NULL", "IS TRUE", "IS FALSE"]);
 
@@ -156,14 +160,39 @@ function getColumnKind(columnName: string, columns: ColumnInfo[]): ColumnKind {
   return "unknown";
 }
 
+function getBaseOperatorGroups(columnName: string, columns: ColumnInfo[]): {
+  common: FilterOperator[];
+  advanced: FilterOperator[];
+} {
+  const kind = getColumnKind(columnName, columns);
+  const common = COMMON_OPERATORS_BY_KIND[kind];
+  const commonSet = new Set<FilterOperator>(common);
+  const advanced = ADVANCED_OPERATORS_BY_KIND[kind].filter((value) => !commonSet.has(value));
+  return { common, advanced };
+}
+
+function getDefaultOperator(columnName: string, columns: ColumnInfo[]): FilterOperator {
+  const groups = getBaseOperatorGroups(columnName, columns);
+  return groups.common[0] ?? groups.advanced[0] ?? "=";
+}
+
+function isOperatorAvailableForColumn(
+  columnName: string,
+  columns: ColumnInfo[],
+  operator: FilterOperator
+): boolean {
+  const groups = getBaseOperatorGroups(columnName, columns);
+  return groups.common.includes(operator) || groups.advanced.includes(operator);
+}
+
 function getOperatorGroups(
   columnName: string,
   columns: ColumnInfo[],
   selectedOperator: FilterOperator
 ): { common: OperatorOption[]; advanced: OperatorOption[] } {
-  const commonValues = COMMON_OPERATORS_BY_KIND[getColumnKind(columnName, columns)];
+  const { common: commonValues, advanced } = getBaseOperatorGroups(columnName, columns);
   const commonSet = new Set<FilterOperator>(commonValues);
-  const advancedValues = ADVANCED_OPERATOR_ORDER.filter((value) => !commonSet.has(value));
+  const advancedValues = [...advanced];
 
   if (!commonSet.has(selectedOperator) && !advancedValues.includes(selectedOperator)) {
     advancedValues.unshift(selectedOperator);
@@ -578,7 +607,12 @@ function FilterConditionRow({
 
       <SearchableColumnSelect
         value={draft.column}
-        onChange={(val) => onUpdate(draft.id, { column: val, value: "" })}
+        onChange={(val) => {
+          const operator = isOperatorAvailableForColumn(val, columns, draft.operator)
+            ? draft.operator
+            : getDefaultOperator(val, columns);
+          onUpdate(draft.id, { column: val, operator, value: "" });
+        }}
         columns={columns}
         placeholder="Column..."
         className="filter-col-select"
@@ -596,7 +630,9 @@ function FilterConditionRow({
             operator,
             value:
               operator === "IN" ||
+              operator === "NOT IN" ||
               draft.operator === "IN" ||
+              draft.operator === "NOT IN" ||
               wasColumnComparison !== nextIsColumnComparison
                 ? ""
                 : draft.value,
@@ -606,7 +642,7 @@ function FilterConditionRow({
 
       {NO_VALUE_OPS.has(draft.operator) ? (
         <div className="filter-value-empty" />
-      ) : draft.operator === "IN" && activeTable ? (
+      ) : (draft.operator === "IN" || draft.operator === "NOT IN") && activeTable ? (
         <InValuePicker
           tableName={activeTable}
           column={draft.column}
@@ -702,7 +738,7 @@ function FilterGroupRenderer({
     return {
       id: genId(),
       column: col,
-      operator: "CONTAINS",
+      operator: getDefaultOperator(col, columns),
       value: "",
     };
   };
