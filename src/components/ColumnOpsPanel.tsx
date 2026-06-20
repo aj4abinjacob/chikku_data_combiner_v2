@@ -537,10 +537,12 @@ export function ColumnOpsPanel({
       {/* Toolbar — matches filter-toolbar */}
       <div className="colops-toolbar">
         <div className="colops-status-strip">
-          <Tag minimal icon={statusInfo.icon} intent={statusInfo.intent}>
-            {statusInfo.tag}
-          </Tag>
-          <span className="colops-status-detail" title={statusInfo.detail}>{statusInfo.detail}</span>
+          <div className="motion-status-pair" key={`${statusInfo.tag}:${statusInfo.detail}`}>
+            <Tag minimal icon={statusInfo.icon} intent={statusInfo.intent}>
+              {statusInfo.tag}
+            </Tag>
+            <span className="colops-status-detail" title={statusInfo.detail}>{statusInfo.detail}</span>
+          </div>
           {isFiltered && (
             <Tag minimal icon="filter" intent={Intent.PRIMARY} className="colops-scope-tag">
               {totalRows.toLocaleString()} of {unfilteredRows!.toLocaleString()} rows

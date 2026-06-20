@@ -18,6 +18,8 @@ import { buildRowOpSQL, buildRowOpStepDescription } from "../utils/rowOpsSQL";
 import { useChunkCache } from "../hooks/useChunkCache";
 import { usePivotCache } from "../hooks/usePivotCache";
 
+const FILTER_PANEL_EXIT_MS = 180;
+
 function makeTableName(filePath: string): string {
   const name = filePath.split(/[/\\]/).pop() || "table";
   const dotIdx = name.lastIndexOf(".");
@@ -201,6 +203,8 @@ export function App(): React.ReactElement {
   const [tableHistories, setTableHistories] = useState<Map<string, TableHistory>>(new Map());
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("theme") === "dark");
+  const [filterPanelMounted, setFilterPanelMounted] = useState(false);
+  const filterPanelExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Use refs so IPC callbacks always see latest state
   const tablesRef = useRef(tables);
@@ -566,6 +570,31 @@ export function App(): React.ReactElement {
     document.documentElement.classList.toggle("dark-theme", darkMode);
     window.api.syncTheme(darkMode);
   }, [darkMode]);
+
+  useEffect(() => {
+    if (filterPanelOpen) {
+      if (filterPanelExitTimerRef.current) {
+        clearTimeout(filterPanelExitTimerRef.current);
+        filterPanelExitTimerRef.current = null;
+      }
+      setFilterPanelMounted(true);
+      return;
+    }
+
+    if (!filterPanelMounted) return;
+
+    filterPanelExitTimerRef.current = setTimeout(() => {
+      setFilterPanelMounted(false);
+      filterPanelExitTimerRef.current = null;
+    }, FILTER_PANEL_EXIT_MS);
+
+    return () => {
+      if (filterPanelExitTimerRef.current) {
+        clearTimeout(filterPanelExitTimerRef.current);
+        filterPanelExitTimerRef.current = null;
+      }
+    };
+  }, [filterPanelOpen, filterPanelMounted]);
 
   // When active table changes, refresh schema and reset columns
   useEffect(() => {
@@ -1728,60 +1757,63 @@ export function App(): React.ReactElement {
   return (
     <div className={`app-container${darkMode ? " bp4-dark dark-theme" : ""}`}>
       <div className="main-layout">
-        {sidebarVisible ? (
-          <Sidebar
-            tables={tables}
-            activeTable={activeTable}
-            schema={schema}
-            visibleColumns={viewState.visibleColumns}
-            columnOrder={viewState.columnOrder}
-            sortColumns={viewState.sortColumns}
-            onSort={handleSort}
-            onClearSort={handleClearSort}
-            pivotConfig={viewState.pivotConfig}
-            onPivotGroup={handlePivotGroup}
-            onClearPivotGroups={handleClearPivotGroups}
-            onSelectTable={(name) => {
-              setActiveTable(name);
-              setViewState((prev) => ({
-                ...prev,
-                filters: { logic: "AND", children: [] },
-                visibleColumns: [],
-                columnOrder: [],
-                sortColumns: [],
-                pivotConfig: null,
-              }));
-              setResetKey((k) => k + 1);
-            }}
-            onToggleColumn={toggleColumn}
-            onSetVisibleColumns={(cols: string[]) => {
-              setViewState((prev) => ({ ...prev, visibleColumns: cols }));
-              setResetKey((k) => k + 1);
-            }}
-            onReorderColumns={reorderColumns}
-            onDataOperation={handleDataOperation}
-            onSampleTable={handleSampleTable}
-            onDeleteTable={handleDeleteTable}
-            onCombine={handleCombineOpen}
-            onCreateAggregateTable={handleCreateAggregateTable}
-            onCreatePivotTable={handleCreatePivotTable}
-            onLookupMerge={handleLookupMerge}
-            onExport={() => setExportDialogOpen(true)}
-            onOpenHistory={() => setHistoryDialogOpen(true)}
-            onOpenFiles={handleChooseFiles}
-            onHide={() => setSidebarVisible(false)}
-          />
-        ) : (
-          <div className="sidebar-collapsed">
-            <Button
-              icon="chevron-right"
-              minimal
-              small
-              onClick={() => setSidebarVisible(true)}
-              title="Show sidebar"
+        <div className={`sidebar-shell${sidebarVisible ? " sidebar-shell-open" : " sidebar-shell-collapsed"}`}>
+          <div className="sidebar-shell-panel" aria-hidden={!sidebarVisible}>
+            <Sidebar
+              tables={tables}
+              activeTable={activeTable}
+              schema={schema}
+              visibleColumns={viewState.visibleColumns}
+              columnOrder={viewState.columnOrder}
+              sortColumns={viewState.sortColumns}
+              onSort={handleSort}
+              onClearSort={handleClearSort}
+              pivotConfig={viewState.pivotConfig}
+              onPivotGroup={handlePivotGroup}
+              onClearPivotGroups={handleClearPivotGroups}
+              onSelectTable={(name) => {
+                setActiveTable(name);
+                setViewState((prev) => ({
+                  ...prev,
+                  filters: { logic: "AND", children: [] },
+                  visibleColumns: [],
+                  columnOrder: [],
+                  sortColumns: [],
+                  pivotConfig: null,
+                }));
+                setResetKey((k) => k + 1);
+              }}
+              onToggleColumn={toggleColumn}
+              onSetVisibleColumns={(cols: string[]) => {
+                setViewState((prev) => ({ ...prev, visibleColumns: cols }));
+                setResetKey((k) => k + 1);
+              }}
+              onReorderColumns={reorderColumns}
+              onDataOperation={handleDataOperation}
+              onSampleTable={handleSampleTable}
+              onDeleteTable={handleDeleteTable}
+              onCombine={handleCombineOpen}
+              onCreateAggregateTable={handleCreateAggregateTable}
+              onCreatePivotTable={handleCreatePivotTable}
+              onLookupMerge={handleLookupMerge}
+              onExport={() => setExportDialogOpen(true)}
+              onOpenHistory={() => setHistoryDialogOpen(true)}
+              onOpenFiles={handleChooseFiles}
+              onHide={() => setSidebarVisible(false)}
             />
           </div>
-        )}
+          <div className="sidebar-shell-strip" aria-hidden={sidebarVisible}>
+            <div className="sidebar-collapsed">
+              <Button
+                icon="chevron-right"
+                minimal
+                small
+                onClick={() => setSidebarVisible(true)}
+                title="Show sidebar"
+              />
+            </div>
+          </div>
+        </div>
         <div className="data-area">
           {hasData ? (
             <>
@@ -1815,7 +1847,7 @@ export function App(): React.ReactElement {
                 groupSortDirection={pivotActive ? viewState.pivotConfig?.groupSortDirection : undefined}
                 onGroupSort={pivotActive ? handleGroupSort : undefined}
               />
-              {filterPanelOpen && (
+              {filterPanelMounted && (
                 <FilterPanel
                   columns={schema}
                   activeFilters={viewState.filters}
@@ -1847,6 +1879,7 @@ export function App(): React.ReactElement {
                   onDeleteView={handleDeleteView}
                   onRenameView={handleRenameView}
                   onClose={() => setFilterPanelOpen(false)}
+                  motionState={filterPanelOpen ? "open" : "closing"}
                 />
               )}
             </>

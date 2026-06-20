@@ -763,7 +763,11 @@ function FilterGroupRenderer({
   const scrollToBottom = () => {
     if (scrollContainerRef?.current) {
       requestAnimationFrame(() => {
-        scrollContainerRef.current?.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: "smooth" });
+        const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+        scrollContainerRef.current?.scrollTo({
+          top: scrollContainerRef.current.scrollHeight,
+          behavior: reduceMotion ? "auto" : "smooth",
+        });
       });
     }
   };
@@ -997,6 +1001,7 @@ interface FilterPanelProps {
   onDeleteView: (viewId: string) => void;
   onRenameView: (viewId: string, newName: string) => void;
   onClose: () => void;
+  motionState?: "open" | "closing";
 }
 
 export function FilterPanel({
@@ -1026,6 +1031,7 @@ export function FilterPanel({
   onDeleteView,
   onRenameView,
   onClose,
+  motionState = "open",
 }: FilterPanelProps): React.ReactElement {
   const [draftRoot, setDraftRoot] = useState<DraftFilterGroup>(() =>
     convertToDraft(activeFilters)
@@ -1036,6 +1042,8 @@ export function FilterPanel({
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [viewsPaneOpen, setViewsPaneOpen] = useState(savedViews.length > 0);
   const [saveViewName, setSaveViewName] = useState("");
+  const [isPanelResizing, setIsPanelResizing] = useState(false);
+  const [isSplitResizing, setIsSplitResizing] = useState(false);
   const lastSavedViewSnapshot = useRef<string | null>(null);
   const isSplitDragging = useRef(false);
   const splitStartX = useRef(0);
@@ -1075,6 +1083,7 @@ export function FilterPanel({
     (e: React.MouseEvent) => {
       e.preventDefault();
       isDragging.current = true;
+      setIsPanelResizing(true);
       startY.current = e.clientY;
       startHeight.current = panelHeight;
       document.body.style.cursor = "ns-resize";
@@ -1097,6 +1106,7 @@ export function FilterPanel({
     const onMouseUp = () => {
       if (!isDragging.current) return;
       isDragging.current = false;
+      setIsPanelResizing(false);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
@@ -1114,6 +1124,7 @@ export function FilterPanel({
     (e: React.MouseEvent) => {
       e.preventDefault();
       isSplitDragging.current = true;
+      setIsSplitResizing(true);
       splitStartX.current = e.clientX;
       splitStartPercent.current = splitPercent;
       document.body.style.cursor = "col-resize";
@@ -1136,6 +1147,7 @@ export function FilterPanel({
     const onSplitUp = () => {
       if (!isSplitDragging.current) return;
       isSplitDragging.current = false;
+      setIsSplitResizing(false);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
@@ -1207,10 +1219,16 @@ export function FilterPanel({
       ? pluralize(activeCount, "filter")
       : draftHasContent
         ? pluralize(draftRowCount, "incomplete filter")
-        : "No filters";
+      : "No filters";
+  const filterPanelClassName = [
+    "filter-panel",
+    motionState === "closing" ? "filter-panel-closing" : "filter-panel-open",
+    isPanelResizing ? "filter-panel-resizing" : "",
+    isSplitResizing ? "filter-panel-split-resizing" : "",
+  ].filter(Boolean).join(" ");
 
   return (
-    <div className="filter-panel" style={{ height: panelHeight }}>
+    <div className={filterPanelClassName} style={{ height: panelHeight }}>
       {/* Resize handle */}
       <div className="filter-panel-resize-handle" onMouseDown={onMouseDown}>
         <div className="filter-panel-resize-grip" />
@@ -1275,14 +1293,16 @@ export function FilterPanel({
         >
           <div className="filter-toolbar">
             <div className="filter-status-strip">
-              <Tag
-                minimal
-                icon={isDirty || (!hasActiveFilters(activeFilters) && draftHasContent) ? "edit" : hasActiveFilters(activeFilters) ? "tick" : "filter"}
-                intent={isDirty ? Intent.WARNING : hasActiveFilters(activeFilters) ? Intent.SUCCESS : undefined}
-              >
-                {statusText}
-              </Tag>
-              <span>{statusDetail}</span>
+              <div className="motion-status-pair" key={`${statusText}:${statusDetail}`}>
+                <Tag
+                  minimal
+                  icon={isDirty || (!hasActiveFilters(activeFilters) && draftHasContent) ? "edit" : hasActiveFilters(activeFilters) ? "tick" : "filter"}
+                  intent={isDirty ? Intent.WARNING : hasActiveFilters(activeFilters) ? Intent.SUCCESS : undefined}
+                >
+                  {statusText}
+                </Tag>
+                <span>{statusDetail}</span>
+              </div>
             </div>
             <div className="filter-toolbar-actions">
               {savedViews.length > 0 && (
