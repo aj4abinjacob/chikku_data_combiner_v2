@@ -13,7 +13,14 @@ import {
   Radio,
 } from "@blueprintjs/core";
 import { ColumnInfo, ColOpTargetMode } from "../types";
-import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
+import {
+  guardNumberInputDrop,
+  guardNumberInputKeyDown,
+  guardNumberInputPaste,
+  isAllowedNumberInputValue,
+  showNumberInputExpectation,
+  stepNumberInputOnWheel,
+} from "../utils/numberInputWheel";
 import { SearchableColumnSelect } from "./SearchableColumnSelect";
 import { ColumnCheckList, ColumnCheckItem } from "./ColumnCheckList";
 
@@ -39,6 +46,7 @@ interface CaseCondition {
 }
 
 const CASE_OPERATORS = ["=", "!=", ">", "<", ">=", "<=", "LIKE", "NOT LIKE", "IS NULL", "IS NOT NULL", "CONTAINS", "STARTS WITH", "ENDS WITH"];
+const CASE_TEXT_VALUE_OPERATORS = new Set(["LIKE", "NOT LIKE", "CONTAINS", "STARTS WITH", "ENDS WITH"]);
 
 const OP_LABELS: Record<OpType, string> = {
   substring: "Substring",
@@ -116,6 +124,11 @@ export function DataOperationsDialog({
 
   const isVarcharType = React.useCallback(
     (type: string | undefined) => /^(VARCHAR|TEXT|STRING|CHAR)/i.test(type ?? ""),
+    []
+  );
+
+  const isNumberType = React.useCallback(
+    (type: string | undefined) => /(int|decimal|numeric|double|float|real|hugeint|bigint|smallint|tinyint|ubigint|uinteger|usmallint|utinyint)/i.test(type ?? ""),
     []
   );
 
@@ -795,7 +808,13 @@ export function DataOperationsDialog({
               <FormGroup label="Sample Mode">
                 <RadioGroup
                   selectedValue={sampleMode}
-                  onChange={(e) => setSampleMode((e.target as HTMLInputElement).value as "rows" | "percent")}
+                  onChange={(e) => {
+                    const nextMode = (e.target as HTMLInputElement).value as "rows" | "percent";
+                    setSampleMode(nextMode);
+                    if (nextMode === "rows" && !isAllowedNumberInputValue(param1)) {
+                      setParam1("");
+                    }
+                  }}
                   inline
                 >
                   <Radio label="Number of rows" value="rows" />
@@ -808,10 +827,24 @@ export function DataOperationsDialog({
               >
                 <InputGroup
                   value={param1}
-                  onChange={(e) => setParam1(e.target.value)}
+                  onChange={(e) => {
+                    if (isAllowedNumberInputValue(e.target.value, { allowDecimal: sampleMode === "percent" })) {
+                      setParam1(e.target.value);
+                    } else {
+                      showNumberInputExpectation(e.currentTarget, { allowDecimal: sampleMode === "percent" });
+                    }
+                  }}
+                  onKeyDown={(e) => guardNumberInputKeyDown(e, { allowDecimal: sampleMode === "percent" })}
+                  onPaste={(e) => guardNumberInputPaste(e, { allowDecimal: sampleMode === "percent" })}
+                  onDrop={(e) => guardNumberInputDrop(e, { allowDecimal: sampleMode === "percent" })}
                   onWheel={(e) => stepNumberInputOnWheel(e, setParam1)}
                   placeholder={sampleMode === "rows" ? "100" : "10"}
                   type="number"
+                  inputMode={sampleMode === "rows" ? "numeric" : "decimal"}
+                  pattern={sampleMode === "rows" ? "[0-9]*" : "[0-9]*[.]?[0-9]*"}
+                  min={sampleMode === "rows" ? 1 : 0}
+                  max={sampleMode === "percent" ? 100 : undefined}
+                  step={sampleMode === "rows" ? 1 : "any"}
                 />
               </FormGroup>
             </>
@@ -932,60 +965,99 @@ export function DataOperationsDialog({
             <>
               <FormGroup label="Conditions" helperText="Each condition is evaluated in order. The first match determines the result.">
                 <div className="case-condition-list">
-                  {caseConditions.map((cond, idx) => (
-                    <div key={idx} className="case-condition-row">
-                      <span className="case-condition-label">IF</span>
-                      <SearchableColumnSelect
-                        value={cond.column}
-                        onChange={(val) => {
-                          setCaseConditions((prev) => prev.map((c, i) => i === idx ? { ...c, column: val } : c));
-                        }}
-                        columns={schema}
-                        placeholder="Column..."
-                        className="case-condition-col"
-                      />
-                      <HTMLSelect
-                        value={cond.operator}
-                        onChange={(e) => {
-                          setCaseConditions((prev) => prev.map((c, i) => i === idx ? { ...c, operator: e.target.value } : c));
-                        }}
-                        className="case-condition-op"
-                      >
-                        {CASE_OPERATORS.map((op) => (
-                          <option key={op} value={op}>{op}</option>
-                        ))}
-                      </HTMLSelect>
-                      {cond.operator !== "IS NULL" && cond.operator !== "IS NOT NULL" && (
-                        <InputGroup
-                          value={cond.value}
-                          onChange={(e) => {
-                            setCaseConditions((prev) => prev.map((c, i) => i === idx ? { ...c, value: e.target.value } : c));
+                  {caseConditions.map((cond, idx) => {
+                    const caseValueIsNumber = isNumberType(colTypeMap.get(cond.column))
+                      && !CASE_TEXT_VALUE_OPERATORS.has(cond.operator);
+
+                    return (
+                      <div key={idx} className="case-condition-row">
+                        <span className="case-condition-label">IF</span>
+                        <SearchableColumnSelect
+                          value={cond.column}
+                          onChange={(val) => {
+                            const nextValueIsNumber = isNumberType(colTypeMap.get(val))
+                              && !CASE_TEXT_VALUE_OPERATORS.has(cond.operator);
+                            setCaseConditions((prev) => prev.map((c, i) => i === idx ? {
+                              ...c,
+                              column: val,
+                              value: nextValueIsNumber && !isAllowedNumberInputValue(c.value, { allowDecimal: true, allowNegative: true, allowPartial: false }) ? "" : c.value,
+                            } : c));
                           }}
-                          placeholder="value"
-                          className="case-condition-value"
+                          columns={schema}
+                          placeholder="Column..."
+                          className="case-condition-col"
+                        />
+                        <HTMLSelect
+                          value={cond.operator}
+                          onChange={(e) => {
+                            const nextOperator = e.target.value;
+                            const nextValueIsNumber = isNumberType(colTypeMap.get(cond.column))
+                              && !CASE_TEXT_VALUE_OPERATORS.has(nextOperator);
+                            setCaseConditions((prev) => prev.map((c, i) => i === idx ? {
+                              ...c,
+                              operator: nextOperator,
+                              value: nextValueIsNumber && !isAllowedNumberInputValue(c.value, { allowDecimal: true, allowNegative: true, allowPartial: false }) ? "" : c.value,
+                            } : c));
+                          }}
+                          className="case-condition-op"
+                        >
+                          {CASE_OPERATORS.map((op) => (
+                            <option key={op} value={op}>{op}</option>
+                          ))}
+                        </HTMLSelect>
+                        {cond.operator !== "IS NULL" && cond.operator !== "IS NOT NULL" && (
+                          <InputGroup
+                            value={cond.value}
+                            onChange={(e) => {
+                              const nextValue = e.target.value;
+                              if (!caseValueIsNumber || isAllowedNumberInputValue(nextValue, { allowDecimal: true, allowNegative: true })) {
+                                setCaseConditions((prev) => prev.map((c, i) => i === idx ? { ...c, value: nextValue } : c));
+                              } else {
+                                showNumberInputExpectation(e.currentTarget, { allowDecimal: true, allowNegative: true });
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (caseValueIsNumber) guardNumberInputKeyDown(e, { allowDecimal: true, allowNegative: true });
+                            }}
+                            onPaste={(e) => {
+                              if (caseValueIsNumber) guardNumberInputPaste(e, { allowDecimal: true, allowNegative: true });
+                            }}
+                            onDrop={(e) => {
+                              if (caseValueIsNumber) guardNumberInputDrop(e, { allowDecimal: true, allowNegative: true });
+                            }}
+                            onBlur={(e) => {
+                              if (caseValueIsNumber && !isAllowedNumberInputValue(cond.value, { allowDecimal: true, allowNegative: true, allowPartial: false })) {
+                                showNumberInputExpectation(e.currentTarget, { allowDecimal: true, allowNegative: true });
+                                setCaseConditions((prev) => prev.map((c, i) => i === idx ? { ...c, value: "" } : c));
+                              }
+                            }}
+                            inputMode={caseValueIsNumber ? "decimal" : undefined}
+                            placeholder="value"
+                            className="case-condition-value"
+                            small
+                          />
+                        )}
+                        <span className="case-condition-then">THEN</span>
+                        <InputGroup
+                          value={cond.result}
+                          onChange={(e) => {
+                            setCaseConditions((prev) => prev.map((c, i) => i === idx ? { ...c, result: e.target.value } : c));
+                          }}
+                          placeholder="result"
+                          className="case-condition-result"
                           small
                         />
-                      )}
-                      <span className="case-condition-then">THEN</span>
-                      <InputGroup
-                        value={cond.result}
-                        onChange={(e) => {
-                          setCaseConditions((prev) => prev.map((c, i) => i === idx ? { ...c, result: e.target.value } : c));
-                        }}
-                        placeholder="result"
-                        className="case-condition-result"
-                        small
-                      />
-                      {caseConditions.length > 1 && (
-                        <Button
-                          icon="cross"
-                          minimal
-                          small
-                          onClick={() => setCaseConditions((prev) => prev.filter((_, i) => i !== idx))}
-                        />
-                      )}
-                    </div>
-                  ))}
+                        {caseConditions.length > 1 && (
+                          <Button
+                            icon="cross"
+                            minimal
+                            small
+                            onClick={() => setCaseConditions((prev) => prev.filter((_, i) => i !== idx))}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
                   <Button
                     icon="plus"
                     text="Add Condition"
@@ -1011,15 +1083,43 @@ export function DataOperationsDialog({
               <FormGroup label="Start Position">
                 <InputGroup
                   value={param1}
-                  onChange={(e) => setParam1(e.target.value)}
+                  onChange={(e) => {
+                    if (isAllowedNumberInputValue(e.target.value)) {
+                      setParam1(e.target.value);
+                    } else {
+                      showNumberInputExpectation(e.currentTarget);
+                    }
+                  }}
+                  onKeyDown={(e) => guardNumberInputKeyDown(e)}
+                  onPaste={(e) => guardNumberInputPaste(e)}
+                  onDrop={(e) => guardNumberInputDrop(e)}
+                  onWheel={(e) => stepNumberInputOnWheel(e, setParam1)}
                   placeholder="1"
+                  type="number"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  min={1}
                 />
               </FormGroup>
               <FormGroup label="Length">
                 <InputGroup
                   value={param2}
-                  onChange={(e) => setParam2(e.target.value)}
+                  onChange={(e) => {
+                    if (isAllowedNumberInputValue(e.target.value)) {
+                      setParam2(e.target.value);
+                    } else {
+                      showNumberInputExpectation(e.currentTarget);
+                    }
+                  }}
+                  onKeyDown={(e) => guardNumberInputKeyDown(e)}
+                  onPaste={(e) => guardNumberInputPaste(e)}
+                  onDrop={(e) => guardNumberInputDrop(e)}
+                  onWheel={(e) => stepNumberInputOnWheel(e, setParam2)}
                   placeholder="10"
+                  type="number"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  min={0}
                 />
               </FormGroup>
             </>

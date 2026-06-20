@@ -31,6 +31,13 @@ import { RowOpsPanel } from "./RowOpsPanel";
 import { ViewsPanel } from "./ViewsPanel";
 import { SearchableColumnSelect } from "./SearchableColumnSelect";
 import { SearchInput } from "./SearchInput";
+import {
+  guardNumberInputDrop,
+  guardNumberInputKeyDown,
+  guardNumberInputPaste,
+  isAllowedNumberInputValue,
+  showNumberInputExpectation,
+} from "../utils/numberInputWheel";
 
 type ColumnKind = "text" | "number" | "date" | "boolean" | "unknown";
 type OperatorOption = { value: FilterOperator; label: string };
@@ -598,6 +605,7 @@ function FilterConditionRow({
   const operatorGroups = getOperatorGroups(draft.column, columns, draft.operator);
   const connectorClass = connectorLabel.toLowerCase();
   const isColumnComparison = isColumnComparisonOperator(draft.operator);
+  const isNumberValueInput = getColumnKind(draft.column, columns) === "number" && !isColumnComparison;
 
   return (
     <div className="filter-row">
@@ -663,16 +671,46 @@ function FilterConditionRow({
         <InputGroup
           className="filter-value-input"
           value={draft.value}
-          onChange={(e) =>
-            onUpdate(draft.id, { value: e.target.value })
-          }
+          onChange={(e) => {
+            if (!isNumberValueInput || isAllowedNumberInputValue(e.target.value, { allowDecimal: true, allowNegative: true })) {
+              onUpdate(draft.id, { value: e.target.value });
+            } else {
+              showNumberInputExpectation(e.currentTarget, { allowDecimal: true, allowNegative: true });
+            }
+          }}
           placeholder={
             draft.operator === "CONTAINS" || draft.operator === "DOES NOT CONTAIN"
               ? "text or regex"
               : "value"
           }
+          inputMode={isNumberValueInput ? "decimal" : undefined}
           onKeyDown={(e) => {
-            if (e.key === "Enter") onApply();
+            if (isNumberValueInput) {
+              guardNumberInputKeyDown(e, { allowDecimal: true, allowNegative: true });
+            }
+            if (
+              isNumberValueInput
+              && e.key === "Enter"
+              && !isAllowedNumberInputValue(draft.value, { allowDecimal: true, allowNegative: true, allowPartial: false })
+            ) {
+              e.preventDefault();
+            }
+            if (!e.defaultPrevented && e.key === "Enter") onApply();
+          }}
+          onPaste={(e) => {
+            if (isNumberValueInput) guardNumberInputPaste(e, { allowDecimal: true, allowNegative: true });
+          }}
+          onDrop={(e) => {
+            if (isNumberValueInput) guardNumberInputDrop(e, { allowDecimal: true, allowNegative: true });
+          }}
+          onBlur={(e) => {
+            if (
+              isNumberValueInput
+              && !isAllowedNumberInputValue(draft.value, { allowDecimal: true, allowNegative: true, allowPartial: false })
+            ) {
+              showNumberInputExpectation(e.currentTarget, { allowDecimal: true, allowNegative: true });
+              onUpdate(draft.id, { value: "" });
+            }
           }}
         />
       )}

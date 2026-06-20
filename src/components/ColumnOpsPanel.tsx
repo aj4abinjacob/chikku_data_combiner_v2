@@ -13,7 +13,14 @@ import {
 } from "@blueprintjs/core";
 import { ColumnInfo, ColOpType, ColOpStep, UndoStrategy, FilterGroup, ColOpTargetMode } from "../types";
 import { buildColOpExpr } from "../utils/colOpsSQL";
-import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
+import {
+  guardNumberInputDrop,
+  guardNumberInputKeyDown,
+  guardNumberInputPaste,
+  isAllowedNumberInputValue,
+  showNumberInputExpectation,
+  stepNumberInputOnWheel,
+} from "../utils/numberInputWheel";
 import { buildFilterGroupClause } from "../utils/sqlBuilder";
 import { RegexPatternPicker } from "./RegexPatternPicker";
 import { RegexPatternManagerDialog } from "./RegexPatternManagerDialog";
@@ -362,11 +369,20 @@ export function ColumnOpsPanel({
                 <InputGroup
                   value={params.groupIndex ?? "1"}
                   onChange={(e) => {
+                    if (!isAllowedNumberInputValue(e.target.value)) {
+                      showNumberInputExpectation(e.currentTarget);
+                      return;
+                    }
                     const val = parseInt(e.target.value, 10);
                     updateParam("groupIndex", String(isNaN(val) || val < 0 ? 0 : val));
                   }}
+                  onKeyDown={(e) => guardNumberInputKeyDown(e)}
+                  onPaste={(e) => guardNumberInputPaste(e)}
+                  onDrop={(e) => guardNumberInputDrop(e)}
                   onWheel={(e) => stepNumberInputOnWheel(e, (value) => updateParam("groupIndex", value))}
                   type="number"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   min={0}
                   fill
                 />
