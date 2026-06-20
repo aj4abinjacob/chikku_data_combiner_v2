@@ -42,17 +42,18 @@ import {
 type ColumnKind = "text" | "number" | "date" | "boolean" | "unknown";
 type OperatorOption = { value: FilterOperator; label: string };
 type OperatorGroupOption = { label: string; options: OperatorOption[] };
+type OperatorSectionConfig = { label: string; operators: FilterOperator[] };
 
 const OPERATOR_LABELS: Record<FilterOperator, string> = {
   CONTAINS: "contains",
   "DOES NOT CONTAIN": "does not contain",
   "=": "equals",
-  "!=": "not equal",
-  "EQUALS IGNORE CASE": "equals, ignore case",
-  "DOES NOT EQUAL IGNORE CASE": "not equal, ignore case",
-  "EQUALS COLUMN": "equals column",
-  "DOES NOT EQUAL COLUMN": "not equal column",
-  IN: "in list",
+  "!=": "does not equal",
+  "EQUALS IGNORE CASE": "equals, ignoring case",
+  "DOES NOT EQUAL IGNORE CASE": "does not equal, ignoring case",
+  "EQUALS COLUMN": "equals another column",
+  "DOES NOT EQUAL COLUMN": "does not equal another column",
+  IN: "is in list",
   "NOT IN": "is not in list",
   "IS NULL": "is empty",
   "IS NOT NULL": "is not empty",
@@ -62,65 +63,46 @@ const OPERATOR_LABELS: Record<FilterOperator, string> = {
   "<": "less than",
   "STARTS WITH": "starts with",
   "ENDS WITH": "ends with",
-  LIKE: "LIKE",
-  "NOT LIKE": "NOT LIKE",
-  ">=": ">=",
-  "<=": "<=",
-  "NOT STARTS WITH": "not starts with",
-  "NOT ENDS WITH": "not ends with",
+  LIKE: "matches SQL pattern",
+  "NOT LIKE": "does not match SQL pattern",
+  ">=": "greater than or equal to",
+  "<=": "less than or equal to",
+  "NOT STARTS WITH": "does not start with",
+  "NOT ENDS WITH": "does not end with",
 };
 
-const SYMBOL_OPERATOR_LABELS: Partial<Record<FilterOperator, string>> = {
-  "=": "=",
-  "!=": "!=",
-  ">": ">",
-  "<": "<",
-  ">=": ">=",
-  "<=": "<=",
-};
-
-const COMMON_OPERATORS_BY_KIND: Record<ColumnKind, FilterOperator[]> = {
+const OPERATOR_SECTIONS_BY_KIND: Record<ColumnKind, OperatorSectionConfig[]> = {
   text: [
-    "CONTAINS",
-    "DOES NOT CONTAIN",
-    "=",
-    "!=",
-    "EQUALS IGNORE CASE",
-    "DOES NOT EQUAL IGNORE CASE",
-    "EQUALS COLUMN",
-    "DOES NOT EQUAL COLUMN",
-    "IN",
-    "NOT IN",
-    "STARTS WITH",
-    "ENDS WITH",
-    "IS NULL",
-    "IS NOT NULL",
+    { label: "Text contains", operators: ["CONTAINS", "DOES NOT CONTAIN"] },
+    { label: "Text starts or ends", operators: ["STARTS WITH", "NOT STARTS WITH", "ENDS WITH", "NOT ENDS WITH"] },
+    { label: "Equals", operators: ["=", "!=", "EQUALS IGNORE CASE", "DOES NOT EQUAL IGNORE CASE"] },
+    { label: "Lists and columns", operators: ["IN", "NOT IN", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN"] },
+    { label: "Empty values", operators: ["IS NULL", "IS NOT NULL"] },
   ],
-  number: ["=", "!=", ">", "<", ">=", "<="],
-  date: ["=", "!=", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", ">", "<", "IN", "NOT IN", "IS NULL", "IS NOT NULL"],
-  boolean: ["IS TRUE", "IS FALSE", "=", "!=", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", "IS NULL", "IS NOT NULL"],
-  unknown: ["CONTAINS", "DOES NOT CONTAIN", "=", "!=", "EQUALS IGNORE CASE", "DOES NOT EQUAL IGNORE CASE", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", "IN", "NOT IN", "IS NULL", "IS NOT NULL", ">", "<"],
-};
-
-const ADVANCED_OPERATORS_BY_KIND: Record<ColumnKind, FilterOperator[]> = {
-  text: [
-    "LIKE",
-    "NOT LIKE",
-    "NOT STARTS WITH",
-    "NOT ENDS WITH",
+  number: [
+    { label: "Equals", operators: ["=", "!="] },
+    { label: "Compare numbers", operators: [">", ">=", "<", "<="] },
+    { label: "Lists and columns", operators: ["IN", "NOT IN", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN"] },
+    { label: "Empty values", operators: ["IS NULL", "IS NOT NULL"] },
   ],
-  number: ["EQUALS COLUMN", "DOES NOT EQUAL COLUMN", "IN", "NOT IN", "IS NULL", "IS NOT NULL"],
-  date: [">=", "<="],
-  boolean: [],
+  date: [
+    { label: "Equals", operators: ["=", "!="] },
+    { label: "Compare dates", operators: [">", ">=", "<", "<="] },
+    { label: "Lists and columns", operators: ["IN", "NOT IN", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN"] },
+    { label: "Empty values", operators: ["IS NULL", "IS NOT NULL"] },
+  ],
+  boolean: [
+    { label: "True or false", operators: ["IS TRUE", "IS FALSE"] },
+    { label: "Compare columns", operators: ["EQUALS COLUMN", "DOES NOT EQUAL COLUMN"] },
+    { label: "Empty values", operators: ["IS NULL", "IS NOT NULL"] },
+  ],
   unknown: [
-    "LIKE",
-    "NOT LIKE",
-    ">=",
-    "<=",
-    "STARTS WITH",
-    "ENDS WITH",
-    "NOT STARTS WITH",
-    "NOT ENDS WITH",
+    { label: "Text contains", operators: ["CONTAINS", "DOES NOT CONTAIN"] },
+    { label: "Text starts or ends", operators: ["STARTS WITH", "NOT STARTS WITH", "ENDS WITH", "NOT ENDS WITH"] },
+    { label: "Equals", operators: ["=", "!=", "EQUALS IGNORE CASE", "DOES NOT EQUAL IGNORE CASE"] },
+    { label: "Compare values", operators: [">", ">=", "<", "<="] },
+    { label: "Lists and columns", operators: ["IN", "NOT IN", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN"] },
+    { label: "Empty values", operators: ["IS NULL", "IS NOT NULL"] },
   ],
 };
 
@@ -170,20 +152,25 @@ function getColumnKind(columnName: string, columns: ColumnInfo[]): ColumnKind {
   return "unknown";
 }
 
-function getBaseOperatorGroups(columnName: string, columns: ColumnInfo[]): {
-  common: FilterOperator[];
-  advanced: FilterOperator[];
-} {
+function getBaseOperatorSections(columnName: string, columns: ColumnInfo[]): OperatorSectionConfig[] {
   const kind = getColumnKind(columnName, columns);
-  const common = COMMON_OPERATORS_BY_KIND[kind];
-  const commonSet = new Set<FilterOperator>(common);
-  const advanced = ADVANCED_OPERATORS_BY_KIND[kind].filter((value) => !commonSet.has(value));
-  return { common, advanced };
+  const seen = new Set<FilterOperator>();
+
+  return OPERATOR_SECTIONS_BY_KIND[kind]
+    .map((section) => ({
+      ...section,
+      operators: section.operators.filter((operator) => {
+        if (seen.has(operator)) return false;
+        seen.add(operator);
+        return true;
+      }),
+    }))
+    .filter((section) => section.operators.length > 0);
 }
 
 function getDefaultOperator(columnName: string, columns: ColumnInfo[]): FilterOperator {
-  const groups = getBaseOperatorGroups(columnName, columns);
-  return groups.common[0] ?? groups.advanced[0] ?? "=";
+  const sections = getBaseOperatorSections(columnName, columns);
+  return sections[0]?.operators[0] ?? "=";
 }
 
 function isOperatorAvailableForColumn(
@@ -191,8 +178,8 @@ function isOperatorAvailableForColumn(
   columns: ColumnInfo[],
   operator: FilterOperator
 ): boolean {
-  const groups = getBaseOperatorGroups(columnName, columns);
-  return groups.common.includes(operator) || groups.advanced.includes(operator);
+  return getBaseOperatorSections(columnName, columns)
+    .some((section) => section.operators.includes(operator));
 }
 
 function getOperatorGroups(
@@ -200,32 +187,20 @@ function getOperatorGroups(
   columns: ColumnInfo[],
   selectedOperator: FilterOperator
 ): OperatorGroupOption[] {
-  const kind = getColumnKind(columnName, columns);
-  const { common: commonValues, advanced } = getBaseOperatorGroups(columnName, columns);
-  const commonSet = new Set<FilterOperator>(commonValues);
-  const advancedValues = [...advanced];
-  const labelOverrides = kind === "number" ? SYMBOL_OPERATOR_LABELS : {};
-
-  if (!commonSet.has(selectedOperator) && !advancedValues.includes(selectedOperator)) {
-    advancedValues.unshift(selectedOperator);
-  }
-
   const getOption = (value: FilterOperator): OperatorOption => ({
     value,
-    label: labelOverrides[value] ?? OPERATOR_LABELS[value],
+    label: OPERATOR_LABELS[value],
   });
 
-  const groups: OperatorGroupOption[] = [
-    {
-      label: kind === "number" ? "Comparisons" : "Common",
-      options: commonValues.map(getOption),
-    },
-  ];
+  const groups = getBaseOperatorSections(columnName, columns).map((section) => ({
+    label: section.label,
+    options: section.operators.map(getOption),
+  }));
 
-  if (advancedValues.length > 0) {
+  if (!groups.some((group) => group.options.some((option) => option.value === selectedOperator))) {
     groups.push({
-      label: kind === "number" ? "Other filters" : "Advanced",
-      options: advancedValues.map(getOption),
+      label: "Current filter",
+      options: [getOption(selectedOperator)],
     });
   }
 
