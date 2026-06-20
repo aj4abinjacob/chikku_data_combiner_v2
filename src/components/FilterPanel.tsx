@@ -41,6 +41,7 @@ import {
 
 type ColumnKind = "text" | "number" | "date" | "boolean" | "unknown";
 type OperatorOption = { value: FilterOperator; label: string };
+type OperatorGroupOption = { label: string; options: OperatorOption[] };
 
 const OPERATOR_LABELS: Record<FilterOperator, string> = {
   CONTAINS: "contains",
@@ -69,12 +70,14 @@ const OPERATOR_LABELS: Record<FilterOperator, string> = {
   "NOT ENDS WITH": "not ends with",
 };
 
-const OPERATOR_OPTIONS: Record<FilterOperator, OperatorOption> = Object.fromEntries(
-  (Object.keys(OPERATOR_LABELS) as FilterOperator[]).map((value) => [
-    value,
-    { value, label: OPERATOR_LABELS[value] },
-  ])
-) as Record<FilterOperator, OperatorOption>;
+const SYMBOL_OPERATOR_LABELS: Partial<Record<FilterOperator, string>> = {
+  "=": "=",
+  "!=": "!=",
+  ">": ">",
+  "<": "<",
+  ">=": ">=",
+  "<=": "<=",
+};
 
 const COMMON_OPERATORS_BY_KIND: Record<ColumnKind, FilterOperator[]> = {
   text: [
@@ -93,7 +96,7 @@ const COMMON_OPERATORS_BY_KIND: Record<ColumnKind, FilterOperator[]> = {
     "IS NULL",
     "IS NOT NULL",
   ],
-  number: ["=", "!=", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", ">", "<", "IN", "NOT IN", "IS NULL", "IS NOT NULL"],
+  number: ["=", "!=", ">", "<", ">=", "<="],
   date: ["=", "!=", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", ">", "<", "IN", "NOT IN", "IS NULL", "IS NOT NULL"],
   boolean: ["IS TRUE", "IS FALSE", "=", "!=", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", "IS NULL", "IS NOT NULL"],
   unknown: ["CONTAINS", "DOES NOT CONTAIN", "=", "!=", "EQUALS IGNORE CASE", "DOES NOT EQUAL IGNORE CASE", "EQUALS COLUMN", "DOES NOT EQUAL COLUMN", "IN", "NOT IN", "IS NULL", "IS NOT NULL", ">", "<"],
@@ -106,7 +109,7 @@ const ADVANCED_OPERATORS_BY_KIND: Record<ColumnKind, FilterOperator[]> = {
     "NOT STARTS WITH",
     "NOT ENDS WITH",
   ],
-  number: [">=", "<="],
+  number: ["EQUALS COLUMN", "DOES NOT EQUAL COLUMN", "IN", "NOT IN", "IS NULL", "IS NOT NULL"],
   date: [">=", "<="],
   boolean: [],
   unknown: [
@@ -196,19 +199,37 @@ function getOperatorGroups(
   columnName: string,
   columns: ColumnInfo[],
   selectedOperator: FilterOperator
-): { common: OperatorOption[]; advanced: OperatorOption[] } {
+): OperatorGroupOption[] {
+  const kind = getColumnKind(columnName, columns);
   const { common: commonValues, advanced } = getBaseOperatorGroups(columnName, columns);
   const commonSet = new Set<FilterOperator>(commonValues);
   const advancedValues = [...advanced];
+  const labelOverrides = kind === "number" ? SYMBOL_OPERATOR_LABELS : {};
 
   if (!commonSet.has(selectedOperator) && !advancedValues.includes(selectedOperator)) {
     advancedValues.unshift(selectedOperator);
   }
 
-  return {
-    common: commonValues.map((value) => OPERATOR_OPTIONS[value]),
-    advanced: advancedValues.map((value) => OPERATOR_OPTIONS[value]),
-  };
+  const getOption = (value: FilterOperator): OperatorOption => ({
+    value,
+    label: labelOverrides[value] ?? OPERATOR_LABELS[value],
+  });
+
+  const groups: OperatorGroupOption[] = [
+    {
+      label: kind === "number" ? "Comparisons" : "Common",
+      options: commonValues.map(getOption),
+    },
+  ];
+
+  if (advancedValues.length > 0) {
+    groups.push({
+      label: kind === "number" ? "Other filters" : "Advanced",
+      options: advancedValues.map(getOption),
+    });
+  }
+
+  return groups;
 }
 
 function pluralize(count: number, singular: string): string {
@@ -518,7 +539,7 @@ function InValuePicker({
 
 interface OperatorSelectProps {
   value: FilterOperator;
-  groups: { common: OperatorOption[]; advanced: OperatorOption[] };
+  groups: OperatorGroupOption[];
   onChange: (operator: FilterOperator) => void;
 }
 
@@ -528,7 +549,9 @@ function OperatorSelect({
   onChange,
 }: OperatorSelectProps): React.ReactElement {
   const [open, setOpen] = useState(false);
-  const selectedLabel = OPERATOR_LABELS[value];
+  const selectedLabel = groups
+    .flatMap((group) => group.options)
+    .find((op) => op.value === value)?.label ?? OPERATOR_LABELS[value];
 
   const renderGroup = (label: string, options: OperatorOption[]) => (
     <div className="filter-op-menu-group" key={label}>
@@ -556,8 +579,7 @@ function OperatorSelect({
     <Popover2
       content={
         <div className="filter-op-menu" role="menu" aria-label="Filter operator">
-          {renderGroup("Common", groups.common)}
-          {groups.advanced.length > 0 && renderGroup("Advanced", groups.advanced)}
+          {groups.map((group) => renderGroup(group.label, group.options))}
         </div>
       }
       isOpen={open}
