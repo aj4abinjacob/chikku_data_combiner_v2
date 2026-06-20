@@ -449,7 +449,7 @@ export function DateConversionDialog({
                 allowEmpty
                 emptyLabel="— No grouping —"
               />
-              <div style={{ fontSize: 11, color: "#8a9ba8", marginTop: 4 }}>
+              <div className="date-conv-group-hint">
                 Use grouping when the same date format (e.g. 1/12/20) means different things
                 across data sources — the format will be detected per group.
               </div>
@@ -462,9 +462,9 @@ export function DateConversionDialog({
               <div className="aggregate-section-header">Detected Formats</div>
 
               {detecting && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 0" }}>
+                <div className="date-conv-detecting">
                   <Spinner size={16} />
-                  <span style={{ fontSize: 12, color: "#5c7080" }}>Analyzing date values...</span>
+                  <span>Analyzing date values...</span>
                 </div>
               )}
 

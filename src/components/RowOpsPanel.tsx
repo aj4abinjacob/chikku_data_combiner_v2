@@ -562,16 +562,16 @@ export function RowOpsPanel({
               >
                 <defs>
                   <linearGradient id="rowops-history-glow" x1="26" y1="18" x2="144" y2="92" gradientUnits="userSpaceOnUse">
-                    <stop stopColor="#fff7ed" />
-                    <stop offset="0.58" stopColor="#eaf5ff" />
-                    <stop offset="1" stopColor="#f4f7fb" />
+                    <stop className="rowops-history-glow-start" />
+                    <stop className="rowops-history-glow-mid" offset="0.58" />
+                    <stop className="rowops-history-glow-end" offset="1" />
                   </linearGradient>
                   <linearGradient id="rowops-history-line" x1="40" y1="30" x2="130" y2="76" gradientUnits="userSpaceOnUse">
-                    <stop stopColor="#d9822b" />
-                    <stop offset="1" stopColor="#137cbd" />
+                    <stop className="rowops-history-line-start" />
+                    <stop className="rowops-history-line-end" offset="1" />
                   </linearGradient>
                   <filter id="rowops-history-shadow" x="18" y="8" width="132" height="96" filterUnits="userSpaceOnUse">
-                    <feDropShadow dx="0" dy="5" stdDeviation="6" floodColor="#30404d" floodOpacity="0.14" />
+                    <feDropShadow className="rowops-history-shadow-color" dx="0" dy="5" stdDeviation="6" />
                   </filter>
                 </defs>
                 <path
@@ -579,10 +579,10 @@ export function RowOpsPanel({
                   fill="url(#rowops-history-glow)"
                 />
                 <g filter="url(#rowops-history-shadow)">
-                  <rect x="45" y="26" width="78" height="60" rx="8" fill="#fff" />
-                  <path d="M58 44h31M58 57h52M58 70h34" stroke="#c8d3dc" strokeWidth="4" strokeLinecap="round" />
-                  <path d="M107 36l9 9-17 17-9-9 17-17Z" fill="#f7d7b0" />
-                  <path d="M91 53l8 8" stroke="#d9822b" strokeWidth="4" strokeLinecap="round" />
+                  <rect className="rowops-history-card" x="45" y="26" width="78" height="60" rx="8" />
+                  <path className="rowops-history-card-lines" d="M58 44h31M58 57h52M58 70h34" strokeWidth="4" strokeLinecap="round" />
+                  <path className="rowops-history-pencil" d="M107 36l9 9-17 17-9-9 17-17Z" />
+                  <path className="rowops-history-pencil-line" d="M91 53l8 8" strokeWidth="4" strokeLinecap="round" />
                 </g>
                 <path
                   d="M34 82c19-10 29-16 47-12 20 5 29 18 55 2"
@@ -591,8 +591,8 @@ export function RowOpsPanel({
                   strokeWidth="4"
                   strokeLinecap="round"
                 />
-                <circle cx="34" cy="82" r="4" fill="#d9822b" />
-                <circle cx="136" cy="72" r="4" fill="#137cbd" />
+                <circle className="rowops-history-dot-warn" cx="34" cy="82" r="4" />
+                <circle className="rowops-history-dot-blue" cx="136" cy="72" r="4" />
               </svg>
               <div className="rowops-history-empty-copy">
                 <span className="rowops-history-empty-title">History is clear</span>

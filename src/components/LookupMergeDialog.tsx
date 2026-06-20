@@ -487,7 +487,7 @@ export function LookupMergeDialog({
                 <span>Columns to Merge</span>
               </div>
               {mergeableColumns.length === 0 && rightSchema.length > 0 ? (
-                <div style={{ fontSize: 12, color: "#5c7080", padding: 8 }}>
+                <div className="merge-empty-columns">
                   All right-table columns are used as keys. Add more columns to the right table or remove key pairs.
                 </div>
               ) : (

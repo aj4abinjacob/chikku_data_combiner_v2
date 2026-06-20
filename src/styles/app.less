@@ -755,6 +755,11 @@ html, body, #root {
   font-style: italic;
 }
 
+.dg-pivot-empty-hint {
+  font-size: 12px;
+  color: #5c7080;
+}
+
 // ── Cell tooltip ──
 .dg-tooltip {
   position: fixed;
@@ -2773,6 +2778,12 @@ html, body, #root {
   }
 }
 
+.preview-table-meta {
+  font-size: 12px;
+  color: #5c7080;
+  margin-bottom: 8px;
+}
+
 .aggregate-results-wrapper {
   border: 1px solid #d8e1e8;
   border-radius: var(--surface-radius);
@@ -2946,6 +2957,12 @@ html, body, #root {
   letter-spacing: 0.5px;
 }
 
+.merge-empty-columns {
+  font-size: 12px;
+  color: #5c7080;
+  padding: 8px;
+}
+
 // ── Date Conversion dialog ──
 
 .date-conv-detection-table {
@@ -2987,6 +3004,21 @@ html, body, #root {
       background: rgba(19, 124, 189, 0.04);
     }
   }
+}
+
+.date-conv-group-hint {
+  font-size: 11px;
+  color: #8a9ba8;
+  margin-top: 4px;
+}
+
+.date-conv-detecting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  font-size: 12px;
+  color: #5c7080;
 }
 
 .date-conv-group-cell {
@@ -4033,6 +4065,55 @@ html, body, #root {
   max-width: 42%;
   height: auto;
   flex-shrink: 0;
+}
+
+.rowops-history-glow-start {
+  stop-color: #fff7ed;
+}
+
+.rowops-history-glow-mid {
+  stop-color: #eaf5ff;
+}
+
+.rowops-history-glow-end {
+  stop-color: #f4f7fb;
+}
+
+.rowops-history-line-start {
+  stop-color: #d9822b;
+}
+
+.rowops-history-line-end {
+  stop-color: #137cbd;
+}
+
+.rowops-history-shadow-color {
+  flood-color: #30404d;
+  flood-opacity: 0.14;
+}
+
+.rowops-history-card {
+  fill: #fff;
+}
+
+.rowops-history-card-lines {
+  stroke: #c8d3dc;
+}
+
+.rowops-history-pencil {
+  fill: #f7d7b0;
+}
+
+.rowops-history-pencil-line {
+  stroke: #d9822b;
+}
+
+.rowops-history-dot-warn {
+  fill: #d9822b;
+}
+
+.rowops-history-dot-blue {
+  fill: #137cbd;
 }
 
 .rowops-history-empty-copy {
@@ -5609,6 +5690,10 @@ html.dark-theme #root {
     color: @dark-text-4;
   }
 
+  .dg-pivot-empty-hint {
+    color: @dark-text-3;
+  }
+
   // ── Status bar ──
   .status-bar {
     background: @dark-bg-2;
@@ -5964,6 +6049,15 @@ html.dark-theme #root {
     border-bottom-color: @dark-border-2;
   }
 
+  .in-value-dropdown-actions .bp4-button {
+    color: @dark-accent;
+
+    &.bp4-active {
+      background: @dark-accent-bg;
+      color: @dark-accent;
+    }
+  }
+
   .in-value-dropdown-separator {
     background: @dark-border-1;
   }
@@ -6215,6 +6309,55 @@ html.dark-theme #root {
     background: linear-gradient(180deg, fade(@dark-bg-3, 82%), fade(@dark-bg-2, 72%));
   }
 
+  .rowops-history-glow-start {
+    stop-color: @dark-bg-4;
+  }
+
+  .rowops-history-glow-mid {
+    stop-color: @dark-bg-3;
+  }
+
+  .rowops-history-glow-end {
+    stop-color: @dark-bg-2;
+  }
+
+  .rowops-history-line-start {
+    stop-color: @dark-warning;
+  }
+
+  .rowops-history-line-end {
+    stop-color: @dark-accent;
+  }
+
+  .rowops-history-shadow-color {
+    flood-color: #000;
+    flood-opacity: 0.28;
+  }
+
+  .rowops-history-card {
+    fill: @dark-bg-3;
+  }
+
+  .rowops-history-card-lines {
+    stroke: @dark-border-1;
+  }
+
+  .rowops-history-pencil {
+    fill: fade(@dark-warning, 30%);
+  }
+
+  .rowops-history-pencil-line {
+    stroke: @dark-warning;
+  }
+
+  .rowops-history-dot-warn {
+    fill: @dark-warning;
+  }
+
+  .rowops-history-dot-blue {
+    fill: @dark-accent;
+  }
+
   .rowops-history-empty-title {
     color: @dark-text-1;
   }
@@ -6397,9 +6540,36 @@ html.dark-theme #root {
       border-color: @dark-border-2;
     }
 
+    &.selected {
+      background: @dark-accent-bg-subtle;
+      border-color: @dark-accent-border;
+    }
+
     .aggregate-col-type {
       color: @dark-text-3;
     }
+
+    .aggregate-col-hint {
+      color: @dark-warning;
+    }
+
+    .column-check-list-muted-hint {
+      color: @dark-text-3;
+    }
+
+    .column-check-list-order-badge.visible {
+      background: @dark-accent;
+      color: @dark-bg-1;
+    }
+  }
+
+  .column-check-list-empty,
+  .column-check-list-hint,
+  .preview-table-meta,
+  .merge-empty-columns,
+  .date-conv-group-hint,
+  .date-conv-detecting {
+    color: @dark-text-3;
   }
 
   .aggregate-results-wrapper {

@@ -48,7 +48,7 @@ export function PreviewTableDialog({
       canOutsideClickClose
     >
       <DialogBody>
-        <div style={{ fontSize: 12, color: "#5c7080", marginBottom: 8 }}>
+        <div className="preview-table-meta">
           {rows.length} row{rows.length !== 1 ? "s" : ""}
           {columns.length > 0 &&
             `, ${columns.length} column${columns.length !== 1 ? "s" : ""}`}

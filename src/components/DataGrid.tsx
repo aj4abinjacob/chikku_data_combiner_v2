@@ -599,7 +599,7 @@ export function DataGrid({
     return (
       <div className="welcome">
         <p>Click a column header to group by that column</p>
-        <p style={{ fontSize: 12, color: "#5c7080" }}>Shift+click to add more group levels</p>
+        <p className="dg-pivot-empty-hint">Shift+click to add more group levels</p>
       </div>
     );
   }
