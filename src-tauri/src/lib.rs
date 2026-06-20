@@ -71,6 +71,8 @@ pub fn run() {
             import_user_patterns,
             write_json_file,
             read_json_file,
+            read_text_file,
+            write_text_file,
             file_exists,
             open_new_window,
             close_db,

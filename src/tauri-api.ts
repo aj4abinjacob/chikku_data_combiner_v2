@@ -150,6 +150,12 @@ function installTauriApi() {
       }
     },
 
+    readTextFile: (filePath: string) =>
+      invoke<string>("read_text_file", { filePath }),
+
+    writeTextFile: (filePath: string, contents: string) =>
+      invoke<boolean>("write_text_file", { filePath, contents }),
+
     fileExists: (filePath: string) => invoke("file_exists", { filePath }),
 
     onOpenFiles: (callback: (filePaths: string[]) => void) => {

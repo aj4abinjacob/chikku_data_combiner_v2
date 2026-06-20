@@ -12,6 +12,7 @@ interface StatusBarProps {
   activeFilterCount: number;
   sidebarVisible: boolean;
   updateNotice?: React.ReactNode;
+  filterEnabled?: boolean;
 }
 
 export function StatusBar({
@@ -25,6 +26,7 @@ export function StatusBar({
   activeFilterCount,
   sidebarVisible,
   updateNotice,
+  filterEnabled = true,
 }: StatusBarProps): React.ReactElement {
   const isFiltered = unfilteredRows !== null && totalRows !== unfilteredRows;
   const rowsDisplay = isFiltered
@@ -46,7 +48,7 @@ export function StatusBar({
           : "No table selected"}
       </span>
       {updateNotice && <div className="status-bar-update">{updateNotice}</div>}
-      {activeTable && (
+      {activeTable && filterEnabled && (
         <div
           className={`filter-toggle${filterPanelOpen ? " active" : ""}`}
           style={{ left: sidebarVisible ? "var(--sidebar-width)" : "36px" }}

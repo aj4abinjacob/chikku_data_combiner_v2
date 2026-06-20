@@ -362,6 +362,17 @@ pub fn read_json_file(file_path: String) -> AppResult<Value> {
 }
 
 #[tauri::command]
+pub fn read_text_file(file_path: String) -> AppResult<String> {
+    Ok(std::fs::read_to_string(file_path)?)
+}
+
+#[tauri::command]
+pub fn write_text_file(file_path: String, contents: String) -> AppResult<bool> {
+    std::fs::write(file_path, contents)?;
+    Ok(true)
+}
+
+#[tauri::command]
 pub fn file_exists(file_path: String) -> AppResult<bool> {
     Ok(Path::new(&file_path).exists())
 }

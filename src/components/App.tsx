@@ -12,6 +12,7 @@ import { ImportRetryDialog } from "./ImportRetryDialog";
 import { ExportDialog } from "./ExportDialog";
 import { HistoryDialog } from "./HistoryDialog";
 import { UpdateNotice } from "./UpdateNotice";
+import { JsonWorkspace } from "./JsonWorkspace";
 import { buildCombineQuery } from "../utils/sqlBuilder";
 import { buildColOpUpdateSQL, buildStepDescription } from "../utils/colOpsSQL";
 import { buildRowOpSQL, buildRowOpStepDescription } from "../utils/rowOpsSQL";
@@ -227,11 +228,21 @@ export function App(): React.ReactElement {
     return new Set(schema.filter(c => NUMERIC_RE.test(c.column_type)).map(c => c.column_name));
   }, [schema]);
 
+  const activeLoadedTable = useMemo(
+    () => activeTable ? tables.find((t) => t.tableName === activeTable) ?? null : null,
+    [activeTable, tables]
+  );
+
+  const activeFileExtension = activeLoadedTable ? getFileExtension(activeLoadedTable.filePath) : "";
+  const jsonWorkspaceActive = !!activeLoadedTable
+    && !activeLoadedTable.filePath.startsWith("(")
+    && (activeFileExtension === "json" || activeFileExtension === "jsonl" || activeFileExtension === "ndjson");
+
   // Chunk cache for lazy-loaded virtual scrolling (flat mode)
   const { totalRows, getRow, ensureRange } = useChunkCache({
     tableName: activeTable,
     viewState,
-    enabled: viewState.visibleColumns.length > 0 && !pivotActive,
+    enabled: viewState.visibleColumns.length > 0 && !pivotActive && !jsonWorkspaceActive,
     dataVersion,
   });
 
@@ -249,7 +260,7 @@ export function App(): React.ReactElement {
     tableName: activeTable,
     viewState,
     schema,
-    enabled: viewState.visibleColumns.length > 0 && pivotActive,
+    enabled: viewState.visibleColumns.length > 0 && pivotActive && !jsonWorkspaceActive,
     dataVersion,
   });
 
@@ -550,6 +561,32 @@ export function App(): React.ReactElement {
     await loadFiles(filePaths, false);
   }, [loadFiles]);
 
+  const handleReloadActiveJsonTable = useCallback(async () => {
+    const currentTableName = activeTableRef.current;
+    if (!currentTableName) return;
+    const currentTable = tablesRef.current.find((t) => t.tableName === currentTableName);
+    if (!currentTable) return;
+
+    const result = await loadSingleFile(
+      currentTable.filePath,
+      currentTable.tableName,
+      currentTable.importOptions
+    );
+    if (!result || "error" in result) return;
+
+    setTables((prev) =>
+      prev.map((table) =>
+        table.tableName === currentTable.tableName
+          ? { ...table, schema: result.schema, rowCount: result.rowCount }
+          : table
+      )
+    );
+    setSchema(result.schema);
+    setSchemaVersion((v) => v + 1);
+    setDataVersion((v) => v + 1);
+    setResetKey((k) => k + 1);
+  }, [loadSingleFile]);
+
   // Register IPC listeners once on mount
   useEffect(() => {
     window.api.onOpenFiles((filePaths) => loadFiles(filePaths, false));
@@ -595,6 +632,10 @@ export function App(): React.ReactElement {
       }
     };
   }, [filterPanelOpen, filterPanelMounted]);
+
+  useEffect(() => {
+    if (jsonWorkspaceActive) setFilterPanelOpen(false);
+  }, [jsonWorkspaceActive]);
 
   // When active table changes, refresh schema and reset columns
   useEffect(() => {
@@ -1817,70 +1858,80 @@ export function App(): React.ReactElement {
         <div className="data-area">
           {hasData ? (
             <>
-              {pivotActive && viewState.pivotConfig && (
-                <PivotToolbar
-                  pivotConfig={viewState.pivotConfig}
-                  onExpandAll={pivotExpandAll}
-                  onCollapseAll={pivotCollapseAll}
-                  onToggleGrandTotal={handleToggleGrandTotal}
-                  onDefaultAggChange={handleDefaultAggChange}
-                  onExitPivot={handleClearPivotGroups}
+              {jsonWorkspaceActive && activeLoadedTable ? (
+                <JsonWorkspace
+                  table={activeLoadedTable}
+                  onOpenFiles={handleChooseFiles}
+                  onReloadTable={handleReloadActiveJsonTable}
                 />
-              )}
-              <DataGrid
-                totalRows={pivotActive ? pivotFlatRows.length : totalRows}
-                getRow={pivotActive ? () => null : getRow}
-                ensureRange={pivotActive ? pivotEnsureRange : ensureRange}
-                columns={viewState.visibleColumns}
-                sortColumns={viewState.sortColumns}
-                onSort={handleSort}
-                onReorderColumns={pivotActive ? undefined : reorderVisibleColumns}
-                resetKey={resetKey}
-                pivotMode={pivotActive}
-                pivotFlatRows={pivotActive ? pivotFlatRows : undefined}
-                pivotGroupColumns={pivotActive ? viewState.pivotConfig?.groupColumns : undefined}
-                onToggleExpand={pivotActive ? pivotToggleExpand : undefined}
-                grandTotals={pivotActive ? pivotGrandTotals : undefined}
-                showGrandTotal={pivotActive ? viewState.pivotConfig?.showGrandTotal : undefined}
-                numericColumns={pivotActive ? numericColumns : undefined}
-                groupSortMode={pivotActive ? viewState.pivotConfig?.groupSortMode : undefined}
-                groupSortDirection={pivotActive ? viewState.pivotConfig?.groupSortDirection : undefined}
-                onGroupSort={pivotActive ? handleGroupSort : undefined}
-              />
-              {filterPanelMounted && (
-                <FilterPanel
-                  columns={schema}
-                  activeFilters={viewState.filters}
-                  activeTable={activeTable}
-                  onApplyFilters={handleFiltersChange}
-                  colOpsSteps={colOpsSteps}
-                  undoStrategy={undoStrategy}
-                  onColOpApply={handleColOpApply}
-                  onColOpUndo={handleColOpUndo}
-                  onColOpRevertAll={handleColOpRevertAll}
-                  onColOpClearAll={handleColOpClearAll}
-                  rowOpsSteps={rowOpsSteps}
-                  rowOpsUndoStrategy={rowOpsUndoStrategy}
-                  onRowOpApply={handleRowOpApply}
-                  onRowOpUndo={handleRowOpUndo}
-                  onRowOpRevertAll={handleRowOpRevertAll}
-                  onRowOpClearAll={handleRowOpClearAll}
-                  totalRows={totalRows}
-                  unfilteredRows={
-                    hasActiveFilters(viewState.filters)
-                      ? tables.find((t) => t.tableName === activeTable)?.rowCount ?? null
-                      : null
-                  }
-                  savedViews={savedViews}
-                  currentViewState={viewState}
-                  onSaveView={handleSaveView}
-                  onApplyView={handleApplyView}
-                  onUpdateView={handleUpdateView}
-                  onDeleteView={handleDeleteView}
-                  onRenameView={handleRenameView}
-                  onClose={() => setFilterPanelOpen(false)}
-                  motionState={filterPanelOpen ? "open" : "closing"}
-                />
+              ) : (
+                <>
+                  {pivotActive && viewState.pivotConfig && (
+                    <PivotToolbar
+                      pivotConfig={viewState.pivotConfig}
+                      onExpandAll={pivotExpandAll}
+                      onCollapseAll={pivotCollapseAll}
+                      onToggleGrandTotal={handleToggleGrandTotal}
+                      onDefaultAggChange={handleDefaultAggChange}
+                      onExitPivot={handleClearPivotGroups}
+                    />
+                  )}
+                  <DataGrid
+                    totalRows={pivotActive ? pivotFlatRows.length : totalRows}
+                    getRow={pivotActive ? () => null : getRow}
+                    ensureRange={pivotActive ? pivotEnsureRange : ensureRange}
+                    columns={viewState.visibleColumns}
+                    sortColumns={viewState.sortColumns}
+                    onSort={handleSort}
+                    onReorderColumns={pivotActive ? undefined : reorderVisibleColumns}
+                    resetKey={resetKey}
+                    pivotMode={pivotActive}
+                    pivotFlatRows={pivotActive ? pivotFlatRows : undefined}
+                    pivotGroupColumns={pivotActive ? viewState.pivotConfig?.groupColumns : undefined}
+                    onToggleExpand={pivotActive ? pivotToggleExpand : undefined}
+                    grandTotals={pivotActive ? pivotGrandTotals : undefined}
+                    showGrandTotal={pivotActive ? viewState.pivotConfig?.showGrandTotal : undefined}
+                    numericColumns={pivotActive ? numericColumns : undefined}
+                    groupSortMode={pivotActive ? viewState.pivotConfig?.groupSortMode : undefined}
+                    groupSortDirection={pivotActive ? viewState.pivotConfig?.groupSortDirection : undefined}
+                    onGroupSort={pivotActive ? handleGroupSort : undefined}
+                  />
+                  {filterPanelMounted && (
+                    <FilterPanel
+                      columns={schema}
+                      activeFilters={viewState.filters}
+                      activeTable={activeTable}
+                      onApplyFilters={handleFiltersChange}
+                      colOpsSteps={colOpsSteps}
+                      undoStrategy={undoStrategy}
+                      onColOpApply={handleColOpApply}
+                      onColOpUndo={handleColOpUndo}
+                      onColOpRevertAll={handleColOpRevertAll}
+                      onColOpClearAll={handleColOpClearAll}
+                      rowOpsSteps={rowOpsSteps}
+                      rowOpsUndoStrategy={rowOpsUndoStrategy}
+                      onRowOpApply={handleRowOpApply}
+                      onRowOpUndo={handleRowOpUndo}
+                      onRowOpRevertAll={handleRowOpRevertAll}
+                      onRowOpClearAll={handleRowOpClearAll}
+                      totalRows={totalRows}
+                      unfilteredRows={
+                        hasActiveFilters(viewState.filters)
+                          ? tables.find((t) => t.tableName === activeTable)?.rowCount ?? null
+                          : null
+                      }
+                      savedViews={savedViews}
+                      currentViewState={viewState}
+                      onSaveView={handleSaveView}
+                      onApplyView={handleApplyView}
+                      onUpdateView={handleUpdateView}
+                      onDeleteView={handleDeleteView}
+                      onRenameView={handleRenameView}
+                      onClose={() => setFilterPanelOpen(false)}
+                      motionState={filterPanelOpen ? "open" : "closing"}
+                    />
+                  )}
+                </>
               )}
             </>
           ) : (
@@ -1945,6 +1996,7 @@ export function App(): React.ReactElement {
         activeFilterCount={countConditions(viewState.filters)}
         sidebarVisible={sidebarVisible}
         updateNotice={<UpdateNotice />}
+        filterEnabled={!jsonWorkspaceActive}
       />
       <CombineDialog
         isOpen={combineDialogOpen}
