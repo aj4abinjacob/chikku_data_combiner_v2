@@ -3239,7 +3239,7 @@ html, body, #root {
   flex: 1;
   min-height: 270px;
   display: grid;
-  grid-template-columns: minmax(390px, 0.88fr) minmax(430px, 1.12fr);
+  grid-template-columns: minmax(240px, 0.88fr) minmax(280px, 1.12fr);
   border-bottom: 1px solid #d8e1e8;
   overflow: hidden;
 }
@@ -3545,6 +3545,7 @@ html, body, #root {
   min-height: 0;
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   background: #fff;
   font-family: "SF Mono", "Menlo", "Monaco", monospace;
@@ -3554,6 +3555,8 @@ html, body, #root {
 }
 
 .json-line-numbers {
+  min-height: 0;
+  overflow: hidden;
   padding: 8px 8px 8px 0;
   background: #f7f9fb;
   border-right: 1px solid #e1e8ed;
@@ -3572,6 +3575,7 @@ html, body, #root {
 .json-editor-scroll {
   min-width: 0;
   min-height: 0;
+  height: 100%;
   overflow: auto;
   scrollbar-gutter: stable both-edges;
 }

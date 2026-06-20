@@ -146,10 +146,14 @@ function flattenArray(
     const itemRows = flattenValue(item, prefix, options);
     if (!options.includeArrayIndex) return itemRows;
     return itemRows.map((row) => ({
-      [`${prefix}${options.delimiter}_index`]: index,
+      [formatArrayIndexColumn(prefix, options.delimiter)]: index,
       ...row,
     }));
   });
+}
+
+function formatArrayIndexColumn(prefix: string, delimiter: string): string {
+  return delimiter === "_" ? `${prefix}_index` : `${prefix}${delimiter}_index`;
 }
 
 function crossJoin(

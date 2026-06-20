@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Callout,
@@ -38,6 +38,24 @@ function getFileExtension(path: string): string {
   return path.split(".").pop()?.toLowerCase() || "";
 }
 
+function isJsonLinesExtension(extension: string): boolean {
+  return extension === "jsonl" || extension === "ndjson";
+}
+
+function serializeJsonForFile(
+  value: JsonValue | null,
+  extension: string,
+  pretty: boolean,
+  sourceText: string
+): string {
+  if (isJsonLinesExtension(extension)) {
+    const records = Array.isArray(value) ? value : [value];
+    const text = records.map((record) => JSON.stringify(record)).join("\n");
+    return /\r?\n$/.test(sourceText) ? `${text}\n` : text;
+  }
+  return JSON.stringify(value, null, pretty ? 2 : undefined);
+}
+
 function formatFileSize(bytes: number | null): string {
   if (bytes === null) return "Unknown size";
   if (bytes < 1024) return `${bytes} B`;
@@ -49,10 +67,19 @@ function flattenPathForLabel(path: string): string {
   return path.replace(/\[(\d+)\]/g, ".$1").replace(/^\$\./, "");
 }
 
+function searchablePathText(path: string): string {
+  const labelPath = flattenPathForLabel(path);
+  const pathWithoutIndexes = labelPath
+    .replace(/(^|\.)\d+(?=\.|$)/g, "$1")
+    .replace(/^\./, "")
+    .replace(/\.+/g, ".");
+  return `${path} ${labelPath} ${pathWithoutIndexes}`.toLowerCase();
+}
+
 function nodeMatches(value: JsonValue, name: string, path: string, query: string): boolean {
-  if (!query) return true;
-  const q = query.toLowerCase();
-  if (name.toLowerCase().includes(q) || path.toLowerCase().includes(q)) return true;
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  if (name.toLowerCase().includes(q) || searchablePathText(path).includes(q)) return true;
   if (getJsonType(value).includes(q)) return true;
   if (value === null || typeof value !== "object") {
     return String(value).toLowerCase().includes(q);
@@ -100,12 +127,14 @@ function JsonTreeRow({
 
   const expandable = value !== null && typeof value === "object" && getChildCount(value) > 0;
   const isExpanded = expanded.has(path);
+  const searchActive = search.trim().length > 0;
+  const isVisuallyExpanded = isExpanded || searchActive;
   const type = getJsonType(value);
   const scalar = formatJsonScalar(value);
   const isSelected = selectedPath === path;
 
   let children: React.ReactNode = null;
-  if (expandable && isExpanded) {
+  if (expandable && isVisuallyExpanded) {
     if (Array.isArray(value)) {
       children = value.map((child, index) => (
         <JsonTreeRow
@@ -158,9 +187,9 @@ function JsonTreeRow({
               event.stopPropagation();
               onToggle(path);
             }}
-            aria-label={isExpanded ? "Collapse JSON node" : "Expand JSON node"}
+            aria-label={isVisuallyExpanded ? "Collapse JSON node" : "Expand JSON node"}
           >
-            <Icon icon={isExpanded ? "chevron-down" : "chevron-right"} size={12} />
+            <Icon icon={isVisuallyExpanded ? "chevron-down" : "chevron-right"} size={12} />
           </button>
         ) : (
           <span className="json-tree-toggle-spacer" />
@@ -191,7 +220,7 @@ export function JsonWorkspace({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState("$");
   const [treeSearch, setTreeSearch] = useState("");
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["$", "$.customers", "$.customers[0]"]));
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["$"]));
   const [rawScrollTop, setRawScrollTop] = useState(0);
   const [flattenOptions, setFlattenOptions] = useState<FlattenOptions>({
     arrayMode: "unwind",
@@ -239,7 +268,7 @@ export function JsonWorkspace({
         setEditorSyncKey((key) => key + 1);
         setFileSize(new Blob([text]).size);
         setSelectedPath("$");
-        setExpanded(new Set(["$", "$.customers", "$.customers[0]"]));
+        setExpanded(new Set(["$"]));
       })
       .catch((err) => {
         if (!cancelled) setLoadError(String(err));
@@ -252,13 +281,23 @@ export function JsonWorkspace({
     };
   }, [table.filePath]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const code = codeRef.current;
     if (!code) return;
     if (code.textContent !== rawText) {
       code.textContent = rawText;
     }
   }, [editorSyncKey, rawText]);
+
+  useLayoutEffect(() => {
+    const scrollEl = editorScrollRef.current;
+    if (!scrollEl) return;
+    const maxTop = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
+    if (scrollEl.scrollTop > maxTop) {
+      scrollEl.scrollTop = maxTop;
+    }
+    setRawScrollTop(scrollEl.scrollTop);
+  }, [editorContentHeight, editorContentWidth, rawText]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -302,19 +341,23 @@ export function JsonWorkspace({
     });
   }, []);
 
+  const collapseTree = useCallback(() => {
+    setExpanded(new Set(["$"]));
+  }, []);
+
   const handleFormat = useCallback(() => {
     if (!isValid) return;
-    setRawText(JSON.stringify(parsed.value, null, 2));
+    setRawText(serializeJsonForFile(parsed.value, extension, true, rawText));
     setEditorSyncKey((key) => key + 1);
-    setStatusMessage("Formatted JSON");
-  }, [isValid, parsed.value]);
+    setStatusMessage(isJsonLinesExtension(extension) ? "Formatted JSON Lines" : "Formatted JSON");
+  }, [extension, isValid, parsed.value, rawText]);
 
   const handleMinify = useCallback(() => {
     if (!isValid) return;
-    setRawText(JSON.stringify(parsed.value));
+    setRawText(serializeJsonForFile(parsed.value, extension, false, rawText));
     setEditorSyncKey((key) => key + 1);
-    setStatusMessage("Minified JSON");
-  }, [isValid, parsed.value]);
+    setStatusMessage(isJsonLinesExtension(extension) ? "Minified JSON Lines" : "Minified JSON");
+  }, [extension, isValid, parsed.value, rawText]);
 
   const handleRawInput = useCallback((event: React.FormEvent<HTMLDivElement>) => {
     setRawText(event.currentTarget.textContent ?? "");
@@ -399,7 +442,13 @@ export function JsonWorkspace({
         <section className="json-panel json-tree-panel">
           <div className="json-panel-header">
             <strong>JSON Tree</strong>
-            <button type="button" className="json-panel-collapse" aria-label="Collapse JSON tree">
+            <button
+              type="button"
+              className="json-panel-collapse"
+              aria-label="Collapse all JSON nodes"
+              title="Collapse all JSON nodes"
+              onClick={collapseTree}
+            >
               <Icon icon="chevron-left" size={12} />
             </button>
           </div>
@@ -509,7 +558,10 @@ export function JsonWorkspace({
               <span>Array mode:</span>
               <HTMLSelect
                 value={flattenOptions.arrayMode}
-                onChange={(event) => setFlattenOptions((prev) => ({ ...prev, arrayMode: event.currentTarget.value as FlattenOptions["arrayMode"] }))}
+                onChange={(event) => {
+                  const arrayMode = event.currentTarget.value as FlattenOptions["arrayMode"];
+                  setFlattenOptions((prev) => ({ ...prev, arrayMode }));
+                }}
               >
                 <option value="unwind">Unwind rows</option>
                 <option value="stringify">Stringify arrays</option>
@@ -520,13 +572,19 @@ export function JsonWorkspace({
               <InputGroup
                 small
                 value={flattenOptions.delimiter}
-                onChange={(event) => setFlattenOptions((prev) => ({ ...prev, delimiter: event.currentTarget.value || "." }))}
+                onChange={(event) => {
+                  const delimiter = event.currentTarget.value || ".";
+                  setFlattenOptions((prev) => ({ ...prev, delimiter }));
+                }}
               />
             </label>
             <Switch
               checked={flattenOptions.includeArrayIndex}
               label="Include array index"
-              onChange={(event) => setFlattenOptions((prev) => ({ ...prev, includeArrayIndex: (event.currentTarget as HTMLInputElement).checked }))}
+              onChange={(event) => {
+                const includeArrayIndex = (event.currentTarget as HTMLInputElement).checked;
+                setFlattenOptions((prev) => ({ ...prev, includeArrayIndex }));
+              }}
             />
           </div>
         </div>
