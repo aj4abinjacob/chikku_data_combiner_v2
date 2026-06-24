@@ -22,8 +22,6 @@ import {
   toCsv,
 } from "../utils/jsonFlatten";
 
-const RAW_EDITOR_LINE_HEIGHT = 22;
-
 interface JsonWorkspaceProps {
   table: LoadedTable;
   onOpenFiles: () => void;
@@ -228,10 +226,7 @@ export function JsonWorkspace({
     includeArrayIndex: false,
   });
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [editorSyncKey, setEditorSyncKey] = useState(0);
-  const editorRef = useRef<HTMLDivElement>(null);
-  const editorScrollRef = useRef<HTMLDivElement>(null);
-  const codeRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
 
   const fileName = getFileName(table.filePath);
   const extension = getFileExtension(table.filePath);
@@ -247,13 +242,6 @@ export function JsonWorkspace({
   const previewRows = flattened.rows.slice(0, 120);
   const lineCount = useMemo(() => rawText.split(/\r\n|\r|\n/).length, [rawText]);
   const lineNumbers = useMemo(() => Array.from({ length: lineCount }, (_, i) => i + 1), [lineCount]);
-  const editorContentHeight = Math.max(120, lineCount * RAW_EDITOR_LINE_HEIGHT + 16);
-  const editorContentWidth = useMemo(() => {
-    const maxLineLength = rawText
-      .split(/\r\n|\r|\n/)
-      .reduce((max, line) => Math.max(max, line.length), 0);
-    return Math.min(32000, Math.max(760, maxLineLength * 8 + 40));
-  }, [rawText]);
 
   useEffect(() => {
     let cancelled = false;
@@ -265,7 +253,6 @@ export function JsonWorkspace({
         if (cancelled) return;
         setRawText(text);
         setOriginalText(text);
-        setEditorSyncKey((key) => key + 1);
         setFileSize(new Blob([text]).size);
         setSelectedPath("$");
         setExpanded(new Set(["$"]));
@@ -282,54 +269,13 @@ export function JsonWorkspace({
   }, [table.filePath]);
 
   useLayoutEffect(() => {
-    const code = codeRef.current;
-    if (!code) return;
-    if (code.textContent !== rawText) {
-      code.textContent = rawText;
-    }
-  }, [editorSyncKey, rawText]);
-
-  useLayoutEffect(() => {
-    const scrollEl = editorScrollRef.current;
-    if (!scrollEl) return;
-    const maxTop = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
-    if (scrollEl.scrollTop > maxTop) {
-      scrollEl.scrollTop = maxTop;
-    }
-    setRawScrollTop(scrollEl.scrollTop);
-  }, [editorContentHeight, editorContentWidth, rawText]);
-
-  useEffect(() => {
     const editor = editorRef.current;
-    const scrollEl = editorScrollRef.current;
-    const code = codeRef.current;
-    if (!editor || !scrollEl || !code) return;
-
-    const onWheel = (event: WheelEvent) => {
-      const multiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-        ? RAW_EDITOR_LINE_HEIGHT
-        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-          ? scrollEl.clientHeight
-          : 1;
-      const nextTop = scrollEl.scrollTop + event.deltaY * multiplier;
-      const nextLeft = scrollEl.scrollLeft + event.deltaX * multiplier;
-      const maxTop = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
-      const maxLeft = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth);
-
-      scrollEl.scrollTop = Math.min(maxTop, Math.max(0, nextTop));
-      scrollEl.scrollLeft = Math.min(maxLeft, Math.max(0, nextLeft));
-      setRawScrollTop(scrollEl.scrollTop);
-
-      event.preventDefault();
-      event.stopPropagation();
-    };
-
-    editor.addEventListener("wheel", onWheel, { passive: false });
-    code.addEventListener("wheel", onWheel, { passive: false });
-    return () => {
-      editor.removeEventListener("wheel", onWheel);
-      code.removeEventListener("wheel", onWheel);
-    };
+    if (!editor) return;
+    const maxTop = Math.max(0, editor.scrollHeight - editor.clientHeight);
+    if (editor.scrollTop > maxTop) {
+      editor.scrollTop = maxTop;
+    }
+    setRawScrollTop(editor.scrollTop);
   }, [rawText]);
 
   const togglePath = useCallback((path: string) => {
@@ -348,25 +294,17 @@ export function JsonWorkspace({
   const handleFormat = useCallback(() => {
     if (!isValid) return;
     setRawText(serializeJsonForFile(parsed.value, extension, true, rawText));
-    setEditorSyncKey((key) => key + 1);
     setStatusMessage(isJsonLinesExtension(extension) ? "Formatted JSON Lines" : "Formatted JSON");
   }, [extension, isValid, parsed.value, rawText]);
 
   const handleMinify = useCallback(() => {
     if (!isValid) return;
     setRawText(serializeJsonForFile(parsed.value, extension, false, rawText));
-    setEditorSyncKey((key) => key + 1);
     setStatusMessage(isJsonLinesExtension(extension) ? "Minified JSON Lines" : "Minified JSON");
   }, [extension, isValid, parsed.value, rawText]);
 
-  const handleRawInput = useCallback((event: React.FormEvent<HTMLDivElement>) => {
-    setRawText(event.currentTarget.textContent ?? "");
-  }, []);
-
-  const handleRawPaste = useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const text = event.clipboardData.getData("text/plain");
-    document.execCommand("insertText", false, text);
+  const handleRawChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setRawText(event.currentTarget.value);
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -504,32 +442,22 @@ export function JsonWorkspace({
               Scroll pane | Ln {lineCount.toLocaleString()} | UTF-8 | {extension.toUpperCase() || "JSON"}
             </span>
           </div>
-          <div className={`json-editor${parsed.error ? " has-error" : ""}`} ref={editorRef}>
-            <div className="json-line-numbers" style={{ transform: `translateY(-${rawScrollTop}px)` }}>
-              {lineNumbers.map((n) => <span key={n}>{n}</span>)}
+          <div className={`json-editor${parsed.error ? " has-error" : ""}`}>
+            <div className="json-line-numbers">
+              <div className="json-line-numbers-inner" style={{ transform: `translateY(-${rawScrollTop}px)` }}>
+                {lineNumbers.map((n) => <span key={n}>{n}</span>)}
+              </div>
             </div>
-            <div
-              className="json-editor-scroll"
-              ref={editorScrollRef}
+            <textarea
+              ref={editorRef}
+              className="json-code-input"
+              value={rawText}
+              aria-label="Raw JSON editor"
+              spellCheck={false}
+              wrap="off"
+              onChange={handleRawChange}
               onScroll={(event) => setRawScrollTop(event.currentTarget.scrollTop)}
-            >
-              <div
-                ref={codeRef}
-                className="json-code-input"
-                contentEditable="plaintext-only"
-                suppressContentEditableWarning
-                role="textbox"
-                aria-label="Raw JSON editor"
-                spellCheck={false}
-                tabIndex={0}
-                style={{
-                  minHeight: editorContentHeight,
-                  width: editorContentWidth,
-                }}
-                onInput={handleRawInput}
-                onPaste={handleRawPaste}
-              />
-            </div>
+            />
           </div>
           <div className={`json-editor-status${parsed.error ? " error" : ""}`}>
             {parsed.error ? (
