@@ -335,7 +335,7 @@ export function CombineDialog({
       isOpen={isOpen}
       onClose={onClose}
       onOpening={handleOpening}
-      title="Combine Tables — Column Mapping"
+      title="Combine Files — Column Mapping"
       style={{ width: "90vw", maxWidth: 1100 }}
       canOutsideClickClose={false}
     >

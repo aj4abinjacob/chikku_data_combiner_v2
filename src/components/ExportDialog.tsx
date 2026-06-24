@@ -150,16 +150,16 @@ export function ExportDialog({
           </RadioGroup>
         </div>
 
-        {/* Section 2: Tables */}
+        {/* Section 2: Files */}
         <div className="aggregate-section" style={{ marginBottom: 16 }}>
-          <div className="aggregate-section-header">Tables</div>
+          <div className="aggregate-section-header">Files</div>
           <RadioGroup
             onChange={(e) => setTableMode((e.target as HTMLInputElement).value as TableMode)}
             selectedValue={tableMode}
             inline
           >
-            <Radio label="Active table only" value="active" />
-            <Radio label="Select tables" value="select" />
+            <Radio label="Active file only" value="active" />
+            <Radio label="Select files" value="select" />
           </RadioGroup>
 
           {tableMode === "select" && (

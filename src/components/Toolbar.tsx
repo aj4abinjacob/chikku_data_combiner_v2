@@ -27,7 +27,7 @@ export function Toolbar({
         <Button
           intent={Intent.PRIMARY}
           icon="merge-columns"
-          text={`Combine ${tableCount} Tables`}
+          text={`Combine ${tableCount} Files`}
           onClick={onCombine}
           small
         />

@@ -1942,7 +1942,7 @@ export function App(): React.ReactElement {
                   <Icon icon="th" size={22} />
                 </div>
                 <div className="welcome-copy">
-                  <span className="welcome-kicker">No tables loaded</span>
+                  <span className="welcome-kicker">No files loaded</span>
                   <h2>Open a data file</h2>
                   <p>CSV, TSV, Excel, JSON, and Parquet files are ready to load.</p>
                 </div>

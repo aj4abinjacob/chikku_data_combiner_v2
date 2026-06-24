@@ -174,7 +174,7 @@ export function HistoryDialog({
           {/* Left: table list */}
           <div className="ghist-table-list">
             {displayTables.length === 0 && (
-              <div className="ghist-empty-tables">No tables loaded</div>
+              <div className="ghist-empty-tables">No files loaded</div>
             )}
             {displayTables.map((t) => {
               const h = histories.get(t.tableName);

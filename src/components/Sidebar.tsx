@@ -44,6 +44,28 @@ interface SidebarProps {
   jsonWorkspaceActive?: boolean;
 }
 
+type FileListIcon = {
+  icon: "array" | "panel-table" | "th-derived";
+  className: string;
+};
+
+function getFileExtension(filePath: string): string {
+  return filePath.split(".").pop()?.toLowerCase() || "";
+}
+
+function getFileListIcon(table: LoadedTable): FileListIcon {
+  if (table.filePath.startsWith("(")) {
+    return { icon: "th-derived", className: "table-icon-generated" };
+  }
+
+  const extension = getFileExtension(table.filePath);
+  if (extension === "json" || extension === "jsonl" || extension === "ndjson") {
+    return { icon: "array", className: "table-icon-json" };
+  }
+
+  return { icon: "panel-table", className: "table-icon-tabular" };
+}
+
 export function Sidebar({
   tables,
   activeTable,
@@ -206,11 +228,11 @@ export function Sidebar({
 
   return (
     <div className="sidebar">
-      {/* Loaded tables */}
+      {/* Loaded files */}
       <div className="sidebar-section sidebar-section-tables">
         <div className="sidebar-section-header">
           <div className="sidebar-heading-block">
-            <h4>Tables</h4>
+            <h4>Files</h4>
             <span className="sidebar-count">{tables.length}</span>
           </div>
           <div className="table-header-actions">
@@ -227,7 +249,7 @@ export function Sidebar({
         {tables.length > 8 && (
           <div className="table-search">
             <SearchInput
-              placeholder="Search tables..."
+              placeholder="Search files..."
               value={tableSearch}
               onChange={setTableSearch}
               small
@@ -236,7 +258,7 @@ export function Sidebar({
         )}
         {tables.length === 0 && (
           <div className="sidebar-empty sidebar-empty-action">
-            <span>No tables loaded</span>
+            <span>No files loaded</span>
             <Button
               icon="folder-open"
               text="Open files"
@@ -246,47 +268,51 @@ export function Sidebar({
           </div>
         )}
         {tables.length > 0 && filteredTables.length === 0 && (
-          <div className="sidebar-empty">No matching tables</div>
+          <div className="sidebar-empty">No matching files</div>
         )}
-        {filteredTables.map((t) => (
-          <div
-            key={t.tableName}
-            className={`table-list-item${t.tableName === activeTable ? " active" : ""}${selectedForCombine.has(t.tableName) ? " selected" : ""}`}
-          >
-            {tables.length >= 2 && (
-              <Checkbox
-                checked={selectedForCombine.has(t.tableName)}
-                onChange={() => toggleCombineSelection(t.tableName)}
-                className="table-combine-checkbox"
-              />
-            )}
-            <span
-              className="table-main"
-              onClick={() => onSelectTable(t.tableName)}
-              title={t.tableName}
+        {filteredTables.map((t) => {
+          const fileIcon = getFileListIcon(t);
+
+          return (
+            <div
+              key={t.tableName}
+              className={`table-list-item${t.tableName === activeTable ? " active" : ""}${selectedForCombine.has(t.tableName) ? " selected" : ""}`}
             >
-              <span className="table-icon">
-                <Icon icon="th" size={12} />
-              </span>
-              <span className="table-text">
-                <span className="table-name">{t.tableName}</span>
-                <span className="row-count">
-                  {t.rowCount.toLocaleString()} rows
+              {tables.length >= 2 && (
+                <Checkbox
+                  checked={selectedForCombine.has(t.tableName)}
+                  onChange={() => toggleCombineSelection(t.tableName)}
+                  className="table-combine-checkbox"
+                />
+              )}
+              <span
+                className="table-main"
+                onClick={() => onSelectTable(t.tableName)}
+                title={t.tableName}
+              >
+                <span className={`table-icon ${fileIcon.className}`}>
+                  <Icon icon={fileIcon.icon} size={12} />
+                </span>
+                <span className="table-text">
+                  <span className="table-name">{t.tableName}</span>
+                  <span className="row-count">
+                    {t.rowCount.toLocaleString()} rows
+                  </span>
                 </span>
               </span>
-            </span>
-            <Button
-              icon="cross"
-              minimal
-              small
-              className="table-delete-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                setDeleteTarget(t.tableName);
-              }}
-            />
-          </div>
-        ))}
+              <Button
+                icon="cross"
+                minimal
+                small
+                className="table-delete-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleteTarget(t.tableName);
+                }}
+              />
+            </div>
+          );
+        })}
       </div>
 
       {/* Combine button */}
@@ -301,7 +327,7 @@ export function Sidebar({
               minimal
               small
               text="All"
-              title="Select all tables for combine"
+              title="Select all files for combine"
               disabled={selectedForCombine.size === tables.length}
               onClick={selectAllTablesForCombine}
             />
@@ -309,7 +335,7 @@ export function Sidebar({
               minimal
               small
               text="None"
-              title="Deselect all tables"
+              title="Deselect all files"
               disabled={selectedForCombine.size === 0}
               onClick={deselectAllTablesForCombine}
             />

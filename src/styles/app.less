@@ -464,9 +464,19 @@ html, body, #root {
       background: #eef7ff;
       border-color: rgba(19, 124, 189, 0.35);
 
-      .table-icon {
+      .table-icon.table-icon-tabular {
         background: #d7ecff;
         color: #106ba3;
+      }
+
+      .table-icon.table-icon-json {
+        background: #def7f2;
+        color: #0f766e;
+      }
+
+      .table-icon.table-icon-generated {
+        background: #f8eadc;
+        color: #a66321;
       }
 
       .table-name {
@@ -508,6 +518,16 @@ html, body, #root {
       border-radius: var(--control-radius);
       background: #f0f3f5;
       color: #5c7080;
+
+      &.table-icon-json {
+        background: #e7f5f2;
+        color: #0f766e;
+      }
+
+      &.table-icon-generated {
+        background: #f6eee6;
+        color: #a66321;
+      }
     }
 
     .table-name {
@@ -3171,40 +3191,6 @@ html, body, #root {
   overflow: hidden;
 }
 
-.json-file-tabbar {
-  height: 42px;
-  display: flex;
-  align-items: flex-end;
-  padding: 0 10px;
-  background: #f5f8fa;
-  border-bottom: 1px solid #d8e1e8;
-  flex-shrink: 0;
-}
-
-.json-file-tab {
-  height: 34px;
-  min-width: 0;
-  max-width: 260px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 11px;
-  border: 1px solid #d8e1e8;
-  border-bottom-color: #fff;
-  border-radius: var(--surface-radius) var(--surface-radius) 0 0;
-  background: #fff;
-  color: #30404d;
-  font-size: 13px;
-  font-weight: 600;
-
-  > span:not(.bp4-tag) {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
-
 .json-toolbar {
   min-height: 60px;
   display: flex;
@@ -3239,9 +3225,18 @@ html, body, #root {
   flex: 1;
   min-height: 270px;
   display: grid;
-  grid-template-columns: minmax(240px, 0.88fr) minmax(280px, 1.12fr);
+  grid-template-columns: minmax(240px, 44%) 8px minmax(280px, 1fr);
   border-bottom: 1px solid #d8e1e8;
   overflow: hidden;
+}
+
+.json-main.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.json-main.tree-collapsed {
+  grid-template-columns: 38px minmax(280px, 1fr);
 }
 
 .json-panel {
@@ -3267,6 +3262,46 @@ html, body, #root {
     background: linear-gradient(90deg, rgba(191, 204, 214, 0.36), rgba(191, 204, 214, 0));
     pointer-events: none;
     z-index: 2;
+  }
+}
+
+.json-tree-rail {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 5px;
+  border-right: 2px solid #bfccd6;
+  background: #f7f9fb;
+  overflow: hidden;
+}
+
+.json-split-resizer {
+  position: relative;
+  z-index: 3;
+  min-width: 8px;
+  min-height: 0;
+  background: #f7f9fb;
+  cursor: col-resize;
+  touch-action: none;
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    transform: translateX(-50%);
+    background: #bfccd6;
+  }
+
+  &:hover::before,
+  &:focus::before,
+  .json-main.resizing &::before {
+    width: 3px;
+    background: #137cbd;
   }
 }
 
@@ -6467,9 +6502,19 @@ html.dark-theme #root {
         background: @dark-accent-bg-subtle;
         border-color: @dark-accent-border;
 
-        .table-icon {
+        .table-icon.table-icon-tabular {
           background: @dark-accent-bg;
           color: @dark-accent;
+        }
+
+        .table-icon.table-icon-json {
+          background: rgba(20, 184, 166, 0.2);
+          color: #5eead4;
+        }
+
+        .table-icon.table-icon-generated {
+          background: rgba(217, 119, 6, 0.2);
+          color: #fbbf24;
         }
 
         .table-name {
@@ -6484,6 +6529,16 @@ html.dark-theme #root {
       .table-icon {
         background: @dark-bg-4;
         color: @dark-text-3;
+
+        &.table-icon-json {
+          background: rgba(20, 184, 166, 0.14);
+          color: #5eead4;
+        }
+
+        &.table-icon-generated {
+          background: rgba(217, 119, 6, 0.14);
+          color: #fbbf24;
+        }
       }
 
       .table-name {
@@ -8023,20 +8078,10 @@ html.dark-theme #root {
     color: @dark-text-1;
   }
 
-  .json-file-tabbar {
-    background: @dark-bg-1;
-    border-bottom-color: @dark-border-1;
-  }
-
-  .json-file-tab {
-    background: @dark-bg-2;
-    border-color: @dark-border-1;
-    border-bottom-color: @dark-bg-2;
-    color: @dark-text-1;
-  }
-
   .json-toolbar,
   .json-main,
+  .json-tree-rail,
+  .json-split-resizer,
   .json-panel-header,
   .json-tree-tools,
   .json-tree-column-header,
@@ -8056,12 +8101,24 @@ html.dark-theme #root {
   }
 
   .json-panel-header,
+  .json-tree-rail,
+  .json-split-resizer,
   .json-tree-tools,
   .json-tree-column-header,
   .json-line-numbers,
   .json-status-strip,
   .json-preview-table th {
     background: @dark-bg-3;
+  }
+
+  .json-split-resizer::before {
+    background: @dark-border-1;
+  }
+
+  .json-split-resizer:hover::before,
+  .json-split-resizer:focus::before,
+  .json-main.resizing .json-split-resizer::before {
+    background: @dark-accent;
   }
 
   .json-panel-header strong,

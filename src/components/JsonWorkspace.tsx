@@ -22,6 +22,11 @@ import {
   toCsv,
 } from "../utils/jsonFlatten";
 
+const DEFAULT_JSON_TREE_WIDTH_PERCENT = 44;
+const JSON_TREE_MIN_WIDTH = 240;
+const JSON_EDITOR_MIN_WIDTH = 280;
+const JSON_SPLITTER_WIDTH = 8;
+
 interface JsonWorkspaceProps {
   table: LoadedTable;
   onOpenFiles: () => void;
@@ -219,6 +224,9 @@ export function JsonWorkspace({
   const [selectedPath, setSelectedPath] = useState("$");
   const [treeSearch, setTreeSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["$"]));
+  const [treePanelCollapsed, setTreePanelCollapsed] = useState(false);
+  const [treePanelWidthPercent, setTreePanelWidthPercent] = useState(DEFAULT_JSON_TREE_WIDTH_PERCENT);
+  const [isTreeResizing, setIsTreeResizing] = useState(false);
   const [rawScrollTop, setRawScrollTop] = useState(0);
   const [flattenOptions, setFlattenOptions] = useState<FlattenOptions>({
     arrayMode: "unwind",
@@ -226,6 +234,7 @@ export function JsonWorkspace({
     includeArrayIndex: false,
   });
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const mainRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
 
   const fileName = getFileName(table.filePath);
@@ -287,9 +296,42 @@ export function JsonWorkspace({
     });
   }, []);
 
-  const collapseTree = useCallback(() => {
-    setExpanded(new Set(["$"]));
+  const updateTreePanelWidth = useCallback((clientX: number) => {
+    const main = mainRef.current;
+    if (!main) return;
+    const rect = main.getBoundingClientRect();
+    const maxTreeWidth = Math.max(80, rect.width - JSON_EDITOR_MIN_WIDTH - JSON_SPLITTER_WIDTH);
+    const minTreeWidth = Math.min(JSON_TREE_MIN_WIDTH, maxTreeWidth);
+    const nextWidth = Math.min(
+      Math.max(clientX - rect.left, minTreeWidth),
+      Math.max(minTreeWidth, maxTreeWidth)
+    );
+    setTreePanelWidthPercent((nextWidth / rect.width) * 100);
   }, []);
+
+  useEffect(() => {
+    if (!isTreeResizing) return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      updateTreePanelWidth(event.clientX);
+    };
+    const handleMouseUp = () => {
+      setIsTreeResizing(false);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isTreeResizing, updateTreePanelWidth]);
+
+  const handleResizeMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsTreeResizing(true);
+    updateTreePanelWidth(event.clientX);
+  }, [updateTreePanelWidth]);
 
   const handleFormat = useCallback(() => {
     if (!isValid) return;
@@ -344,17 +386,15 @@ export function JsonWorkspace({
   }, [flattened.columns, flattened.rows]);
 
   const selectedLabel = flattenPathForLabel(selectedPath) || "$";
+  const mainClassName = `json-main${treePanelCollapsed ? " tree-collapsed" : ""}${isTreeResizing ? " resizing" : ""}`;
+  const mainStyle = treePanelCollapsed
+    ? undefined
+    : ({
+        gridTemplateColumns: `minmax(${JSON_TREE_MIN_WIDTH}px, ${treePanelWidthPercent}%) ${JSON_SPLITTER_WIDTH}px minmax(${JSON_EDITOR_MIN_WIDTH}px, 1fr)`,
+      } as React.CSSProperties);
 
   return (
     <div className="json-workspace">
-      <div className="json-file-tabbar">
-        <div className="json-file-tab active">
-          <Icon icon="code" size={14} />
-          <span>{fileName}</span>
-          {isDirty && <Tag minimal intent={Intent.WARNING}>Edited</Tag>}
-        </div>
-      </div>
-
       <div className="json-toolbar">
         <div className="json-toolbar-actions">
           <Button icon="folder-open" text="Open JSON" onClick={onOpenFiles} />
@@ -376,64 +416,90 @@ export function JsonWorkspace({
         </Callout>
       )}
 
-      <div className="json-main">
-        <section className="json-panel json-tree-panel">
-          <div className="json-panel-header">
-            <strong>JSON Tree</strong>
+      <div className={mainClassName} ref={mainRef} style={mainStyle}>
+        {treePanelCollapsed ? (
+          <div className="json-tree-rail">
             <button
               type="button"
               className="json-panel-collapse"
-              aria-label="Collapse all JSON nodes"
-              title="Collapse all JSON nodes"
-              onClick={collapseTree}
+              aria-label="Expand JSON tree panel"
+              title="Expand JSON tree panel"
+              onClick={() => setTreePanelCollapsed(false)}
             >
-              <Icon icon="chevron-left" size={12} />
+              <Icon icon="chevron-right" size={12} />
             </button>
           </div>
-          <div className="json-tree-tools">
-            <InputGroup
-              small
-              leftIcon="search"
-              placeholder="Search tree..."
-              value={treeSearch}
-              onChange={(event) => setTreeSearch(event.currentTarget.value)}
-            />
-            <span className="json-path-pill" title={selectedPath}>Path: {selectedLabel}</span>
-          </div>
-          <div className="json-tree-column-header" aria-hidden="true">
-            <span />
-            <span />
-            <span>Key</span>
-            <span>Value</span>
-            <span>Type</span>
-          </div>
-          <div className="json-tree-scroll">
-            {loading && <div className="json-loading"><Spinner size={18} /> Loading JSON...</div>}
-            {!loading && isValid && (
-              <JsonTreeRow
-                name="root"
-                path="$"
-                value={parsed.value}
-                depth={0}
-                expanded={expanded}
-                selectedPath={selectedPath}
-                search={treeSearch}
-                onToggle={togglePath}
-                onSelect={setSelectedPath}
+        ) : (
+          <section className="json-panel json-tree-panel">
+            <div className="json-panel-header">
+              <strong>JSON Tree</strong>
+              <button
+                type="button"
+                className="json-panel-collapse"
+                aria-label="Collapse JSON tree panel"
+                title="Collapse JSON tree panel"
+                onClick={() => setTreePanelCollapsed(true)}
+              >
+                <Icon icon="chevron-left" size={12} />
+              </button>
+            </div>
+            <div className="json-tree-tools">
+              <InputGroup
+                small
+                leftIcon="search"
+                placeholder="Search tree..."
+                value={treeSearch}
+                onChange={(event) => setTreeSearch(event.currentTarget.value)}
               />
-            )}
-            {!loading && parsed.error && (
-              <div className="json-tree-empty">
-                <Icon icon="warning-sign" size={18} />
-                <span>{parsed.error}</span>
-              </div>
-            )}
-          </div>
-          <div className="json-panel-footer">
-            <span>Path: {selectedPath}</span>
-            <span>{flattened.rows.length.toLocaleString()} rows</span>
-          </div>
-        </section>
+              <span className="json-path-pill" title={selectedPath}>Path: {selectedLabel}</span>
+            </div>
+            <div className="json-tree-column-header" aria-hidden="true">
+              <span />
+              <span />
+              <span>Key</span>
+              <span>Value</span>
+              <span>Type</span>
+            </div>
+            <div className="json-tree-scroll">
+              {loading && <div className="json-loading"><Spinner size={18} /> Loading JSON...</div>}
+              {!loading && isValid && (
+                <JsonTreeRow
+                  name="root"
+                  path="$"
+                  value={parsed.value}
+                  depth={0}
+                  expanded={expanded}
+                  selectedPath={selectedPath}
+                  search={treeSearch}
+                  onToggle={togglePath}
+                  onSelect={setSelectedPath}
+                />
+              )}
+              {!loading && parsed.error && (
+                <div className="json-tree-empty">
+                  <Icon icon="warning-sign" size={18} />
+                  <span>{parsed.error}</span>
+                </div>
+              )}
+            </div>
+            <div className="json-panel-footer">
+              <span>Path: {selectedPath}</span>
+              <span>{flattened.rows.length.toLocaleString()} rows</span>
+            </div>
+          </section>
+        )}
+
+        {!treePanelCollapsed && (
+          <div
+            className="json-split-resizer"
+            role="separator"
+            aria-label="Resize JSON tree and raw editor panels"
+            aria-orientation="vertical"
+            title="Drag to resize. Double-click to reset."
+            onMouseDown={handleResizeMouseDown}
+            onDoubleClick={() => setTreePanelWidthPercent(DEFAULT_JSON_TREE_WIDTH_PERCENT)}
+          />
+        )}
 
         <section className="json-panel json-editor-panel">
           <div className="json-panel-header">
