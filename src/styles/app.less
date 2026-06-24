@@ -3242,6 +3242,80 @@ html, body, #root {
   flex-shrink: 0;
 }
 
+.json-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.json-history-panel {
+  border-left: 1px solid #d8e1e8;
+}
+
+.json-history-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.json-history-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 14px 26px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: #394b59;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: #f5f8fa;
+  }
+
+  &.ahead {
+    color: #8a9ba8;
+  }
+
+  &.current {
+    background: #eef7ff;
+    border-left-color: #137cbd;
+  }
+}
+
+.json-history-marker {
+  width: 8px;
+  height: 8px;
+  justify-self: center;
+  border-radius: 50%;
+  background: #c5cdd4;
+
+  .json-history-row.current & {
+    background: #137cbd;
+  }
+}
+
+.json-history-step {
+  color: #8a9ba8;
+  font-family: "SF Mono", "Menlo", "Monaco", monospace;
+  font-size: 11px;
+  text-align: right;
+}
+
+.json-history-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .json-load-error {
   margin: 8px 12px 0;
   flex-shrink: 0;
@@ -8229,6 +8303,39 @@ html.dark-theme #root {
   .json-tree-row.selected {
     background: @dark-accent-bg-subtle;
     border-color: @dark-accent-border;
+  }
+
+  .json-history-panel {
+    border-left-color: @dark-border-1;
+  }
+
+  .json-history-row {
+    color: @dark-text-2;
+
+    &:hover {
+      background: @dark-bg-4;
+    }
+
+    &.ahead {
+      color: @dark-text-4;
+    }
+
+    &.current {
+      background: @dark-accent-bg-subtle;
+      border-left-color: @dark-accent;
+    }
+  }
+
+  .json-history-marker {
+    background: @dark-border-2;
+  }
+
+  .json-history-row.current .json-history-marker {
+    background: @dark-accent;
+  }
+
+  .json-history-step {
+    color: @dark-text-3;
   }
 
   .json-tree-value,

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   Button,
   Callout,
@@ -26,6 +26,50 @@ const DEFAULT_JSON_TREE_WIDTH_PERCENT = 44;
 const JSON_TREE_MIN_WIDTH = 240;
 const JSON_EDITOR_MIN_WIDTH = 280;
 const JSON_SPLITTER_WIDTH = 8;
+const JSON_HISTORY_LIMIT = 100;
+const JSON_TYPING_PUSH_DELAY = 700;
+
+interface JsonHistoryEntry {
+  text: string;
+  label: string;
+}
+
+interface JsonHistoryState {
+  entries: JsonHistoryEntry[];
+  index: number;
+}
+
+type JsonHistoryAction =
+  | { type: "reset"; text: string; label: string }
+  | { type: "push"; text: string; label: string }
+  | { type: "undo" }
+  | { type: "redo" }
+  | { type: "jump"; index: number };
+
+function jsonHistoryReducer(state: JsonHistoryState, action: JsonHistoryAction): JsonHistoryState {
+  switch (action.type) {
+    case "reset":
+      return { entries: [{ text: action.text, label: action.label }], index: 0 };
+    case "push": {
+      const current = state.entries[state.index];
+      if (current && current.text === action.text) return state;
+      const kept = state.entries.slice(0, state.index + 1);
+      const next = [...kept, { text: action.text, label: action.label }];
+      const overflow = Math.max(0, next.length - JSON_HISTORY_LIMIT);
+      const trimmed = overflow ? next.slice(overflow) : next;
+      return { entries: trimmed, index: trimmed.length - 1 };
+    }
+    case "undo":
+      return state.index > 0 ? { ...state, index: state.index - 1 } : state;
+    case "redo":
+      return state.index < state.entries.length - 1 ? { ...state, index: state.index + 1 } : state;
+    case "jump":
+      if (action.index < 0 || action.index >= state.entries.length) return state;
+      return { ...state, index: action.index };
+    default:
+      return state;
+  }
+}
 
 interface JsonWorkspaceProps {
   table: LoadedTable;
@@ -267,6 +311,8 @@ export function JsonWorkspace({
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["$"]));
   const [treePanelCollapsed, setTreePanelCollapsed] = useState(false);
   const [flattenCollapsed, setFlattenCollapsed] = useState(false);
+  const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const [history, dispatchHistory] = useReducer(jsonHistoryReducer, { entries: [], index: 0 });
   const [treePanelWidthPercent, setTreePanelWidthPercent] = useState(DEFAULT_JSON_TREE_WIDTH_PERCENT);
   const [isTreeResizing, setIsTreeResizing] = useState(false);
   const [rawScrollTop, setRawScrollTop] = useState(0);
@@ -278,6 +324,11 @@ export function JsonWorkspace({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const mainRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const rawTextRef = useRef(rawText);
+  const pushTimerRef = useRef<number | null>(null);
+
+  const canUndo = history.index > 0;
+  const canRedo = history.index < history.entries.length - 1;
 
   const fileName = getFileName(table.filePath);
   const extension = getFileExtension(table.filePath);
@@ -304,6 +355,14 @@ export function JsonWorkspace({
   const lineCount = useMemo(() => rawText.split(/\r\n|\r|\n/).length, [rawText]);
   const lineNumbers = useMemo(() => Array.from({ length: lineCount }, (_, i) => i + 1), [lineCount]);
 
+  useLayoutEffect(() => {
+    rawTextRef.current = rawText;
+  });
+
+  useEffect(() => () => {
+    if (pushTimerRef.current) window.clearTimeout(pushTimerRef.current);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -317,6 +376,7 @@ export function JsonWorkspace({
         setFileSize(new Blob([text]).size);
         setSelectedPath("$");
         setExpanded(new Set(["$"]));
+        dispatchHistory({ type: "reset", text, label: "Opened" });
       })
       .catch((err) => {
         if (!cancelled) setLoadError(String(err));
@@ -338,6 +398,41 @@ export function JsonWorkspace({
     }
     setRawScrollTop(editor.scrollTop);
   }, [rawText]);
+
+  const flushPendingHistory = useCallback(() => {
+    if (pushTimerRef.current) {
+      window.clearTimeout(pushTimerRef.current);
+      pushTimerRef.current = null;
+      dispatchHistory({ type: "push", text: rawTextRef.current, label: "Edited" });
+    }
+  }, []);
+
+  // Apply text when the user navigates history (undo / redo / jump). Pushes are
+  // no-ops here because the current entry text already equals rawText.
+  useEffect(() => {
+    const entry = history.entries[history.index];
+    if (entry && entry.text !== rawTextRef.current) {
+      if (pushTimerRef.current) {
+        window.clearTimeout(pushTimerRef.current);
+        pushTimerRef.current = null;
+      }
+      setRawText(entry.text);
+    }
+  }, [history.index, history.entries]);
+
+  const handleUndo = useCallback(() => {
+    flushPendingHistory();
+    dispatchHistory({ type: "undo" });
+  }, [flushPendingHistory]);
+
+  const handleRedo = useCallback(() => {
+    dispatchHistory({ type: "redo" });
+  }, []);
+
+  const handleJump = useCallback((index: number) => {
+    flushPendingHistory();
+    dispatchHistory({ type: "jump", index });
+  }, [flushPendingHistory]);
 
   const togglePath = useCallback((path: string) => {
     setExpanded((prev) => {
@@ -387,19 +482,41 @@ export function JsonWorkspace({
 
   const handleFormat = useCallback(() => {
     if (!isValid) return;
-    setRawText(serializeJsonForFile(parsed.value, extension, true, rawText));
-    setStatusMessage(isJsonLinesExtension(extension) ? "Formatted JSON Lines" : "Formatted JSON");
-  }, [extension, isValid, parsed.value, rawText]);
+    flushPendingHistory();
+    const formatted = serializeJsonForFile(parsed.value, extension, true, rawText);
+    setRawText(formatted);
+    const label = isJsonLinesExtension(extension) ? "Formatted JSON Lines" : "Formatted JSON";
+    dispatchHistory({ type: "push", text: formatted, label });
+    setStatusMessage(label);
+  }, [extension, isValid, parsed.value, rawText, flushPendingHistory]);
 
   const handleMinify = useCallback(() => {
     if (!isValid) return;
-    setRawText(serializeJsonForFile(parsed.value, extension, false, rawText));
-    setStatusMessage(isJsonLinesExtension(extension) ? "Minified JSON Lines" : "Minified JSON");
-  }, [extension, isValid, parsed.value, rawText]);
+    flushPendingHistory();
+    const minified = serializeJsonForFile(parsed.value, extension, false, rawText);
+    setRawText(minified);
+    const label = isJsonLinesExtension(extension) ? "Minified JSON Lines" : "Minified JSON";
+    dispatchHistory({ type: "push", text: minified, label });
+    setStatusMessage(label);
+  }, [extension, isValid, parsed.value, rawText, flushPendingHistory]);
 
   const handleRawChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setRawText(event.currentTarget.value);
+    const value = event.currentTarget.value;
+    setRawText(value);
+    if (pushTimerRef.current) window.clearTimeout(pushTimerRef.current);
+    pushTimerRef.current = window.setTimeout(() => {
+      pushTimerRef.current = null;
+      dispatchHistory({ type: "push", text: rawTextRef.current, label: "Edited" });
+    }, JSON_TYPING_PUSH_DELAY);
   }, []);
+
+  const handleRevert = useCallback(() => {
+    if (rawText === originalText) return;
+    flushPendingHistory();
+    setRawText(originalText);
+    dispatchHistory({ type: "push", text: originalText, label: "Reverted to saved" });
+    setStatusMessage("Reverted to saved");
+  }, [rawText, originalText, flushPendingHistory]);
 
   const handleSave = useCallback(async () => {
     if (!isValid) {
@@ -437,16 +554,44 @@ export function JsonWorkspace({
     }
   }, [flattened.columns, flattened.rows]);
 
+  const handleSaveAs = useCallback(async () => {
+    if (!isValid) {
+      setStatusMessage("Fix JSON before saving");
+      return;
+    }
+    setSaving(true);
+    setStatusMessage(null);
+    try {
+      const path = await window.api.saveFileDialog(extension || "json");
+      if (!path) return;
+      await window.api.writeTextFile(path, rawText);
+      setStatusMessage(`Saved copy to ${getFileName(path)}`);
+    } catch (err) {
+      setStatusMessage(`Save As failed: ${String(err)}`);
+    } finally {
+      setSaving(false);
+    }
+  }, [isValid, extension, rawText]);
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      const meta = event.metaKey || event.ctrlKey;
+      if (!meta) return;
+      const key = event.key.toLowerCase();
+      if (key === "s") {
         event.preventDefault();
         if (isDirty && isValid && !saving) handleSave();
+      } else if (key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        if (canUndo) handleUndo();
+      } else if ((key === "z" && event.shiftKey) || key === "y") {
+        event.preventDefault();
+        if (canRedo) handleRedo();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleSave, isDirty, isValid, saving]);
+  }, [handleSave, isDirty, isValid, saving, canUndo, canRedo, handleUndo, handleRedo]);
 
   useEffect(() => {
     if (!statusMessage) return;
@@ -456,11 +601,11 @@ export function JsonWorkspace({
 
   const selectedLabel = flattenPathForLabel(selectedPath) || "$";
   const mainClassName = `json-main${treePanelCollapsed ? " tree-collapsed" : ""}${isTreeResizing ? " resizing" : ""}`;
-  const mainStyle = treePanelCollapsed
-    ? undefined
-    : ({
-        gridTemplateColumns: `minmax(${JSON_TREE_MIN_WIDTH}px, ${treePanelWidthPercent}%) ${JSON_SPLITTER_WIDTH}px minmax(${JSON_EDITOR_MIN_WIDTH}px, 1fr)`,
-      } as React.CSSProperties);
+  const historyCol = historyPanelOpen ? " minmax(220px, 280px)" : "";
+  const treeCols = treePanelCollapsed
+    ? `38px minmax(${JSON_EDITOR_MIN_WIDTH}px, 1fr)`
+    : `minmax(${JSON_TREE_MIN_WIDTH}px, ${treePanelWidthPercent}%) ${JSON_SPLITTER_WIDTH}px minmax(${JSON_EDITOR_MIN_WIDTH}px, 1fr)`;
+  const mainStyle = { gridTemplateColumns: `${treeCols}${historyCol}` } as React.CSSProperties;
 
   return (
     <div className="json-workspace">
@@ -473,13 +618,21 @@ export function JsonWorkspace({
           <span className="json-toolbar-divider" />
           <Button icon="folder-open" text="Open JSON" onClick={onOpenFiles} />
           <Button icon="floppy-disk" text="Save" intent={Intent.PRIMARY} onClick={handleSave} disabled={!isDirty || !isValid || saving} loading={saving} />
+          <Button icon="duplicate" text="Save As" onClick={handleSaveAs} disabled={!isValid || saving} />
+          <Button icon="reset" text="Revert" onClick={handleRevert} disabled={!isDirty} />
+          <span className="json-toolbar-divider" />
+          <Button icon="undo" aria-label="Undo (Cmd+Z)" title="Undo (Cmd+Z)" onClick={handleUndo} disabled={!canUndo} />
+          <Button icon="redo" aria-label="Redo (Cmd+Shift+Z)" title="Redo (Cmd+Shift+Z)" onClick={handleRedo} disabled={!canRedo} />
           <span className="json-toolbar-divider" />
           <Button icon="align-left" text="Format" onClick={handleFormat} disabled={!isValid} />
           <Button icon="minimize" text="Minify" onClick={handleMinify} disabled={!isValid} />
         </div>
-        <Tag minimal intent={isValid ? Intent.SUCCESS : Intent.DANGER} icon={isValid ? "tick-circle" : "error"}>
-          {isValid ? "Valid JSON" : "Invalid JSON"}
-        </Tag>
+        <div className="json-toolbar-right">
+          <Button icon="history" text="History" active={historyPanelOpen} onClick={() => setHistoryPanelOpen((prev) => !prev)} />
+          <Tag minimal intent={isValid ? Intent.SUCCESS : Intent.DANGER} icon={isValid ? "tick-circle" : "error"}>
+            {isValid ? "Valid JSON" : "Invalid JSON"}
+          </Tag>
+        </div>
       </div>
 
       {loadError && (
@@ -617,6 +770,56 @@ export function JsonWorkspace({
             )}
           </div>
         </section>
+
+        {historyPanelOpen && (
+          <section className="json-panel json-history-panel">
+            <div className="json-panel-header">
+              <strong>History</strong>
+              <button
+                type="button"
+                className="json-panel-collapse"
+                aria-label="Close history panel"
+                title="Close history panel"
+                onClick={() => setHistoryPanelOpen(false)}
+              >
+                <Icon icon="cross" size={12} />
+              </button>
+            </div>
+            <div className="json-history-scroll">
+              {history.entries.length === 0 ? (
+                <div className="json-tree-empty">
+                  <Icon icon="history" size={18} />
+                  <span>No history yet</span>
+                </div>
+              ) : (
+                history.entries
+                  .map((entry, index) => ({ entry, index }))
+                  .reverse()
+                  .map(({ entry, index }) => {
+                  const isCurrent = index === history.index;
+                  return (
+                    <button
+                      key={index}
+                      type="button"
+                      className={`json-history-row${isCurrent ? " current" : ""}${index > history.index ? " ahead" : ""}`}
+                      onClick={() => handleJump(index)}
+                      title={`Restore: ${entry.label}`}
+                    >
+                      <span className="json-history-marker" />
+                      <span className="json-history-step">{index + 1}</span>
+                      <span className="json-history-label">{entry.label}</span>
+                      {isCurrent && <Tag minimal intent={Intent.PRIMARY}>current</Tag>}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            <div className="json-panel-footer">
+              <span>{history.index + 1} / {history.entries.length}</span>
+              <span>{canRedo ? `${history.entries.length - 1 - history.index} ahead` : "latest"}</span>
+            </div>
+          </section>
+        )}
       </div>
 
       <div className={`json-flatten-panel${flattenCollapsed ? " collapsed" : ""}`}>

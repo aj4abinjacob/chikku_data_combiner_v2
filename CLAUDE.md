@@ -91,6 +91,9 @@ Three-column layout: config, preview, history. Operations include trim, uppercas
 ### DataOperationsDialog.tsx — Data Operations Modal
 Includes substring, custom SQL, create/delete/combine/rename columns, sampling, duplicate removal, empty-row removal, conditional column, and NULL/sentinel replacement operations. Generates `CREATE OR REPLACE TABLE ... AS SELECT` SQL.
 
+### JsonWorkspace.tsx — JSON/JSONL/NDJSON Editor
+Shown instead of the data grid when the active file is json/jsonl/ndjson. Layout: toolbar (filename + dirty dot, Open/Save/Save As/Revert, Undo/Redo, Format/Minify, History toggle, validity tag) + resizable JSON tree panel + raw textarea editor (synced line numbers) + optional History panel + collapsible Flatten Preview. Full snapshot undo/redo via `useReducer` (`jsonHistoryReducer`, 100-entry cap, debounced typing pushes, immediate Format/Minify/Revert pushes); history list supports jump-to-any-point. Save writes in place via `writeTextFile`; Save As writes a copy (stays on current file). Cmd/Ctrl+S save, Cmd+Z/Cmd+Shift+Z undo/redo.
+
 ### Other Components
 - **ExportDialog.tsx**: Format selection (CSV/TSV/JSON/Excel/Parquet), table selection, view options, Excel row/col limit warnings
 - **CombineDialog.tsx**: Column mapping modal for UNION ALL with auto VARCHAR cast
