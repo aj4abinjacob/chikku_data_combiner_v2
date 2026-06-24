@@ -96,6 +96,34 @@ function nodeMatches(value: JsonValue, name: string, path: string, query: string
   });
 }
 
+function nodeSelfMatches(value: JsonValue, name: string, path: string, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return false;
+  if (name.toLowerCase().includes(q) || searchablePathText(path).includes(q)) return true;
+  if (getJsonType(value).includes(q)) return true;
+  if (value === null || typeof value !== "object") {
+    return String(value).toLowerCase().includes(q);
+  }
+  return false;
+}
+
+function countSelfMatches(value: JsonValue, name: string, path: string, query: string): number {
+  let total = nodeSelfMatches(value, name, path, query) ? 1 : 0;
+  if (value !== null && typeof value === "object") {
+    if (Array.isArray(value)) {
+      value.forEach((child, index) => {
+        total += countSelfMatches(child, String(index), `${path}[${index}]`, query);
+      });
+    } else {
+      Object.entries(value).forEach(([key, child]) => {
+        const childPath = path === "$" ? `$.${key}` : `${path}.${key}`;
+        total += countSelfMatches(child, key, childPath, query);
+      });
+    }
+  }
+  return total;
+}
+
 function JsonTypeBadge({ value }: { value: JsonValue }): React.ReactElement {
   const type = getJsonType(value);
   const count = getChildCount(value);
@@ -132,7 +160,6 @@ function JsonTreeRow({
   const isExpanded = expanded.has(path);
   const searchActive = search.trim().length > 0;
   const isVisuallyExpanded = isExpanded || searchActive;
-  const type = getJsonType(value);
   const scalar = formatJsonScalar(value);
   const isSelected = selectedPath === path;
 
@@ -179,7 +206,23 @@ function JsonTreeRow({
       <div
         className={`json-tree-row${isSelected ? " selected" : ""}`}
         style={{ paddingLeft: 8 + depth * 18 }}
+        role="treeitem"
+        tabIndex={0}
+        aria-expanded={expandable ? isVisuallyExpanded : undefined}
+        aria-selected={isSelected}
         onClick={() => onSelect(path)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onSelect(path);
+          } else if (expandable && event.key === "ArrowRight" && !isVisuallyExpanded) {
+            event.preventDefault();
+            onToggle(path);
+          } else if (expandable && event.key === "ArrowLeft" && isVisuallyExpanded) {
+            event.preventDefault();
+            onToggle(path);
+          }
+        }}
         title={path}
       >
         {expandable ? (
@@ -190,6 +233,7 @@ function JsonTreeRow({
               event.stopPropagation();
               onToggle(path);
             }}
+            tabIndex={-1}
             aria-label={isVisuallyExpanded ? "Collapse JSON node" : "Expand JSON node"}
           >
             <Icon icon={isVisuallyExpanded ? "chevron-down" : "chevron-right"} size={12} />
@@ -197,9 +241,6 @@ function JsonTreeRow({
         ) : (
           <span className="json-tree-toggle-spacer" />
         )}
-        <span className={`json-tree-kind json-tree-kind-${type}`}>
-          {type === "array" ? "[]" : type === "object" ? "{}" : type === "string" ? "ABC" : type === "number" ? "123" : type === "boolean" ? "BOOL" : "NULL"}
-        </span>
         <span className="json-tree-name">{name}</span>
         {scalar && <span className="json-tree-value">{scalar}</span>}
         <JsonTypeBadge value={value} />
@@ -225,6 +266,7 @@ export function JsonWorkspace({
   const [treeSearch, setTreeSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["$"]));
   const [treePanelCollapsed, setTreePanelCollapsed] = useState(false);
+  const [flattenCollapsed, setFlattenCollapsed] = useState(false);
   const [treePanelWidthPercent, setTreePanelWidthPercent] = useState(DEFAULT_JSON_TREE_WIDTH_PERCENT);
   const [isTreeResizing, setIsTreeResizing] = useState(false);
   const [rawScrollTop, setRawScrollTop] = useState(0);
@@ -249,6 +291,16 @@ export function JsonWorkspace({
   }, [isValid, parsed.value, flattenOptions]);
 
   const previewRows = flattened.rows.slice(0, 120);
+  const previewTruncated = flattened.rows.length > previewRows.length;
+  const treeSearchActive = treeSearch.trim().length > 0;
+  const rootMatches = useMemo(
+    () => (isValid ? nodeMatches(parsed.value, "root", "$", treeSearch) : false),
+    [isValid, parsed.value, treeSearch]
+  );
+  const searchMatchCount = useMemo(
+    () => (isValid && treeSearchActive ? countSelfMatches(parsed.value, "root", "$", treeSearch) : 0),
+    [isValid, treeSearchActive, parsed.value, treeSearch]
+  );
   const lineCount = useMemo(() => rawText.split(/\r\n|\r|\n/).length, [rawText]);
   const lineNumbers = useMemo(() => Array.from({ length: lineCount }, (_, i) => i + 1), [lineCount]);
 
@@ -385,6 +437,23 @@ export function JsonWorkspace({
     }
   }, [flattened.columns, flattened.rows]);
 
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        if (isDirty && isValid && !saving) handleSave();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleSave, isDirty, isValid, saving]);
+
+  useEffect(() => {
+    if (!statusMessage) return;
+    const id = window.setTimeout(() => setStatusMessage(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [statusMessage]);
+
   const selectedLabel = flattenPathForLabel(selectedPath) || "$";
   const mainClassName = `json-main${treePanelCollapsed ? " tree-collapsed" : ""}${isTreeResizing ? " resizing" : ""}`;
   const mainStyle = treePanelCollapsed
@@ -397,13 +466,16 @@ export function JsonWorkspace({
     <div className="json-workspace">
       <div className="json-toolbar">
         <div className="json-toolbar-actions">
+          <span className="json-file-name" title={table.filePath}>
+            {fileName}
+            {isDirty && <span className="json-dirty-dot" title="Unsaved changes">●</span>}
+          </span>
+          <span className="json-toolbar-divider" />
           <Button icon="folder-open" text="Open JSON" onClick={onOpenFiles} />
-          <Button icon="floppy-disk" text="Save" onClick={handleSave} disabled={!isDirty || !isValid || saving} loading={saving} />
+          <Button icon="floppy-disk" text="Save" intent={Intent.PRIMARY} onClick={handleSave} disabled={!isDirty || !isValid || saving} loading={saving} />
+          <span className="json-toolbar-divider" />
           <Button icon="align-left" text="Format" onClick={handleFormat} disabled={!isValid} />
           <Button icon="minimize" text="Minify" onClick={handleMinify} disabled={!isValid} />
-          <Button icon="tick-circle" text="Validate" intent={isValid ? Intent.SUCCESS : Intent.DANGER} onClick={() => setStatusMessage(isValid ? "Valid JSON" : "Invalid JSON")} />
-          <Button icon="th" text="Flatten" disabled={!isValid} onClick={() => setStatusMessage(`${flattened.rows.length.toLocaleString()} rows ready`)} />
-          <Button icon={exporting ? <Spinner size={14} /> : "export"} text="Export CSV" intent={Intent.PRIMARY} disabled={!isValid || flattened.rows.length === 0 || exporting} onClick={handleExportCsv} />
         </div>
         <Tag minimal intent={isValid ? Intent.SUCCESS : Intent.DANGER} icon={isValid ? "tick-circle" : "error"}>
           {isValid ? "Valid JSON" : "Invalid JSON"}
@@ -453,8 +525,12 @@ export function JsonWorkspace({
               />
               <span className="json-path-pill" title={selectedPath}>Path: {selectedLabel}</span>
             </div>
+            {treeSearchActive && (
+              <div className="json-tree-search-meta">
+                {searchMatchCount.toLocaleString()} match{searchMatchCount === 1 ? "" : "es"}
+              </div>
+            )}
             <div className="json-tree-column-header" aria-hidden="true">
-              <span />
               <span />
               <span>Key</span>
               <span>Value</span>
@@ -462,7 +538,13 @@ export function JsonWorkspace({
             </div>
             <div className="json-tree-scroll">
               {loading && <div className="json-loading"><Spinner size={18} /> Loading JSON...</div>}
-              {!loading && isValid && (
+              {!loading && isValid && treeSearchActive && !rootMatches && (
+                <div className="json-tree-empty">
+                  <Icon icon="search" size={18} />
+                  <span>No matches for "{treeSearch.trim()}"</span>
+                </div>
+              )}
+              {!loading && isValid && (!treeSearchActive || rootMatches) && (
                 <JsonTreeRow
                   name="root"
                   path="$"
@@ -481,10 +563,6 @@ export function JsonWorkspace({
                   <span>{parsed.error}</span>
                 </div>
               )}
-            </div>
-            <div className="json-panel-footer">
-              <span>Path: {selectedPath}</span>
-              <span>{flattened.rows.length.toLocaleString()} rows</span>
             </div>
           </section>
         )}
@@ -505,7 +583,7 @@ export function JsonWorkspace({
           <div className="json-panel-header">
             <strong>Raw Editor</strong>
             <span className="json-editor-meta">
-              Scroll pane | Ln {lineCount.toLocaleString()} | UTF-8 | {extension.toUpperCase() || "JSON"}
+              {lineCount.toLocaleString()} lines · UTF-8 · {extension.toUpperCase() || "JSON"}
             </span>
           </div>
           <div className={`json-editor${parsed.error ? " has-error" : ""}`}>
@@ -541,11 +619,26 @@ export function JsonWorkspace({
         </section>
       </div>
 
-      <div className="json-flatten-panel">
+      <div className={`json-flatten-panel${flattenCollapsed ? " collapsed" : ""}`}>
         <div className="json-flatten-header">
-          <div>
-            <strong>Flatten Preview</strong>
-            <span>{flattened.rows.length.toLocaleString()} rows | {flattened.columns.length.toLocaleString()} columns | {flattened.recordPath}</span>
+          <div className="json-flatten-title">
+            <button
+              type="button"
+              className="json-panel-collapse"
+              aria-label={flattenCollapsed ? "Expand flatten preview" : "Collapse flatten preview"}
+              aria-expanded={!flattenCollapsed}
+              title={flattenCollapsed ? "Expand flatten preview" : "Collapse flatten preview"}
+              onClick={() => setFlattenCollapsed((prev) => !prev)}
+            >
+              <Icon icon={flattenCollapsed ? "chevron-up" : "chevron-down"} size={12} />
+            </button>
+            <div>
+              <strong>Flatten Preview</strong>
+              <span>
+                {flattened.rows.length.toLocaleString()} rows · {flattened.columns.length.toLocaleString()} columns · {flattened.recordPath}
+                {previewTruncated && ` · showing first ${previewRows.length}`}
+              </span>
+            </div>
           </div>
           <div className="json-flatten-options">
             <label>
@@ -580,8 +673,17 @@ export function JsonWorkspace({
                 setFlattenOptions((prev) => ({ ...prev, includeArrayIndex }));
               }}
             />
+            <span className="json-toolbar-divider" />
+            <Button
+              icon={exporting ? <Spinner size={14} /> : "export"}
+              text="Export CSV"
+              intent={Intent.PRIMARY}
+              disabled={!isValid || flattened.rows.length === 0 || exporting}
+              onClick={handleExportCsv}
+            />
           </div>
         </div>
+        {!flattenCollapsed && (
         <div className="json-preview-scroll">
           {flattened.columns.length === 0 ? (
             <div className="json-preview-empty">No flattened columns</div>
@@ -606,13 +708,10 @@ export function JsonWorkspace({
             </table>
           )}
         </div>
+        )}
         <div className="json-status-strip">
-          <span>File: {fileName}</span>
           <span>Size: {formatFileSize(fileSize)}</span>
           <span>Rows: {table.rowCount.toLocaleString()}</span>
-          <span>Flattened: {flattened.rows.length.toLocaleString()} x {flattened.columns.length.toLocaleString()}</span>
-          <span>Validation: {isValid ? "Valid" : "Invalid"}</span>
-          <span>Mode: JSON</span>
         </div>
       </div>
     </div>

@@ -3216,6 +3216,32 @@ html, body, #root {
   }
 }
 
+.json-file-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #182026;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.json-dirty-dot {
+  color: #d9822b;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.json-toolbar-divider {
+  width: 1px;
+  height: 22px;
+  background: #d8e1e8;
+  flex-shrink: 0;
+}
+
 .json-load-error {
   margin: 8px 12px 0;
   flex-shrink: 0;
@@ -3374,7 +3400,7 @@ html, body, #root {
 .json-tree-column-header {
   min-height: 26px;
   display: grid;
-  grid-template-columns: 18px 34px minmax(150px, 280px) minmax(140px, 1fr) 96px;
+  grid-template-columns: 18px minmax(150px, 280px) minmax(140px, 1fr) 96px;
   align-items: center;
   gap: 8px;
   padding: 0 10px;
@@ -3387,14 +3413,25 @@ html, body, #root {
   text-transform: uppercase;
   flex-shrink: 0;
 
-  span:nth-child(4) {
+  span:nth-child(3) {
     padding-left: 12px;
     border-left: 1px solid #d8e1e8;
   }
 
-  span:nth-child(5) {
+  span:nth-child(4) {
     text-align: right;
   }
+}
+
+.json-tree-search-meta {
+  padding: 4px 10px;
+  border-bottom: 1px solid #e1e8ed;
+  background: #f7f9fb;
+  color: #5c7080;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
 }
 
 .json-path-pill {
@@ -3424,7 +3461,7 @@ html, body, #root {
 .json-tree-row {
   min-height: 26px;
   display: grid;
-  grid-template-columns: 18px 34px minmax(150px, 280px) minmax(140px, 1fr) 96px;
+  grid-template-columns: 18px minmax(150px, 280px) minmax(140px, 1fr) 96px;
   align-items: center;
   gap: 8px;
   padding: 2px 10px;
@@ -3433,6 +3470,12 @@ html, body, #root {
 
   &:hover {
     background: #f5f8fa;
+  }
+
+  &:focus-visible {
+    outline: none;
+    border-color: #137cbd;
+    background: #eef7ff;
   }
 
   &.selected {
@@ -3536,6 +3579,15 @@ html, body, #root {
 .json-type-boolean {
   background: rgba(15, 153, 96, 0.12);
   color: #0f9960;
+}
+
+.json-type-number {
+  color: #106ba3;
+}
+
+.json-type-null {
+  color: #8a9ba8;
+  font-style: italic;
 }
 
 .json-loading,
@@ -3679,6 +3731,25 @@ html, body, #root {
   overflow: hidden;
 }
 
+.json-flatten-panel.collapsed {
+  height: auto;
+  min-height: 0;
+}
+
+.json-flatten-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+
+  > div {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+}
+
 .json-flatten-header {
   min-height: 58px;
   display: flex;
@@ -3690,12 +3761,7 @@ html, body, #root {
   background: #fff;
   flex-shrink: 0;
 
-  > div:first-child {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-
+  .json-flatten-title > div {
     strong {
       color: #182026;
       font-size: 13px;
@@ -8122,17 +8188,28 @@ html.dark-theme #root {
   }
 
   .json-panel-header strong,
-  .json-flatten-header > div:first-child strong,
+  .json-flatten-title strong,
+  .json-file-name,
   .json-tree-name,
   .json-code-input {
     color: @dark-text-1;
+  }
+
+  .json-toolbar-divider {
+    background: @dark-border-1;
+  }
+
+  .json-tree-search-meta {
+    background: @dark-bg-3;
+    border-bottom-color: @dark-border-1;
+    color: @dark-text-3;
   }
 
   .json-panel-collapse,
   .json-editor-meta,
   .json-tree-column-header,
   .json-panel-footer,
-  .json-flatten-header > div:first-child span,
+  .json-flatten-title span,
   .json-flatten-options label,
   .json-flatten-options .bp4-control,
   .json-loading,
@@ -8160,7 +8237,7 @@ html.dark-theme #root {
   }
 
   .json-tree-value,
-  .json-tree-column-header span:nth-child(4) {
+  .json-tree-column-header span:nth-child(3) {
     border-left-color: @dark-border-1;
   }
 
@@ -8186,6 +8263,14 @@ html.dark-theme #root {
   .json-type-boolean {
     background: @dark-success-bg;
     color: @dark-success;
+  }
+
+  .json-type-number {
+    color: @dark-accent;
+  }
+
+  .json-type-null {
+    color: @dark-text-3;
   }
 
   .json-editor {
