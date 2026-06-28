@@ -48,6 +48,24 @@ function getFileExtension(filePath: string): string {
   return filePath.split(".").pop()?.toLowerCase() || "";
 }
 
+function isJsonFilePath(filePath: string): boolean {
+  const ext = getFileExtension(filePath);
+  return ext === "json" || ext === "jsonl" || ext === "ndjson";
+}
+
+function estimateJsonRowCount(text: string, filePath: string): number {
+  const ext = getFileExtension(filePath);
+  if (ext === "jsonl" || ext === "ndjson") {
+    return text.split(/\r\n|\r|\n/).filter((line) => line.trim().length > 0).length;
+  }
+  try {
+    const value = JSON.parse(text);
+    return Array.isArray(value) ? value.length : 1;
+  } catch (_) {
+    return 0;
+  }
+}
+
 /** Generate a unique "combined_N" table name that doesn't collide with existing tables */
 function nextCombinedName(existingNames: Set<string>): string {
   let i = 1;
@@ -233,10 +251,9 @@ export function App(): React.ReactElement {
     [activeTable, tables]
   );
 
-  const activeFileExtension = activeLoadedTable ? getFileExtension(activeLoadedTable.filePath) : "";
   const jsonWorkspaceActive = !!activeLoadedTable
     && !activeLoadedTable.filePath.startsWith("(")
-    && (activeFileExtension === "json" || activeFileExtension === "jsonl" || activeFileExtension === "ndjson");
+    && isJsonFilePath(activeLoadedTable.filePath);
 
   // Chunk cache for lazy-loaded virtual scrolling (flat mode)
   const { totalRows, getRow, ensureRange } = useChunkCache({
@@ -421,6 +438,24 @@ export function App(): React.ReactElement {
     []
   );
 
+  const loadJsonWorkspaceFile = useCallback(
+    async (fp: string, tableName: string): Promise<LoadedTable | null> => {
+      try {
+        const text = await window.api.readTextFile(fp);
+        return {
+          tableName,
+          filePath: fp,
+          schema: [],
+          rowCount: estimateJsonRowCount(text, fp),
+        };
+      } catch (err) {
+        console.error(`Failed to open JSON ${fp}:`, err);
+        return null;
+      }
+    },
+    []
+  );
+
   // Load files into DuckDB (handles all formats)
   // accumulatedTables: when continuing after a dialog, pass the already-loaded tables
   const loadFiles = useCallback(
@@ -438,7 +473,13 @@ export function App(): React.ReactElement {
         const ext = getFileExtension(fp);
         const remaining = filePaths.slice(i + 1);
 
-        if (ext === "xlsx" || ext === "xls") {
+        if (isJsonFilePath(fp)) {
+          const tableName = makeUniqueTableName(makeTableName(fp), tableNames);
+          const result = await loadJsonWorkspaceFile(fp, tableName);
+          if (result) {
+            newTables.push(result);
+          }
+        } else if (ext === "xlsx" || ext === "xls") {
           // Excel: check for multiple sheets
           try {
             const sheets = await window.api.getExcelSheets(fp);
@@ -482,7 +523,7 @@ export function App(): React.ReactElement {
             newTables.push(result);
           }
         } else {
-          // JSON, Parquet — straight load
+          // Parquet and other supported tabular formats — straight load
           const tableName = makeUniqueTableName(makeTableName(fp), tableNames);
           const result = await loadSingleFile(fp, tableName);
           if (result && !("error" in result)) {
@@ -493,7 +534,7 @@ export function App(): React.ReactElement {
 
       await finalizeLoadedTables(newTables, replaceOriginal);
     },
-    [loadSingleFile, finalizeLoadedTables]
+    [loadSingleFile, loadJsonWorkspaceFile, finalizeLoadedTables]
   );
 
   // Handle Excel sheet picker result
@@ -566,6 +607,25 @@ export function App(): React.ReactElement {
     if (!currentTableName) return;
     const currentTable = tablesRef.current.find((t) => t.tableName === currentTableName);
     if (!currentTable) return;
+
+    if (isJsonFilePath(currentTable.filePath)) {
+      try {
+        const text = await window.api.readTextFile(currentTable.filePath);
+        const rowCount = estimateJsonRowCount(text, currentTable.filePath);
+        setTables((prev) =>
+          prev.map((table) =>
+            table.tableName === currentTable.tableName
+              ? { ...table, rowCount }
+              : table
+          )
+        );
+        setDataVersion((v) => v + 1);
+        setResetKey((k) => k + 1);
+      } catch (err) {
+        console.error(`Failed to refresh JSON ${currentTable.filePath}:`, err);
+      }
+      return;
+    }
 
     const result = await loadSingleFile(
       currentTable.filePath,
@@ -642,6 +702,19 @@ export function App(): React.ReactElement {
     if (!activeTable) {
       setSchema([]);
       setViewState((prev) => ({ ...prev, visibleColumns: [], columnOrder: [] }));
+      return;
+    }
+
+    const currentTable = tablesRef.current.find((table) => table.tableName === activeTable);
+    if (currentTable && !currentTable.filePath.startsWith("(") && isJsonFilePath(currentTable.filePath)) {
+      setSchema([]);
+      setViewState((prev) => ({
+        ...prev,
+        visibleColumns: [],
+        columnOrder: [],
+        sortColumns: [],
+        pivotConfig: null,
+      }));
       return;
     }
 

@@ -1,6 +1,8 @@
 use crate::error::AppResult;
 use parking_lot::Mutex;
-use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{
+    AboutMetadata, Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
+};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_dialog::DialogExt;
 
@@ -60,8 +62,22 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> AppResult<Menu<R>> {
 
     #[cfg(target_os = "macos")]
     {
+        let pkg_info = app.package_info();
+        let config = app.config();
+        let about_metadata = AboutMetadata {
+            name: Some(
+                config
+                    .product_name
+                    .clone()
+                    .unwrap_or_else(|| pkg_info.name.clone()),
+            ),
+            version: Some(pkg_info.version.to_string()),
+            copyright: config.bundle.copyright.clone(),
+            authors: config.bundle.publisher.clone().map(|p| vec![p]),
+            ..Default::default()
+        };
         let app_menu = SubmenuBuilder::new(app, "Chikku Parser")
-            .item(&PredefinedMenuItem::about(app, None, None)?)
+            .item(&PredefinedMenuItem::about(app, None, Some(about_metadata))?)
             .separator()
             .item(&PredefinedMenuItem::services(app, None)?)
             .separator()
