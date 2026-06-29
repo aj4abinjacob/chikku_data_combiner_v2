@@ -20,6 +20,9 @@ import { useChunkCache } from "../hooks/useChunkCache";
 import { usePivotCache } from "../hooks/usePivotCache";
 
 const FILTER_PANEL_EXIT_MS = 180;
+const DEFAULT_DISPLAY_DECIMAL_PLACES = 4;
+const MIN_DISPLAY_DECIMAL_PLACES = 0;
+const MAX_DISPLAY_DECIMAL_PLACES = 10;
 
 function makeTableName(filePath: string): string {
   const name = filePath.split(/[/\\]/).pop() || "table";
@@ -51,6 +54,13 @@ function getFileExtension(filePath: string): string {
 function isJsonFilePath(filePath: string): boolean {
   const ext = getFileExtension(filePath);
   return ext === "json" || ext === "jsonl" || ext === "ndjson";
+}
+
+function clampDisplayDecimalPlaces(value: number): number {
+  return Math.min(
+    MAX_DISPLAY_DECIMAL_PLACES,
+    Math.max(MIN_DISPLAY_DECIMAL_PLACES, value)
+  );
 }
 
 function estimateJsonRowCount(text: string, filePath: string): number {
@@ -222,6 +232,16 @@ export function App(): React.ReactElement {
   const [tableHistories, setTableHistories] = useState<Map<string, TableHistory>>(new Map());
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("theme") === "dark");
+  const [displayDecimalPlaces, setDisplayDecimalPlaces] = useState(() => {
+    const storedValue = localStorage.getItem("displayDecimalPlaces");
+    if (storedValue !== null) {
+      const stored = Number(storedValue);
+      if (Number.isInteger(stored)) {
+        return clampDisplayDecimalPlaces(stored);
+      }
+    }
+    return DEFAULT_DISPLAY_DECIMAL_PLACES;
+  });
   const [filterPanelMounted, setFilterPanelMounted] = useState(false);
   const filterPanelExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -669,6 +689,10 @@ export function App(): React.ReactElement {
   }, [darkMode]);
 
   useEffect(() => {
+    localStorage.setItem("displayDecimalPlaces", String(displayDecimalPlaces));
+  }, [displayDecimalPlaces]);
+
+  useEffect(() => {
     if (filterPanelOpen) {
       if (filterPanelExitTimerRef.current) {
         clearTimeout(filterPanelExitTimerRef.current);
@@ -931,6 +955,10 @@ export function App(): React.ReactElement {
   const handleClearSort = useCallback(() => {
     setViewState((prev) => ({ ...prev, sortColumns: [] }));
     setResetKey((k) => k + 1);
+  }, []);
+
+  const handleDisplayDecimalPlacesChange = useCallback((places: number) => {
+    setDisplayDecimalPlaces(clampDisplayDecimalPlaces(places));
   }, []);
 
   // ── Pivot View handlers ──
@@ -1969,6 +1997,10 @@ export function App(): React.ReactElement {
                     groupSortMode={pivotActive ? viewState.pivotConfig?.groupSortMode : undefined}
                     groupSortDirection={pivotActive ? viewState.pivotConfig?.groupSortDirection : undefined}
                     onGroupSort={pivotActive ? handleGroupSort : undefined}
+                    displayDecimalPlaces={displayDecimalPlaces}
+                    minDisplayDecimalPlaces={MIN_DISPLAY_DECIMAL_PLACES}
+                    maxDisplayDecimalPlaces={MAX_DISPLAY_DECIMAL_PLACES}
+                    onDisplayDecimalPlacesChange={handleDisplayDecimalPlacesChange}
                   />
                   {filterPanelMounted && (
                     <FilterPanel

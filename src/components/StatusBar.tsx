@@ -42,7 +42,7 @@ export function StatusBar({
 
   return (
     <div className="status-bar">
-      <span className="status-bar-rows" style={{ marginLeft: "auto" }}>
+      <span className="status-bar-rows">
         {activeTable
           ? `${rowsDisplay}${groupDisplay}${pivotDisplay}`
           : "No table selected"}

@@ -806,6 +806,57 @@ html, body, #root {
   font-family: "SF Mono", "Menlo", "Monaco", monospace;
 }
 
+.dg-view-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 32px;
+  padding: 4px 10px;
+  background: #fff;
+  border-bottom: 1px solid #d8e1e8;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.dg-decimals-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.dg-decimals-label {
+  color: #5c7080;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.dg-decimals-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+
+  .bp4-button {
+    min-width: 24px;
+    min-height: 24px;
+    color: #5c7080;
+  }
+}
+
+.dg-decimals-value {
+  min-width: 36px;
+  color: #30404d;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 24px;
+  text-align: center;
+}
+
 .data-grid-scroll {
   flex: 1;
   overflow: auto;
@@ -1066,6 +1117,14 @@ html, body, #root {
   flex: 0 0 auto;
   margin-left: 10px;
   z-index: 4;
+}
+
+.status-bar-rows {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .update-notice {
@@ -6769,6 +6828,20 @@ html.dark-theme #root {
   }
 
   // ── Data Grid ──
+  .dg-view-toolbar {
+    background: @dark-bg-2;
+    border-bottom-color: @dark-border-1;
+  }
+
+  .dg-decimals-label,
+  .dg-decimals-buttons .bp4-button {
+    color: @dark-text-3;
+  }
+
+  .dg-decimals-value {
+    color: @dark-text-1;
+  }
+
   .dg-header {
     background: @dark-bg-3;
     border-bottom-color: @dark-border-1;

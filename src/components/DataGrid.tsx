@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Icon } from "@blueprintjs/core";
+import { Button, ButtonGroup, Icon } from "@blueprintjs/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode } from "../types";
 
@@ -34,6 +34,10 @@ interface DataGridProps {
   groupSortMode?: PivotGroupSortMode | null;
   groupSortDirection?: "ASC" | "DESC";
   onGroupSort?: (mode: PivotGroupSortMode, direction: "ASC" | "DESC" | null) => void;
+  displayDecimalPlaces?: number;
+  minDisplayDecimalPlaces?: number;
+  maxDisplayDecimalPlaces?: number;
+  onDisplayDecimalPlacesChange?: (places: number) => void;
 }
 
 export function DataGrid({
@@ -55,6 +59,10 @@ export function DataGrid({
   groupSortMode,
   groupSortDirection,
   onGroupSort,
+  displayDecimalPlaces = 4,
+  minDisplayDecimalPlaces = 0,
+  maxDisplayDecimalPlaces = 10,
+  onDisplayDecimalPlacesChange,
 }: DataGridProps): React.ReactElement {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const anchor = useRef<{ row: number; col: string } | null>(null);
@@ -429,7 +437,7 @@ export function DataGrid({
             const row = getRow(i);
             if (row) value = row[col];
           }
-          const text = formatCell(value);
+          const text = formatCell(value, displayDecimalPlaces);
           if (text) {
             const w = ctx.measureText(text).width + CELL_PADDING;
             if (w > maxWidth) maxWidth = w;
@@ -441,7 +449,7 @@ export function DataGrid({
       autoFittedCols.current.add(col);
       setColumnWidths((prev) => ({ ...prev, [col]: fitWidth }));
     },
-    [virtualizer, getRow, pivotMode, pivotFlatRows, columns]
+    [virtualizer, getRow, pivotMode, pivotFlatRows, columns, displayDecimalPlaces]
   );
 
   // ── Click-drag selection state ──
@@ -564,14 +572,14 @@ export function DataGrid({
               const row = flatRow.data;
               return colNames
                 .map((c) =>
-                  selected.has(cellKey(r, c)) ? formatCell(row?.[c]) : ""
+                  selected.has(cellKey(r, c)) ? formatCell(row?.[c], displayDecimalPlaces) : ""
                 )
                 .join("\t");
             }
             const row = getRow(r);
             return colNames
               .map((c) =>
-                selected.has(cellKey(r, c)) ? formatCell(row?.[c]) : ""
+                selected.has(cellKey(r, c)) ? formatCell(row?.[c], displayDecimalPlaces) : ""
               )
               .join("\t");
           })
@@ -584,7 +592,7 @@ export function DataGrid({
 
     el.addEventListener("keydown", handler);
     return () => el.removeEventListener("keydown", handler);
-  }, [selected, getRow, columns, pivotMode, pivotFlatRows]);
+  }, [selected, getRow, columns, pivotMode, pivotFlatRows, displayDecimalPlaces]);
 
   if (columns.length === 0 || (effectiveRowCount === 0 && !pivotMode)) {
     return (
@@ -608,18 +616,53 @@ export function DataGrid({
   const maxGroupDepth = pivotGroupColumns ? pivotGroupColumns.length - 1 : 0;
 
   // Helper: get aggregate value for a column from an aggregates record
-  const getAggValue = (aggregates: Record<string, any> | undefined, col: string): string => {
-    if (!aggregates) return "";
+  const getAggRawValue = (aggregates: Record<string, any> | undefined, col: string): any | undefined => {
+    if (!aggregates) return undefined;
     for (const key of Object.keys(aggregates)) {
       if (key.startsWith(`${col}:`)) {
-        return formatCell(aggregates[key]);
+        return aggregates[key];
       }
     }
-    return "";
+    return undefined;
+  };
+
+  const getAggValue = (aggregates: Record<string, any> | undefined, col: string): string => {
+    const value = getAggRawValue(aggregates, col);
+    if (value === null || value === undefined) return "";
+    return formatCell(value, displayDecimalPlaces);
   };
 
   return (
     <div className="data-grid-container" ref={containerRef} tabIndex={-1}>
+      {onDisplayDecimalPlacesChange && (
+        <div className="dg-view-toolbar">
+          <div
+            className="dg-decimals-control"
+            title="Display precision only; underlying data is unchanged"
+          >
+            <span className="dg-decimals-label">Decimals</span>
+            <ButtonGroup minimal className="dg-decimals-buttons">
+              <Button
+                icon="minus"
+                small
+                title="Show fewer decimal places"
+                aria-label="Show fewer decimal places"
+                disabled={displayDecimalPlaces <= minDisplayDecimalPlaces}
+                onClick={() => onDisplayDecimalPlacesChange(displayDecimalPlaces - 1)}
+              />
+              <span className="dg-decimals-value">{displayDecimalPlaces} dp</span>
+              <Button
+                icon="plus"
+                small
+                title="Show more decimal places"
+                aria-label="Show more decimal places"
+                disabled={displayDecimalPlaces >= maxDisplayDecimalPlaces}
+                onClick={() => onDisplayDecimalPlacesChange(displayDecimalPlaces + 1)}
+              />
+            </ButtonGroup>
+          </div>
+        </div>
+      )}
       <div className="data-grid-scroll" ref={scrollRef}>
         <div style={{ width: totalWidth, minWidth: "100%" }}>
           {/* Sticky header */}
@@ -768,7 +811,7 @@ export function DataGrid({
                           className={`dg-pivot-group-value${flatRow.groupValue == null ? " dg-null-value" : ""}`}
                           title={flatRow.groupValue == null ? "NULL" : String(flatRow.groupValue)}
                         >
-                          {flatRow.groupValue == null ? "NULL" : formatCell(flatRow.groupValue)}
+                          {flatRow.groupValue == null ? "NULL" : formatCell(flatRow.groupValue, displayDecimalPlaces)}
                         </span>
                         <span className="dg-pivot-group-count">
                           ({flatRow.groupCount?.toLocaleString()})
@@ -776,7 +819,10 @@ export function DataGrid({
                       </div>
                       {/* Data columns: show aggregates — selectable with tooltip */}
                       {dataColumns.map((col) => {
-                        const cellText = getAggValue(flatRow.aggregates, col);
+                        const rawValue = getAggRawValue(flatRow.aggregates, col);
+                        const cellText = rawValue === null || rawValue === undefined
+                          ? ""
+                          : formatCell(rawValue, displayDecimalPlaces);
                         return (
                           <div
                             key={col}
@@ -790,7 +836,7 @@ export function DataGrid({
                             onMouseEnter={(e) => {
                               handleCellMouseEnterDrag(virtualRow.index, col);
                               if (cellText && !dragSelecting.current)
-                                handleCellMouseEnter(e, cellText);
+                                handleCellMouseEnter(e, String(rawValue));
                             }}
                             onMouseLeave={handleCellMouseLeave}
                           >
@@ -824,7 +870,7 @@ export function DataGrid({
                     />
                     {/* Data columns: show actual cell values */}
                     {dataColumns.map((col) => {
-                      const cellText = loaded ? formatCell(rowData[col]) : "...";
+                      const cellText = loaded ? formatCell(rowData[col], displayDecimalPlaces) : "...";
                       return (
                         <div
                           key={col}
@@ -875,7 +921,7 @@ export function DataGrid({
                     {virtualRow.index + 1}
                   </div>
                   {columns.map((col) => {
-                    const cellText = loaded ? formatCell(row[col]) : "...";
+                    const cellText = loaded ? formatCell(row[col], displayDecimalPlaces) : "...";
                     return (
                       <div
                         key={col}
@@ -924,7 +970,7 @@ export function DataGrid({
                   Total
                 </span>
                 <span className="dg-pivot-group-count">
-                  ({formatCell(grandTotals.__count)})
+                  ({formatCell(grandTotals.__count, displayDecimalPlaces)})
                 </span>
               </div>
               {/* Data columns: show aggregates if available */}
@@ -971,10 +1017,11 @@ export function DataGrid({
   );
 }
 
-function formatCell(value: any): string {
+function formatCell(value: any, decimalPlaces: number): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "number") {
-    return Number.isInteger(value) ? value.toString() : value.toFixed(4);
+    if (!Number.isFinite(value)) return String(value);
+    return Number.isInteger(value) ? value.toString() : value.toFixed(decimalPlaces);
   }
   return String(value);
 }
