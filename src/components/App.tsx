@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Button, Icon, Intent } from "@blueprintjs/core";
-import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions } from "../types";
+import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions, ColumnStats, ColumnStatsUniqueValue } from "../types";
 import { Sidebar } from "./Sidebar";
 import { DataGrid } from "./DataGrid";
 import { FilterPanel } from "./FilterPanel";
@@ -13,7 +13,7 @@ import { ExportDialog } from "./ExportDialog";
 import { HistoryDialog } from "./HistoryDialog";
 import { UpdateNotice } from "./UpdateNotice";
 import { JsonWorkspace } from "./JsonWorkspace";
-import { buildCombineQuery } from "../utils/sqlBuilder";
+import { buildColumnStatsSummaryQuery, buildColumnTopValuesQuery, buildColumnUniqueValuesQuery, buildCombineQuery } from "../utils/sqlBuilder";
 import { buildColOpUpdateSQL, buildStepDescription } from "../utils/colOpsSQL";
 import { buildRowOpSQL, buildRowOpStepDescription } from "../utils/rowOpsSQL";
 import { useChunkCache } from "../hooks/useChunkCache";
@@ -61,6 +61,13 @@ function clampDisplayDecimalPlaces(value: number): number {
     MAX_DISPLAY_DECIMAL_PLACES,
     Math.max(MIN_DISPLAY_DECIMAL_PLACES, value)
   );
+}
+
+function toStatNumber(value: any): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "bigint") return Number(value);
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function estimateJsonRowCount(text: string, filePath: string): number {
@@ -266,6 +273,14 @@ export function App(): React.ReactElement {
     return new Set(schema.filter(c => NUMERIC_RE.test(c.column_type)).map(c => c.column_name));
   }, [schema]);
 
+  const columnTypes = useMemo(() => {
+    const types = new Map<string, string>();
+    for (const col of schema) {
+      types.set(col.column_name, col.column_type);
+    }
+    return types;
+  }, [schema]);
+
   const activeLoadedTable = useMemo(
     () => activeTable ? tables.find((t) => t.tableName === activeTable) ?? null : null,
     [activeTable, tables]
@@ -274,6 +289,69 @@ export function App(): React.ReactElement {
   const jsonWorkspaceActive = !!activeLoadedTable
     && !activeLoadedTable.filePath.startsWith("(")
     && isJsonFilePath(activeLoadedTable.filePath);
+
+  const handleGetColumnStats = useCallback(
+    async (column: string): Promise<ColumnStats> => {
+      if (!activeTable) throw new Error("No active table");
+
+      const columnType = columnTypes.get(column);
+      const includeNumericStats = numericColumns.has(column);
+      const [summaryRows, topValueRows] = await Promise.all([
+        window.api.query(
+          buildColumnStatsSummaryQuery(
+            activeTable,
+            column,
+            viewState.filters,
+            includeNumericStats
+          )
+        ),
+        window.api.query(
+          buildColumnTopValuesQuery(activeTable, column, viewState.filters)
+        ),
+      ]);
+      const summary = summaryRows[0] ?? {};
+      const sourceRowCount = tables.find((t) => t.tableName === activeTable)?.rowCount;
+
+      return {
+        column,
+        columnType,
+        rowCount: toStatNumber(summary.row_count),
+        totalRows: sourceRowCount ?? toStatNumber(summary.row_count),
+        nullCount: toStatNumber(summary.null_count),
+        uniqueCount: toStatNumber(summary.unique_count),
+        minValue: summary.min_value ?? null,
+        maxValue: summary.max_value ?? null,
+        avgValue: includeNumericStats && summary.avg_value != null ? toStatNumber(summary.avg_value) : null,
+        medianValue: includeNumericStats && summary.median_value != null ? toStatNumber(summary.median_value) : null,
+        topValues: topValueRows.map((row) => ({
+          value: String(row.value ?? ""),
+          count: toStatNumber(row.count),
+        })),
+      };
+    },
+    [activeTable, columnTypes, numericColumns, tables, viewState.filters, dataVersion]
+  );
+
+  const handleGetColumnUniques = useCallback(
+    async (column: string): Promise<ColumnStatsUniqueValue[]> => {
+      if (!activeTable) throw new Error("No active table");
+
+      const rows = await window.api.query(
+        buildColumnUniqueValuesQuery(
+          activeTable,
+          column,
+          viewState.filters,
+          numericColumns.has(column)
+        )
+      );
+
+      return rows.map((row) => ({
+        value: String(row.value ?? ""),
+        count: toStatNumber(row.count),
+      }));
+    },
+    [activeTable, numericColumns, viewState.filters, dataVersion]
+  );
 
   // Chunk cache for lazy-loaded virtual scrolling (flat mode)
   const { totalRows, getRow, ensureRange } = useChunkCache({
@@ -1994,6 +2072,9 @@ export function App(): React.ReactElement {
                     grandTotals={pivotActive ? pivotGrandTotals : undefined}
                     showGrandTotal={pivotActive ? viewState.pivotConfig?.showGrandTotal : undefined}
                     numericColumns={pivotActive ? numericColumns : undefined}
+                    columnTypes={columnTypes}
+                    onGetColumnStats={pivotActive ? undefined : handleGetColumnStats}
+                    onGetColumnUniques={pivotActive ? undefined : handleGetColumnUniques}
                     groupSortMode={pivotActive ? viewState.pivotConfig?.groupSortMode : undefined}
                     groupSortDirection={pivotActive ? viewState.pivotConfig?.groupSortDirection : undefined}
                     onGroupSort={pivotActive ? handleGroupSort : undefined}

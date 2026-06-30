@@ -64,6 +64,30 @@ export interface ColumnInfo {
   extra: string | null;
 }
 
+export interface ColumnStatsTopValue {
+  value: string;
+  count: number;
+}
+
+export interface ColumnStatsUniqueValue {
+  value: string;
+  count: number;
+}
+
+export interface ColumnStats {
+  column: string;
+  columnType?: string;
+  rowCount: number;
+  totalRows: number;
+  nullCount: number;
+  uniqueCount: number;
+  minValue: any;
+  maxValue: any;
+  avgValue?: number | null;
+  medianValue?: number | null;
+  topValues: ColumnStatsTopValue[];
+}
+
 export interface LoadedTable {
   tableName: string;
   filePath: string;

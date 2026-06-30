@@ -250,6 +250,79 @@ export function buildCountQuery(
   return sql;
 }
 
+export function buildColumnStatsSummaryQuery(
+  tableName: string,
+  column: string,
+  filters: FilterGroup,
+  includeNumericStats: boolean
+): string {
+  const col = escapeIdent(column);
+  const selects = [
+    "COUNT(*) AS row_count",
+    `SUM(CASE WHEN ${col} IS NULL THEN 1 ELSE 0 END) AS null_count`,
+    `COUNT(DISTINCT ${col}) AS unique_count`,
+    `CAST(MIN(${col}) AS VARCHAR) AS min_value`,
+    `CAST(MAX(${col}) AS VARCHAR) AS max_value`,
+  ];
+
+  if (includeNumericStats) {
+    selects.push(
+      `AVG(${col}) AS avg_value`,
+      `MEDIAN(${col}) AS median_value`
+    );
+  }
+
+  let sql = `SELECT ${selects.join(", ")} FROM ${escapeIdent(tableName)}`;
+  const whereClause = buildFilterGroupClause(filters);
+  if (whereClause) {
+    sql += ` WHERE ${whereClause}`;
+  }
+  return sql;
+}
+
+export function buildColumnTopValuesQuery(
+  tableName: string,
+  column: string,
+  filters: FilterGroup,
+  limit = 6
+): string {
+  const col = escapeIdent(column);
+  const whereParts: string[] = [];
+  const filterClause = buildFilterGroupClause(filters);
+  if (filterClause) whereParts.push(filterClause);
+  whereParts.push(`${col} IS NOT NULL`);
+
+  let sql = `SELECT CAST(${col} AS VARCHAR) AS value, COUNT(*) AS count FROM ${escapeIdent(tableName)}`;
+  if (whereParts.length > 0) {
+    sql += ` WHERE ${whereParts.join(" AND ")}`;
+  }
+  sql += ` GROUP BY ${col} ORDER BY count DESC, value ASC LIMIT ${Math.max(1, Math.floor(limit))}`;
+  return sql;
+}
+
+export function buildColumnUniqueValuesQuery(
+  tableName: string,
+  column: string,
+  filters: FilterGroup,
+  sortAsNumber: boolean
+): string {
+  const col = escapeIdent(column);
+  const whereParts: string[] = [];
+  const filterClause = buildFilterGroupClause(filters);
+  if (filterClause) whereParts.push(filterClause);
+  whereParts.push(`${col} IS NOT NULL`);
+
+  let sql = `SELECT CAST(${col} AS VARCHAR) AS value, COUNT(*) AS count FROM ${escapeIdent(tableName)}`;
+  if (whereParts.length > 0) {
+    sql += ` WHERE ${whereParts.join(" AND ")}`;
+  }
+  sql += ` GROUP BY ${col}`;
+  sql += sortAsNumber
+    ? ` ORDER BY ${col} ASC`
+    : ` ORDER BY LOWER(CAST(${col} AS VARCHAR)) ASC, CAST(${col} AS VARCHAR) ASC`;
+  return sql;
+}
+
 /**
  * Build a WHERE clause fragment for parent path constraints in pivot queries.
  * Generates: "col1" = 'val1' AND "col2" IS NULL ...

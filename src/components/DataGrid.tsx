@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, ButtonGroup, Icon } from "@blueprintjs/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode } from "../types";
+import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue } from "../types";
 
 const TOOLTIP_DELAY = 600; // ms before tooltip appears
+const COLUMN_STATS_DELAY = 350;
+const COLUMN_STATS_DISMISS_DELAY = 900;
 
 const ROW_HEIGHT = 28;
 const DEFAULT_COLUMN_WIDTH = 150;
@@ -14,6 +16,18 @@ const PIVOT_GROUP_COL_KEY = "__pivot_group__";
 function cellKey(row: number, col: string): string {
   return `${row}:${col}`;
 }
+
+type ColumnStatsPanelState = {
+  column: string;
+  view: "overview" | "uniques";
+  status: "loading" | "ready" | "error";
+  stats?: ColumnStats;
+  error?: string;
+  uniqueStatus?: "idle" | "loading" | "ready" | "error";
+  uniqueValues?: ColumnStatsUniqueValue[];
+  uniqueError?: string;
+  pinned: boolean;
+};
 
 interface DataGridProps {
   totalRows: number;
@@ -31,6 +45,9 @@ interface DataGridProps {
   grandTotals?: Record<string, any> | null;
   showGrandTotal?: boolean;
   numericColumns?: Set<string>;
+  columnTypes?: Map<string, string>;
+  onGetColumnStats?: (column: string) => Promise<ColumnStats>;
+  onGetColumnUniques?: (column: string) => Promise<ColumnStatsUniqueValue[]>;
   groupSortMode?: PivotGroupSortMode | null;
   groupSortDirection?: "ASC" | "DESC";
   onGroupSort?: (mode: PivotGroupSortMode, direction: "ASC" | "DESC" | null) => void;
@@ -56,6 +73,9 @@ export function DataGrid({
   grandTotals,
   showGrandTotal,
   numericColumns,
+  columnTypes,
+  onGetColumnStats,
+  onGetColumnUniques,
   groupSortMode,
   groupSortDirection,
   onGroupSort,
@@ -82,6 +102,100 @@ export function DataGrid({
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
   const [tooltipFlipped, setTooltipFlipped] = useState(false);
+
+  // ── Column stats rail state ──
+  const [columnStatsPanel, setColumnStatsPanel] = useState<ColumnStatsPanelState | null>(null);
+  const columnStatsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const columnStatsDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const columnStatsRequestId = useRef(0);
+  const columnUniquesRequestId = useRef(0);
+  const columnStatsHovered = useRef(false);
+
+  const clearColumnStatsTimer = useCallback(() => {
+    if (columnStatsTimer.current) {
+      clearTimeout(columnStatsTimer.current);
+      columnStatsTimer.current = null;
+    }
+  }, []);
+
+  const clearColumnStatsDismissTimer = useCallback(() => {
+    if (columnStatsDismissTimer.current) {
+      clearTimeout(columnStatsDismissTimer.current);
+      columnStatsDismissTimer.current = null;
+    }
+  }, []);
+
+  const closeColumnStatsPanel = useCallback(() => {
+    clearColumnStatsTimer();
+    clearColumnStatsDismissTimer();
+    columnStatsRequestId.current += 1;
+    columnUniquesRequestId.current += 1;
+    setColumnStatsPanel(null);
+  }, [clearColumnStatsDismissTimer, clearColumnStatsTimer]);
+
+  const scheduleColumnStatsDismiss = useCallback(
+    (delay: number) => {
+      clearColumnStatsDismissTimer();
+      columnStatsDismissTimer.current = setTimeout(() => {
+        if (columnStatsHovered.current) return;
+        setColumnStatsPanel((prev) => {
+          if (prev?.pinned) return prev;
+          columnStatsRequestId.current += 1;
+          columnUniquesRequestId.current += 1;
+          return null;
+        });
+      }, delay);
+    },
+    [clearColumnStatsDismissTimer]
+  );
+
+  const requestColumnStats = useCallback(
+    (column: string) => {
+      if (!onGetColumnStats || pivotMode) return;
+      const requestId = columnStatsRequestId.current + 1;
+      columnStatsRequestId.current = requestId;
+      setColumnStatsPanel((prev) => ({
+        column,
+        view: prev?.column === column ? prev.view : "overview",
+        status: "loading",
+        stats: prev?.column === column ? prev.stats : undefined,
+        uniqueStatus: prev?.column === column ? prev.uniqueStatus : "idle",
+        uniqueValues: prev?.column === column ? prev.uniqueValues : undefined,
+        uniqueError: undefined,
+        pinned: prev?.column === column ? prev.pinned : false,
+      }));
+
+      onGetColumnStats(column)
+        .then((stats) => {
+          if (columnStatsRequestId.current !== requestId) return;
+          setColumnStatsPanel((prev) => {
+            if (!prev || prev.column !== column) return prev;
+            return {
+              ...prev,
+              column,
+              status: "ready",
+              stats,
+              pinned: prev.pinned,
+            };
+          });
+        })
+        .catch((err) => {
+          if (columnStatsRequestId.current !== requestId) return;
+          const error = err instanceof Error ? err.message : "Unable to load column stats";
+          setColumnStatsPanel((prev) => {
+            if (!prev || prev.column !== column) return prev;
+            return {
+              ...prev,
+              column,
+              status: "error",
+              error,
+              pinned: prev.pinned,
+            };
+          });
+        });
+    },
+    [onGetColumnStats, pivotMode]
+  );
 
   /** Returns true if user has selected text inside the tooltip */
   const hasTooltipSelection = useCallback(() => {
@@ -180,6 +294,8 @@ export function DataGrid({
     return () => {
       if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
       if (tooltipDismissTimer.current) clearTimeout(tooltipDismissTimer.current);
+      if (columnStatsTimer.current) clearTimeout(columnStatsTimer.current);
+      if (columnStatsDismissTimer.current) clearTimeout(columnStatsDismissTimer.current);
     };
   }, []);
 
@@ -237,6 +353,10 @@ export function DataGrid({
   useEffect(() => {
     rangeRef.current = null;
   }, [columnsKey]);
+
+  useEffect(() => {
+    closeColumnStatsPanel();
+  }, [columnsKey, closeColumnStatsPanel, pivotMode, resetKey]);
 
   useEffect(() => {
     const range = virtualizer.range;
@@ -452,9 +572,127 @@ export function DataGrid({
     [virtualizer, getRow, pivotMode, pivotFlatRows, columns, displayDecimalPlaces]
   );
 
+  const handleHeaderMouseEnter = useCallback(
+    (col: string) => {
+      if (!onGetColumnStats || pivotMode || columnStatsPanel?.pinned) return;
+      if (isDragging.current || headerDragCol.current) return;
+      clearColumnStatsDismissTimer();
+      clearColumnStatsTimer();
+      setTooltip(null);
+      setCopied(false);
+      columnStatsTimer.current = setTimeout(() => {
+        requestColumnStats(col);
+      }, COLUMN_STATS_DELAY);
+    },
+    [
+      clearColumnStatsDismissTimer,
+      clearColumnStatsTimer,
+      columnStatsPanel?.pinned,
+      onGetColumnStats,
+      pivotMode,
+      requestColumnStats,
+    ]
+  );
+
+  const handleHeaderMouseLeave = useCallback(() => {
+    clearColumnStatsTimer();
+    if (!columnStatsPanel?.pinned) {
+      scheduleColumnStatsDismiss(COLUMN_STATS_DISMISS_DELAY);
+    }
+  }, [clearColumnStatsTimer, columnStatsPanel?.pinned, scheduleColumnStatsDismiss]);
+
+  const handleColumnStatsMouseEnter = useCallback(() => {
+    columnStatsHovered.current = true;
+    clearColumnStatsDismissTimer();
+  }, [clearColumnStatsDismissTimer]);
+
+  const handleColumnStatsMouseLeave = useCallback(() => {
+    columnStatsHovered.current = false;
+    if (!columnStatsPanel?.pinned) {
+      scheduleColumnStatsDismiss(160);
+    }
+  }, [columnStatsPanel?.pinned, scheduleColumnStatsDismiss]);
+
+  const handleColumnStatsPinToggle = useCallback(() => {
+    setColumnStatsPanel((prev) => prev ? { ...prev, pinned: !prev.pinned } : prev);
+  }, []);
+
+  const requestColumnUniques = useCallback(
+    (column: string) => {
+      if (!onGetColumnUniques || pivotMode) return;
+      const requestId = columnUniquesRequestId.current + 1;
+      columnUniquesRequestId.current = requestId;
+
+      setColumnStatsPanel((prev) => {
+        if (!prev || prev.column !== column) return prev;
+        return {
+          ...prev,
+          view: "uniques",
+          uniqueStatus: "loading",
+          uniqueError: undefined,
+        };
+      });
+
+      onGetColumnUniques(column)
+        .then((values) => {
+          if (columnUniquesRequestId.current !== requestId) return;
+          setColumnStatsPanel((prev) => {
+            if (!prev || prev.column !== column) return prev;
+            return {
+              ...prev,
+              view: "uniques",
+              uniqueStatus: "ready",
+              uniqueValues: values,
+            };
+          });
+        })
+        .catch((err) => {
+          if (columnUniquesRequestId.current !== requestId) return;
+          const uniqueError = err instanceof Error ? err.message : "Unable to load unique values";
+          setColumnStatsPanel((prev) => {
+            if (!prev || prev.column !== column) return prev;
+            return {
+              ...prev,
+              view: "uniques",
+              uniqueStatus: "error",
+              uniqueError,
+            };
+          });
+        });
+    },
+    [onGetColumnUniques, pivotMode]
+  );
+
+  const handleShowUniqueValues = useCallback(() => {
+    if (!columnStatsPanel || !onGetColumnUniques) return;
+    if (columnStatsPanel.uniqueStatus === "ready" && columnStatsPanel.uniqueValues) {
+      setColumnStatsPanel((prev) => prev ? { ...prev, view: "uniques" } : prev);
+      return;
+    }
+    requestColumnUniques(columnStatsPanel.column);
+  }, [columnStatsPanel, onGetColumnUniques, requestColumnUniques]);
+
+  const handleColumnStatsBack = useCallback(() => {
+    setColumnStatsPanel((prev) => prev ? { ...prev, view: "overview" } : prev);
+  }, []);
+
+  const handleColumnStatsRefresh = useCallback(() => {
+    if (!columnStatsPanel) return;
+    if (columnStatsPanel.view === "uniques") {
+      requestColumnUniques(columnStatsPanel.column);
+      return;
+    }
+    requestColumnStats(columnStatsPanel.column);
+  }, [columnStatsPanel, requestColumnStats, requestColumnUniques]);
+
   // ── Click-drag selection state ──
   const dragSelecting = useRef(false);
   const dragBaseSelected = useRef<Set<string>>(new Set());
+
+  const endDragSelection = useCallback(() => {
+    dragSelecting.current = false;
+    dragBaseSelected.current = new Set();
+  }, []);
 
   const buildRange = useCallback(
     (
@@ -519,24 +757,40 @@ export function DataGrid({
   );
 
   const handleCellMouseEnterDrag = useCallback(
-    (rowIdx: number, col: string) => {
+    (rowIdx: number, col: string, e: React.MouseEvent) => {
       if (!dragSelecting.current || !anchor.current) return;
+      if ((e.buttons & 1) !== 1) {
+        endDragSelection();
+        return;
+      }
       const range = buildRange(anchor.current.row, anchor.current.col, rowIdx, col);
       const next = new Set(dragBaseSelected.current);
       for (const k of range) next.add(k);
       setSelected(next);
     },
-    [buildRange]
+    [buildRange, endDragSelection]
   );
 
   // End drag selection on mouseup (document-level to catch releases outside grid)
   useEffect(() => {
-    const onMouseUp = () => {
-      dragSelecting.current = false;
+    const onMouseUp = () => endDragSelection();
+    const onMouseLeave = (e: MouseEvent) => {
+      if (!e.relatedTarget) endDragSelection();
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) endDragSelection();
     };
     document.addEventListener("mouseup", onMouseUp);
-    return () => document.removeEventListener("mouseup", onMouseUp);
-  }, []);
+    document.addEventListener("mouseleave", onMouseLeave);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("blur", endDragSelection);
+    return () => {
+      document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("mouseleave", onMouseLeave);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("blur", endDragSelection);
+    };
+  }, [endDragSelection]);
 
   // Cmd/Ctrl+C copy — uses getRow instead of rows array
   useEffect(() => {
@@ -614,6 +868,7 @@ export function DataGrid({
 
   const virtualRows = virtualizer.getVirtualItems();
   const maxGroupDepth = pivotGroupColumns ? pivotGroupColumns.length - 1 : 0;
+  const activeStatsColumn = columnStatsPanel?.column ?? null;
 
   // Helper: get aggregate value for a column from an aggregates record
   const getAggRawValue = (aggregates: Record<string, any> | undefined, col: string): any | undefined => {
@@ -663,8 +918,9 @@ export function DataGrid({
           </div>
         </div>
       )}
-      <div className="data-grid-scroll" ref={scrollRef}>
-        <div style={{ width: totalWidth, minWidth: "100%" }}>
+      <div className="data-grid-body">
+        <div className="data-grid-scroll" ref={scrollRef}>
+          <div style={{ width: totalWidth, minWidth: "100%" }}>
           {/* Sticky header */}
           <div className="dg-header">
             {pivotMode ? (
@@ -727,6 +983,7 @@ export function DataGrid({
                   className={[
                     "dg-cell dg-header-cell",
                     draggingColumn === col ? "column-dragging" : "",
+                    activeStatsColumn === col ? "column-inspected" : "",
                     headerDropTarget?.col === col
                       ? `header-drop-${headerDropTarget.position}`
                       : "",
@@ -741,8 +998,10 @@ export function DataGrid({
                   onDragLeave={handleHeaderDragLeave}
                   onDrop={handleHeaderDrop}
                   onDragEnd={handleHeaderDragEnd}
+                  onMouseEnter={() => handleHeaderMouseEnter(col)}
+                  onMouseLeave={handleHeaderMouseLeave}
                 >
-                  <span className="dg-header-text" title={col}>{col}</span>
+                  <span className="dg-header-text" title={onGetColumnStats ? undefined : col}>{col}</span>
                   {sortInfo && (
                     <span className="sort-indicator">
                       {sortColumns.length > 1 && (
@@ -826,7 +1085,7 @@ export function DataGrid({
                         return (
                           <div
                             key={col}
-                            className={`dg-cell${cellText ? " dg-pivot-agg-value" : ""}${flatRow.expanded ? " dg-pivot-agg-faded" : ""}${
+                            className={`dg-cell${cellText ? " dg-pivot-agg-value" : ""}${flatRow.expanded ? " dg-pivot-agg-faded" : ""}${activeStatsColumn === col ? " column-inspected" : ""}${
                               selected.has(cellKey(virtualRow.index, col)) ? " cell-selected" : ""
                             }`}
                             style={{ width: columnWidths[col] ?? DEFAULT_COLUMN_WIDTH }}
@@ -834,7 +1093,7 @@ export function DataGrid({
                               handleCellMouseDown(virtualRow.index, col, e)
                             }
                             onMouseEnter={(e) => {
-                              handleCellMouseEnterDrag(virtualRow.index, col);
+                              handleCellMouseEnterDrag(virtualRow.index, col, e);
                               if (cellText && !dragSelecting.current)
                                 handleCellMouseEnter(e, String(rawValue));
                             }}
@@ -879,6 +1138,7 @@ export function DataGrid({
                             selected.has(cellKey(virtualRow.index, col))
                               ? "cell-selected"
                               : "",
+                            activeStatsColumn === col ? "column-inspected" : "",
                             !loaded ? "loading-cell" : "",
                           ]
                             .filter(Boolean)
@@ -888,7 +1148,7 @@ export function DataGrid({
                             handleCellMouseDown(virtualRow.index, col, e)
                           }
                           onMouseEnter={(e) => {
-                            handleCellMouseEnterDrag(virtualRow.index, col);
+                            handleCellMouseEnterDrag(virtualRow.index, col, e);
                             if (loaded && !dragSelecting.current)
                               handleCellMouseEnter(e, String(rowData[col] ?? ""));
                           }}
@@ -925,14 +1185,15 @@ export function DataGrid({
                     return (
                       <div
                         key={col}
-                        className={[
-                          "dg-cell",
-                          selected.has(cellKey(virtualRow.index, col))
-                            ? "cell-selected"
-                            : "",
-                          draggingColumn === col ? "column-dragging" : "",
-                          !loaded ? "loading-cell" : "",
-                        ]
+                          className={[
+                            "dg-cell",
+                            selected.has(cellKey(virtualRow.index, col))
+                              ? "cell-selected"
+                              : "",
+                            draggingColumn === col ? "column-dragging" : "",
+                            activeStatsColumn === col ? "column-inspected" : "",
+                            !loaded ? "loading-cell" : "",
+                          ]
                           .filter(Boolean)
                           .join(" ")}
                         style={{ width: columnWidths[col] ?? DEFAULT_COLUMN_WIDTH }}
@@ -940,7 +1201,7 @@ export function DataGrid({
                           handleCellMouseDown(virtualRow.index, col, e)
                         }
                         onMouseEnter={(e) => {
-                          handleCellMouseEnterDrag(virtualRow.index, col);
+                          handleCellMouseEnterDrag(virtualRow.index, col, e);
                           if (loaded && !dragSelecting.current)
                             handleCellMouseEnter(
                               e,
@@ -988,7 +1249,22 @@ export function DataGrid({
               })}
             </div>
           )}
+          </div>
         </div>
+        {columnStatsPanel && (
+          <ColumnStatsRail
+            panel={columnStatsPanel}
+            fallbackType={columnTypes?.get(columnStatsPanel.column)}
+            decimalPlaces={displayDecimalPlaces}
+            onMouseEnter={handleColumnStatsMouseEnter}
+            onMouseLeave={handleColumnStatsMouseLeave}
+            onPinToggle={handleColumnStatsPinToggle}
+            onShowUniques={handleShowUniqueValues}
+            onBack={handleColumnStatsBack}
+            onRefresh={handleColumnStatsRefresh}
+            onClose={closeColumnStatsPanel}
+          />
+        )}
       </div>
       {tooltip && (
         <div
@@ -1015,6 +1291,321 @@ export function DataGrid({
       )}
     </div>
   );
+}
+
+interface ColumnStatsRailProps {
+  panel: ColumnStatsPanelState;
+  fallbackType?: string;
+  decimalPlaces: number;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+  onPinToggle: () => void;
+  onShowUniques: () => void;
+  onBack: () => void;
+  onRefresh: () => void;
+  onClose: () => void;
+}
+
+function ColumnStatsRail({
+  panel,
+  fallbackType,
+  decimalPlaces,
+  onMouseEnter,
+  onMouseLeave,
+  onPinToggle,
+  onShowUniques,
+  onBack,
+  onRefresh,
+  onClose,
+}: ColumnStatsRailProps): React.ReactElement {
+  const stats = panel.stats;
+  const columnType = stats?.columnType ?? fallbackType ?? "Column";
+  const filledCount = stats ? Math.max(0, stats.rowCount - stats.nullCount) : 0;
+  const topMax = stats
+    ? Math.max(1, ...stats.topValues.map((topValue) => topValue.count))
+    : 1;
+  const hasNumericStats = stats?.avgValue != null || stats?.medianValue != null;
+  const uniqueSortLabel = isNumericColumnType(columnType)
+    ? "Sorted numerically"
+    : "Sorted A-Z, case-insensitive";
+
+  return (
+    <aside
+      className="dg-column-stats-rail"
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      <div className="dg-stats-header">
+        <div className="dg-stats-heading">
+          {panel.view === "uniques" && (
+            <Button
+              minimal
+              small
+              icon="arrow-left"
+              className="dg-stats-back"
+              title="Back to column stats"
+              aria-label="Back to column stats"
+              onClick={onBack}
+            />
+          )}
+          <Icon icon={panel.view === "uniques" ? "list" : "chart"} size={16} />
+          <div className="dg-stats-title-block">
+            <span className="dg-stats-column" title={panel.column}>
+              {panel.column}
+            </span>
+            <span className="dg-stats-type">{columnType}</span>
+          </div>
+        </div>
+        <div className="dg-stats-actions">
+          <Button
+            minimal
+            small
+            icon="refresh"
+            title="Refresh stats"
+            aria-label="Refresh stats"
+            disabled={panel.status === "loading"}
+            onClick={onRefresh}
+          />
+          <Button
+            minimal
+            small
+            icon="pin"
+            active={panel.pinned}
+            title={panel.pinned ? "Unpin stats" : "Pin stats"}
+            aria-label={panel.pinned ? "Unpin stats" : "Pin stats"}
+            onClick={onPinToggle}
+          />
+          <Button
+            minimal
+            small
+            icon="cross"
+            title="Close stats"
+            aria-label="Close stats"
+            onClick={onClose}
+          />
+        </div>
+      </div>
+
+      <div className="dg-stats-context">
+        <span>Current filter</span>
+        <strong>
+          {stats
+            ? `${formatStatNumber(stats.rowCount)} of ${formatStatNumber(stats.totalRows)} rows`
+            : "Loading"}
+        </strong>
+      </div>
+
+      {panel.status === "loading" && !stats && (
+        <div className="dg-stats-loading" aria-label="Loading column stats">
+          <span />
+          <span />
+          <span />
+        </div>
+      )}
+
+      {panel.status === "error" && (
+        <div className="dg-stats-error">
+          <Icon icon="warning-sign" size={14} />
+          <span>{panel.error ?? "Unable to load column stats"}</span>
+        </div>
+      )}
+
+      {stats && panel.view === "overview" && (
+        <>
+          <div className="dg-stats-metrics">
+            <StatMetric
+              label="Nulls"
+              value={formatStatNumber(stats.nullCount)}
+              detail={formatPercent(stats.nullCount, stats.rowCount)}
+            />
+            <StatMetric
+              label="Unique"
+              value={formatStatNumber(stats.uniqueCount)}
+              detail={formatPercent(stats.uniqueCount, stats.rowCount)}
+              onClick={onShowUniques}
+              title="Show unique values"
+            />
+            <StatMetric
+              label="Filled"
+              value={formatStatNumber(filledCount)}
+              detail={formatPercent(filledCount, stats.rowCount)}
+            />
+          </div>
+
+          <div className="dg-stats-section">
+            <div className="dg-stats-section-title">
+              {hasNumericStats ? "Numeric summary" : "Range"}
+            </div>
+            <div className="dg-stats-kv">
+              {hasNumericStats && (
+                <>
+                  <StatsKeyValue
+                    label="Median"
+                    value={formatStatsValue(stats.medianValue, decimalPlaces)}
+                  />
+                  <StatsKeyValue
+                    label="Average"
+                    value={formatStatsValue(stats.avgValue, decimalPlaces)}
+                  />
+                </>
+              )}
+              <StatsKeyValue label="Min" value={formatStatsValue(stats.minValue, decimalPlaces)} />
+              <StatsKeyValue label="Max" value={formatStatsValue(stats.maxValue, decimalPlaces)} />
+            </div>
+          </div>
+
+          <div className="dg-stats-section">
+            <div className="dg-stats-section-title">Top values</div>
+            {stats.topValues.length > 0 ? (
+              <div className="dg-stats-top-values">
+                {stats.topValues.map((topValue, idx) => {
+                  const valueLabel = topValue.value === "" ? "(empty)" : topValue.value;
+                  return (
+                    <div className="dg-stats-top-row" key={`${topValue.value}:${idx}`}>
+                      <div className="dg-stats-top-label" title={valueLabel}>
+                        {valueLabel}
+                      </div>
+                      <div className="dg-stats-top-bar-track">
+                        <span
+                          className="dg-stats-top-bar"
+                          style={{ width: `${Math.max(4, (topValue.count / topMax) * 100)}%` }}
+                        />
+                      </div>
+                      <div className="dg-stats-top-count">
+                        {formatStatNumber(topValue.count)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="dg-stats-empty">No non-null values</div>
+            )}
+          </div>
+        </>
+      )}
+
+      {stats && panel.view === "uniques" && (
+        <div className="dg-stats-section dg-stats-uniques-section">
+          <div className="dg-stats-section-heading">
+            <div className="dg-stats-section-title">Unique values</div>
+            <span>{uniqueSortLabel}</span>
+          </div>
+
+          {panel.uniqueStatus === "loading" && (
+            <div className="dg-stats-loading" aria-label="Loading unique values">
+              <span />
+              <span />
+              <span />
+            </div>
+          )}
+
+          {panel.uniqueStatus === "error" && (
+            <div className="dg-stats-error">
+              <Icon icon="warning-sign" size={14} />
+              <span>{panel.uniqueError ?? "Unable to load unique values"}</span>
+            </div>
+          )}
+
+          {panel.uniqueStatus === "ready" && (
+            panel.uniqueValues && panel.uniqueValues.length > 0 ? (
+              <div className="dg-stats-unique-values">
+                {panel.uniqueValues.map((uniqueValue, idx) => {
+                  const valueLabel = uniqueValue.value === "" ? "(empty)" : uniqueValue.value;
+                  return (
+                    <div className="dg-stats-unique-row" key={`${uniqueValue.value}:${idx}`}>
+                      <div className="dg-stats-unique-value" title={valueLabel}>
+                        {valueLabel}
+                      </div>
+                      <div className="dg-stats-unique-count">
+                        {formatStatNumber(uniqueValue.count)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="dg-stats-empty">No non-null unique values</div>
+            )
+          )}
+        </div>
+      )}
+    </aside>
+  );
+}
+
+function StatMetric({
+  label,
+  value,
+  detail,
+  onClick,
+  title,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  onClick?: () => void;
+  title?: string;
+}): React.ReactElement {
+  const content = (
+    <>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <em>{detail}</em>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className="dg-stats-metric dg-stats-metric-clickable"
+        onClick={onClick}
+        title={title}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className="dg-stats-metric">
+      {content}
+    </div>
+  );
+}
+
+function StatsKeyValue({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}): React.ReactElement {
+  return (
+    <div className="dg-stats-kv-row">
+      <span>{label}</span>
+      <strong title={value}>{value || "-"}</strong>
+    </div>
+  );
+}
+
+function formatStatNumber(value: number): string {
+  return value.toLocaleString();
+}
+
+function formatPercent(part: number, total: number): string {
+  if (total <= 0) return "0%";
+  return `${Math.round((part / total) * 100)}%`;
+}
+
+function formatStatsValue(value: any, decimalPlaces: number): string {
+  if (value === null || value === undefined || value === "") return "-";
+  return formatCell(value, decimalPlaces);
+}
+
+function isNumericColumnType(columnType: string): boolean {
+  return /^(TINYINT|SMALLINT|INTEGER|INT|BIGINT|HUGEINT|FLOAT|REAL|DOUBLE|DECIMAL|NUMERIC)/i.test(columnType);
 }
 
 function formatCell(value: any, decimalPlaces: number): string {
