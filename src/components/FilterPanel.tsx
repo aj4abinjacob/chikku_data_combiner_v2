@@ -1068,16 +1068,6 @@ export function FilterPanel({
     setViewsPaneOpen(savedViews.length > 0);
   }, [savedViews.length]);
 
-  // Header + resize handle take ~36px; content gets the rest
-  const PANEL_CHROME_HEIGHT = 42;
-
-  // Called by child panels when their content height changes — set exactly what's needed
-  const handleContentHeightChange = useCallback((contentHeight: number) => {
-    const needed = contentHeight + PANEL_CHROME_HEIGHT;
-    const clamped = Math.min(MAX_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, needed));
-    setPanelHeight(clamped);
-  }, []);
-
   // ── Resize drag handlers ──
   const onMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -1430,7 +1420,6 @@ export function FilterPanel({
         totalRows={totalRows}
         unfilteredRows={unfilteredRows}
         visible={activeTab === "colops"}
-        onContentHeightChange={handleContentHeightChange}
       />
       <RowOpsPanel
         columns={columns}

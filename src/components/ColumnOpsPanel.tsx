@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef, useLayoutEffect } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   Button,
   HTMLSelect,
@@ -80,7 +80,6 @@ interface ColumnOpsPanelProps {
   totalRows: number;
   unfilteredRows: number | null;
   visible: boolean;
-  onContentHeightChange?: (height: number) => void;
 }
 
 export function ColumnOpsPanel({
@@ -96,7 +95,6 @@ export function ColumnOpsPanel({
   totalRows,
   unfilteredRows,
   visible,
-  onContentHeightChange,
 }: ColumnOpsPanelProps): React.ReactElement {
   const [selectedColumn, setSelectedColumn] = useState("");
   const [opType, setOpType] = useState<ColOpType>("find_replace");
@@ -114,13 +112,6 @@ export function ColumnOpsPanel({
   const [previews, setPreviews] = useState<Array<{ original: string; result: string }>>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [lastAppliedKey, setLastAppliedKey] = useState<string | null>(null);
-  const configRef = useRef<HTMLDivElement>(null);
-
-  useLayoutEffect(() => {
-    if (!visible || !configRef.current || !onContentHeightChange) return;
-    const el = configRef.current;
-    onContentHeightChange(el.scrollHeight + 60);
-  }, [visible, opType, targetMode, selectedColumn, colOpsSteps.length, onContentHeightChange]);
 
   const handlePatternsChanged = useCallback(() => {
     setPatternRefreshKey((k) => k + 1);
@@ -569,7 +560,7 @@ export function ColumnOpsPanel({
 
       <div className="colops-layout">
         {/* Left: configuration */}
-        <div className="colops-config" ref={configRef}>
+        <div className="colops-config">
           <div className="colops-field">
             <label>Column</label>
             <SearchableColumnSelect
