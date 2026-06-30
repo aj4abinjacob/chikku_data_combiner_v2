@@ -24,7 +24,6 @@ type ColumnStatsPanelState = {
   uniqueStatus?: "idle" | "loading" | "ready" | "error";
   uniqueValues?: ColumnStatsUniqueValue[];
   uniqueError?: string;
-  pinned: boolean;
 };
 
 interface DataGridProps {
@@ -103,40 +102,14 @@ export function DataGrid({
 
   // ── Column stats rail state ──
   const [columnStatsPanel, setColumnStatsPanel] = useState<ColumnStatsPanelState | null>(null);
-  const columnStatsDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const columnStatsRequestId = useRef(0);
   const columnUniquesRequestId = useRef(0);
-  const columnStatsHovered = useRef(false);
-
-  const clearColumnStatsDismissTimer = useCallback(() => {
-    if (columnStatsDismissTimer.current) {
-      clearTimeout(columnStatsDismissTimer.current);
-      columnStatsDismissTimer.current = null;
-    }
-  }, []);
 
   const closeColumnStatsPanel = useCallback(() => {
-    clearColumnStatsDismissTimer();
     columnStatsRequestId.current += 1;
     columnUniquesRequestId.current += 1;
     setColumnStatsPanel(null);
-  }, [clearColumnStatsDismissTimer]);
-
-  const scheduleColumnStatsDismiss = useCallback(
-    (delay: number) => {
-      clearColumnStatsDismissTimer();
-      columnStatsDismissTimer.current = setTimeout(() => {
-        if (columnStatsHovered.current) return;
-        setColumnStatsPanel((prev) => {
-          if (prev?.pinned) return prev;
-          columnStatsRequestId.current += 1;
-          columnUniquesRequestId.current += 1;
-          return null;
-        });
-      }, delay);
-    },
-    [clearColumnStatsDismissTimer]
-  );
+  }, []);
 
   const requestColumnStats = useCallback(
     (column: string) => {
@@ -151,7 +124,6 @@ export function DataGrid({
         uniqueStatus: prev?.column === column ? prev.uniqueStatus : "idle",
         uniqueValues: prev?.column === column ? prev.uniqueValues : undefined,
         uniqueError: undefined,
-        pinned: prev?.column === column ? prev.pinned : false,
       }));
 
       onGetColumnStats(column)
@@ -164,7 +136,6 @@ export function DataGrid({
               column,
               status: "ready",
               stats,
-              pinned: prev.pinned,
             };
           });
         })
@@ -178,7 +149,6 @@ export function DataGrid({
               column,
               status: "error",
               error,
-              pinned: prev.pinned,
             };
           });
         });
@@ -283,7 +253,6 @@ export function DataGrid({
     return () => {
       if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
       if (tooltipDismissTimer.current) clearTimeout(tooltipDismissTimer.current);
-      if (columnStatsDismissTimer.current) clearTimeout(columnStatsDismissTimer.current);
     };
   }, []);
 
@@ -565,32 +534,15 @@ export function DataGrid({
       e.preventDefault();
       e.stopPropagation();
       if (!onGetColumnStats || pivotMode) return;
-      clearColumnStatsDismissTimer();
       setTooltip(null);
       setCopied(false);
       requestColumnStats(col);
       setColumnStatsPanel((prev) =>
-        prev?.column === col ? { ...prev, view: "overview", pinned: true } : prev
+        prev?.column === col ? { ...prev, view: "overview" } : prev
       );
     },
-    [clearColumnStatsDismissTimer, onGetColumnStats, pivotMode, requestColumnStats]
+    [onGetColumnStats, pivotMode, requestColumnStats]
   );
-
-  const handleColumnStatsMouseEnter = useCallback(() => {
-    columnStatsHovered.current = true;
-    clearColumnStatsDismissTimer();
-  }, [clearColumnStatsDismissTimer]);
-
-  const handleColumnStatsMouseLeave = useCallback(() => {
-    columnStatsHovered.current = false;
-    if (!columnStatsPanel?.pinned) {
-      scheduleColumnStatsDismiss(160);
-    }
-  }, [columnStatsPanel?.pinned, scheduleColumnStatsDismiss]);
-
-  const handleColumnStatsPinToggle = useCallback(() => {
-    setColumnStatsPanel((prev) => prev ? { ...prev, pinned: !prev.pinned } : prev);
-  }, []);
 
   const requestColumnUniques = useCallback(
     (column: string) => {
@@ -1245,9 +1197,6 @@ export function DataGrid({
             panel={columnStatsPanel}
             fallbackType={columnTypes?.get(columnStatsPanel.column)}
             decimalPlaces={displayDecimalPlaces}
-            onMouseEnter={handleColumnStatsMouseEnter}
-            onMouseLeave={handleColumnStatsMouseLeave}
-            onPinToggle={handleColumnStatsPinToggle}
             onShowUniques={handleShowUniqueValues}
             onBack={handleColumnStatsBack}
             onRefresh={handleColumnStatsRefresh}
@@ -1286,9 +1235,6 @@ interface ColumnStatsRailProps {
   panel: ColumnStatsPanelState;
   fallbackType?: string;
   decimalPlaces: number;
-  onMouseEnter: () => void;
-  onMouseLeave: () => void;
-  onPinToggle: () => void;
   onShowUniques: () => void;
   onBack: () => void;
   onRefresh: () => void;
@@ -1299,9 +1245,6 @@ function ColumnStatsRail({
   panel,
   fallbackType,
   decimalPlaces,
-  onMouseEnter,
-  onMouseLeave,
-  onPinToggle,
   onShowUniques,
   onBack,
   onRefresh,
@@ -1319,11 +1262,7 @@ function ColumnStatsRail({
     : "Sorted A-Z, case-insensitive";
 
   return (
-    <aside
-      className="dg-column-stats-rail"
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-    >
+    <aside className="dg-column-stats-rail">
       <div className="dg-stats-header">
         <div className="dg-stats-heading">
           {panel.view === "uniques" && (
@@ -1354,15 +1293,6 @@ function ColumnStatsRail({
             aria-label="Refresh stats"
             disabled={panel.status === "loading"}
             onClick={onRefresh}
-          />
-          <Button
-            minimal
-            small
-            icon="pin"
-            active={panel.pinned}
-            title={panel.pinned ? "Unpin stats" : "Pin stats"}
-            aria-label={panel.pinned ? "Unpin stats" : "Pin stats"}
-            onClick={onPinToggle}
           />
           <Button
             minimal
