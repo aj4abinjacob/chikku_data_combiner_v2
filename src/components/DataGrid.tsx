@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, ButtonGroup, Icon } from "@blueprintjs/core";
+import { Button, ButtonGroup, HTMLSelect, Icon } from "@blueprintjs/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue } from "../types";
 
@@ -25,6 +25,29 @@ type ColumnStatsPanelState = {
   uniqueValues?: ColumnStatsUniqueValue[];
   uniqueError?: string;
 };
+
+type NumberDisplayStyle = "standard" | "currency" | "percent" | "scientific";
+type RoundingMethod = "half_up" | "truncate" | "floor" | "ceil";
+
+interface ColumnDisplayFormat {
+  decimalPlaces: number;
+  numberStyle: NumberDisplayStyle;
+  roundingMethod: RoundingMethod;
+}
+
+const NUMBER_STYLE_OPTIONS: { value: NumberDisplayStyle; label: string }[] = [
+  { value: "standard", label: "Standard" },
+  { value: "currency", label: "Currency" },
+  { value: "percent", label: "Percent" },
+  { value: "scientific", label: "Scientific" },
+];
+
+const ROUNDING_METHOD_OPTIONS: { value: RoundingMethod; label: string }[] = [
+  { value: "half_up", label: "Round half up" },
+  { value: "truncate", label: "Truncate" },
+  { value: "floor", label: "Round down" },
+  { value: "ceil", label: "Round up" },
+];
 
 interface DataGridProps {
   totalRows: number;
@@ -79,7 +102,6 @@ export function DataGrid({
   displayDecimalPlaces = 4,
   minDisplayDecimalPlaces = 0,
   maxDisplayDecimalPlaces = 10,
-  onDisplayDecimalPlacesChange,
 }: DataGridProps): React.ReactElement {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const anchor = useRef<{ row: number; col: string } | null>(null);
@@ -99,15 +121,91 @@ export function DataGrid({
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
   const [tooltipFlipped, setTooltipFlipped] = useState(false);
+  const [columnDisplayFormats, setColumnDisplayFormats] = useState<Record<string, ColumnDisplayFormat>>({});
+  const [previewColumnFormat, setPreviewColumnFormat] = useState<{ column: string; format: ColumnDisplayFormat } | null>(null);
 
   // ── Column stats rail state ──
   const [columnStatsPanel, setColumnStatsPanel] = useState<ColumnStatsPanelState | null>(null);
   const columnStatsRequestId = useRef(0);
   const columnUniquesRequestId = useRef(0);
+  const defaultColumnFormat = useMemo<ColumnDisplayFormat>(() => ({
+    decimalPlaces: displayDecimalPlaces,
+    numberStyle: "standard",
+    roundingMethod: "half_up",
+  }), [displayDecimalPlaces]);
+
+  const isColumnNumeric = useCallback(
+    (column?: string): boolean => {
+      if (!column) return false;
+      if (numericColumns?.has(column)) return true;
+      return isNumericColumnType(columnTypes?.get(column) ?? "");
+    },
+    [columnTypes, numericColumns]
+  );
+
+  const getColumnFormat = useCallback(
+    (column?: string): ColumnDisplayFormat => {
+      if (!column) return defaultColumnFormat;
+      return columnDisplayFormats[column] ?? defaultColumnFormat;
+    },
+    [columnDisplayFormats, defaultColumnFormat]
+  );
+
+  const setColumnFormat = useCallback(
+    (column: string, nextFormat: ColumnDisplayFormat) => {
+      setColumnDisplayFormats((prev) => {
+        const isDefault =
+          nextFormat.decimalPlaces === defaultColumnFormat.decimalPlaces
+          && nextFormat.numberStyle === defaultColumnFormat.numberStyle
+          && nextFormat.roundingMethod === defaultColumnFormat.roundingMethod;
+        if (isDefault) {
+          const { [column]: _removed, ...rest } = prev;
+          return rest;
+        }
+        return { ...prev, [column]: nextFormat };
+      });
+    },
+    [defaultColumnFormat]
+  );
+
+  const getEffectiveColumnFormat = useCallback(
+    (column?: string): ColumnDisplayFormat => {
+      if (column && previewColumnFormat?.column === column) {
+        return previewColumnFormat.format;
+      }
+      return getColumnFormat(column);
+    },
+    [getColumnFormat, previewColumnFormat]
+  );
+
+  const previewFormatForColumn = useCallback((column: string, format: ColumnDisplayFormat) => {
+    setPreviewColumnFormat({ column, format });
+  }, []);
+
+  const applyFormatForColumn = useCallback((column: string, format: ColumnDisplayFormat) => {
+    setColumnFormat(column, format);
+    setPreviewColumnFormat(null);
+  }, [setColumnFormat]);
+
+  const formatCellForColumn = useCallback(
+    (value: any, column?: string): string => {
+      const format = getEffectiveColumnFormat(column);
+      const useNumericFormatting = isColumnNumeric(column);
+      return formatCell(
+        value,
+        format.decimalPlaces,
+        useNumericFormatting ? format.numberStyle : "standard",
+        format.roundingMethod,
+        useNumericFormatting
+      );
+    },
+    [getEffectiveColumnFormat, isColumnNumeric]
+  );
 
   const closeColumnStatsPanel = useCallback(() => {
     columnStatsRequestId.current += 1;
     columnUniquesRequestId.current += 1;
+    setPreviewColumnFormat(null);
     setColumnStatsPanel(null);
   }, []);
 
@@ -514,7 +612,7 @@ export function DataGrid({
             const row = getRow(i);
             if (row) value = row[col];
           }
-          const text = formatCell(value, displayDecimalPlaces);
+          const text = formatCellForColumn(value, col);
           if (text) {
             const w = ctx.measureText(text).width + CELL_PADDING;
             if (w > maxWidth) maxWidth = w;
@@ -526,7 +624,7 @@ export function DataGrid({
       autoFittedCols.current.add(col);
       setColumnWidths((prev) => ({ ...prev, [col]: fitWidth }));
     },
-    [virtualizer, getRow, pivotMode, pivotFlatRows, columns, displayDecimalPlaces]
+    [virtualizer, getRow, pivotMode, pivotFlatRows, columns, formatCellForColumn]
   );
 
   const handleHeaderStatsClick = useCallback(
@@ -536,6 +634,7 @@ export function DataGrid({
       if (!onGetColumnStats || pivotMode) return;
       setTooltip(null);
       setCopied(false);
+      setPreviewColumnFormat(null);
       requestColumnStats(col);
       setColumnStatsPanel((prev) =>
         prev?.column === col ? { ...prev, view: "overview" } : prev
@@ -753,14 +852,14 @@ export function DataGrid({
               const row = flatRow.data;
               return colNames
                 .map((c) =>
-                  selected.has(cellKey(r, c)) ? formatCell(row?.[c], displayDecimalPlaces) : ""
+                  selected.has(cellKey(r, c)) ? formatCellForColumn(row?.[c], c) : ""
                 )
                 .join("\t");
             }
             const row = getRow(r);
             return colNames
               .map((c) =>
-                selected.has(cellKey(r, c)) ? formatCell(row?.[c], displayDecimalPlaces) : ""
+                selected.has(cellKey(r, c)) ? formatCellForColumn(row?.[c], c) : ""
               )
               .join("\t");
           })
@@ -773,7 +872,7 @@ export function DataGrid({
 
     el.addEventListener("keydown", handler);
     return () => el.removeEventListener("keydown", handler);
-  }, [selected, getRow, columns, pivotMode, pivotFlatRows, displayDecimalPlaces]);
+  }, [selected, getRow, columns, pivotMode, pivotFlatRows, formatCellForColumn]);
 
   if (columns.length === 0 || (effectiveRowCount === 0 && !pivotMode)) {
     return (
@@ -811,40 +910,11 @@ export function DataGrid({
   const getAggValue = (aggregates: Record<string, any> | undefined, col: string): string => {
     const value = getAggRawValue(aggregates, col);
     if (value === null || value === undefined) return "";
-    return formatCell(value, displayDecimalPlaces);
+    return formatCellForColumn(value, col);
   };
 
   return (
     <div className="data-grid-container" ref={containerRef} tabIndex={-1}>
-      {onDisplayDecimalPlacesChange && (
-        <div className="dg-view-toolbar">
-          <div
-            className="dg-decimals-control"
-            title="Display precision only; underlying data is unchanged"
-          >
-            <span className="dg-decimals-label">Decimals</span>
-            <ButtonGroup minimal className="dg-decimals-buttons">
-              <Button
-                icon="minus"
-                small
-                title="Show fewer decimal places"
-                aria-label="Show fewer decimal places"
-                disabled={displayDecimalPlaces <= minDisplayDecimalPlaces}
-                onClick={() => onDisplayDecimalPlacesChange(displayDecimalPlaces - 1)}
-              />
-              <span className="dg-decimals-value">{displayDecimalPlaces} dp</span>
-              <Button
-                icon="plus"
-                small
-                title="Show more decimal places"
-                aria-label="Show more decimal places"
-                disabled={displayDecimalPlaces >= maxDisplayDecimalPlaces}
-                onClick={() => onDisplayDecimalPlacesChange(displayDecimalPlaces + 1)}
-              />
-            </ButtonGroup>
-          </div>
-        </div>
-      )}
       <div className="data-grid-body">
         <div className="data-grid-scroll" ref={scrollRef}>
           <div style={{ width: totalWidth, minWidth: "100%" }}>
@@ -1022,7 +1092,7 @@ export function DataGrid({
                         const rawValue = getAggRawValue(flatRow.aggregates, col);
                         const cellText = rawValue === null || rawValue === undefined
                           ? ""
-                          : formatCell(rawValue, displayDecimalPlaces);
+                          : formatCellForColumn(rawValue, col);
                         return (
                           <div
                             key={col}
@@ -1070,7 +1140,7 @@ export function DataGrid({
                     />
                     {/* Data columns: show actual cell values */}
                     {dataColumns.map((col) => {
-                      const cellText = loaded ? formatCell(rowData[col], displayDecimalPlaces) : "...";
+                      const cellText = loaded ? formatCellForColumn(rowData[col], col) : "...";
                       return (
                         <div
                           key={col}
@@ -1122,7 +1192,7 @@ export function DataGrid({
                     {virtualRow.index + 1}
                   </div>
                   {columns.map((col) => {
-                    const cellText = loaded ? formatCell(row[col], displayDecimalPlaces) : "...";
+                    const cellText = loaded ? formatCellForColumn(row[col], col) : "...";
                     return (
                       <div
                         key={col}
@@ -1196,7 +1266,13 @@ export function DataGrid({
           <ColumnStatsRail
             panel={columnStatsPanel}
             fallbackType={columnTypes?.get(columnStatsPanel.column)}
-            decimalPlaces={displayDecimalPlaces}
+            format={getEffectiveColumnFormat(columnStatsPanel.column)}
+            appliedFormat={getColumnFormat(columnStatsPanel.column)}
+            defaultFormat={defaultColumnFormat}
+            minDecimalPlaces={minDisplayDecimalPlaces}
+            maxDecimalPlaces={maxDisplayDecimalPlaces}
+            onFormatPreview={(format) => previewFormatForColumn(columnStatsPanel.column, format)}
+            onFormatChange={(format) => applyFormatForColumn(columnStatsPanel.column, format)}
             onShowUniques={handleShowUniqueValues}
             onBack={handleColumnStatsBack}
             onRefresh={handleColumnStatsRefresh}
@@ -1234,7 +1310,13 @@ export function DataGrid({
 interface ColumnStatsRailProps {
   panel: ColumnStatsPanelState;
   fallbackType?: string;
-  decimalPlaces: number;
+  format: ColumnDisplayFormat;
+  appliedFormat: ColumnDisplayFormat;
+  defaultFormat: ColumnDisplayFormat;
+  minDecimalPlaces: number;
+  maxDecimalPlaces: number;
+  onFormatPreview: (format: ColumnDisplayFormat) => void;
+  onFormatChange: (format: ColumnDisplayFormat) => void;
   onShowUniques: () => void;
   onBack: () => void;
   onRefresh: () => void;
@@ -1244,7 +1326,13 @@ interface ColumnStatsRailProps {
 function ColumnStatsRail({
   panel,
   fallbackType,
-  decimalPlaces,
+  format,
+  appliedFormat,
+  defaultFormat,
+  minDecimalPlaces,
+  maxDecimalPlaces,
+  onFormatPreview,
+  onFormatChange,
   onShowUniques,
   onBack,
   onRefresh,
@@ -1257,6 +1345,7 @@ function ColumnStatsRail({
     ? Math.max(1, ...stats.topValues.map((topValue) => topValue.count))
     : 1;
   const hasNumericStats = stats?.avgValue != null || stats?.medianValue != null;
+  const isNumeric = isNumericColumnType(columnType);
   const uniqueSortLabel = isNumericColumnType(columnType)
     ? "Sorted numerically"
     : "Sorted A-Z, case-insensitive";
@@ -1360,16 +1449,16 @@ function ColumnStatsRail({
                 <>
                   <StatsKeyValue
                     label="Median"
-                    value={formatStatsValue(stats.medianValue, decimalPlaces)}
+                    value={formatStatsValue(stats.medianValue, format, isNumeric)}
                   />
                   <StatsKeyValue
                     label="Average"
-                    value={formatStatsValue(stats.avgValue, decimalPlaces)}
+                    value={formatStatsValue(stats.avgValue, format, isNumeric)}
                   />
                 </>
               )}
-              <StatsKeyValue label="Min" value={formatStatsValue(stats.minValue, decimalPlaces)} />
-              <StatsKeyValue label="Max" value={formatStatsValue(stats.maxValue, decimalPlaces)} />
+              <StatsKeyValue label="Min" value={formatStatsValue(stats.minValue, format, isNumeric)} />
+              <StatsKeyValue label="Max" value={formatStatsValue(stats.maxValue, format, isNumeric)} />
             </div>
           </div>
 
@@ -1378,7 +1467,9 @@ function ColumnStatsRail({
             {stats.topValues.length > 0 ? (
               <div className="dg-stats-top-values">
                 {stats.topValues.map((topValue, idx) => {
-                  const valueLabel = topValue.value === "" ? "(empty)" : topValue.value;
+                  const valueLabel = topValue.value === ""
+                    ? "(empty)"
+                    : formatStatsValue(topValue.value, format, isNumeric);
                   return (
                     <div className="dg-stats-top-row" key={`${topValue.value}:${idx}`}>
                       <div className="dg-stats-top-label" title={valueLabel}>
@@ -1401,6 +1492,18 @@ function ColumnStatsRail({
               <div className="dg-stats-empty">No non-null values</div>
             )}
           </div>
+
+          <ColumnStatsOpsPanel
+            columnType={columnType}
+            stats={stats}
+            format={format}
+            appliedFormat={appliedFormat}
+            defaultFormat={defaultFormat}
+            minDecimalPlaces={minDecimalPlaces}
+            maxDecimalPlaces={maxDecimalPlaces}
+            onFormatPreview={onFormatPreview}
+            onFormatChange={onFormatChange}
+          />
         </>
       )}
 
@@ -1450,6 +1553,227 @@ function ColumnStatsRail({
         </div>
       )}
     </aside>
+  );
+}
+
+function ColumnStatsOpsPanel({
+  columnType,
+  stats,
+  format,
+  appliedFormat,
+  defaultFormat,
+  minDecimalPlaces,
+  maxDecimalPlaces,
+  onFormatPreview,
+  onFormatChange,
+}: {
+  columnType: string;
+  stats: ColumnStats;
+  format: ColumnDisplayFormat;
+  appliedFormat: ColumnDisplayFormat;
+  defaultFormat: ColumnDisplayFormat;
+  minDecimalPlaces: number;
+  maxDecimalPlaces: number;
+  onFormatPreview: (format: ColumnDisplayFormat) => void;
+  onFormatChange: (format: ColumnDisplayFormat) => void;
+}): React.ReactElement {
+  const [activeTab, setActiveTab] = useState<"format" | "clean" | "transform">("format");
+  const [draftFormat, setDraftFormat] = useState<ColumnDisplayFormat>(format);
+  const isNumeric = isNumericColumnType(columnType);
+  const sampleValue = stats.medianValue ?? stats.avgValue ?? stats.minValue ?? stats.topValues[0]?.value ?? null;
+
+  useEffect(() => {
+    setDraftFormat(format);
+  }, [format, stats.column]);
+
+  useEffect(() => {
+    setActiveTab("format");
+  }, [stats.column]);
+
+  const updateDraft = (patch: Partial<ColumnDisplayFormat>) => {
+    const nextFormat = { ...draftFormat, ...patch };
+    setDraftFormat(nextFormat);
+    onFormatPreview(nextFormat);
+  };
+
+  const isDirty =
+    draftFormat.decimalPlaces !== appliedFormat.decimalPlaces
+    || draftFormat.numberStyle !== appliedFormat.numberStyle
+    || draftFormat.roundingMethod !== appliedFormat.roundingMethod;
+
+  const stepDecimalPlaces = (delta: number) => {
+    const next = Math.min(
+      maxDecimalPlaces,
+      Math.max(minDecimalPlaces, draftFormat.decimalPlaces + delta)
+    );
+    updateDraft({ decimalPlaces: next });
+  };
+
+  const renderFormatTab = () => {
+    if (!isNumeric) {
+      return (
+        <div className="dg-stats-op-empty">
+          <Icon icon="info-sign" size={14} />
+          <span>Formatting controls adapt to the selected column type.</span>
+        </div>
+      );
+    }
+
+    return (
+      <>
+        <div className="dg-stats-op-field">
+          <div className="dg-stats-op-label-row">
+            <span>Decimal places</span>
+            <em>Preview: {formatStatsValue(sampleValue, draftFormat, true)}</em>
+          </div>
+          <ButtonGroup className="dg-stats-decimal-stepper">
+            <Button
+              icon="minus"
+              aria-label="Decrease decimal places"
+              disabled={draftFormat.decimalPlaces <= minDecimalPlaces}
+              onClick={() => stepDecimalPlaces(-1)}
+            />
+            <span>{draftFormat.decimalPlaces}</span>
+            <Button
+              icon="plus"
+              aria-label="Increase decimal places"
+              disabled={draftFormat.decimalPlaces >= maxDecimalPlaces}
+              onClick={() => stepDecimalPlaces(1)}
+            />
+          </ButtonGroup>
+        </div>
+
+        <div className="dg-stats-op-field">
+          <div className="dg-stats-op-label-row">
+            <span>Number style</span>
+          </div>
+          <div className="dg-stats-style-list" role="radiogroup" aria-label="Number style">
+            {NUMBER_STYLE_OPTIONS.map((option) => {
+              const selected = draftFormat.numberStyle === option.value;
+              const optionFormat = { ...draftFormat, numberStyle: option.value };
+              return (
+                <button
+                  type="button"
+                  key={option.value}
+                  className={`dg-stats-style-row${selected ? " active" : ""}`}
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => updateDraft({ numberStyle: option.value })}
+                >
+                  <span className="dg-stats-radio-dot" aria-hidden="true" />
+                  <span>{option.label}</span>
+                  <em>{formatStatsValue(sampleValue, optionFormat, true)}</em>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="dg-stats-op-field">
+          <div className="dg-stats-op-label-row">
+            <span>Rounding method</span>
+          </div>
+          <HTMLSelect
+            value={draftFormat.roundingMethod}
+            onChange={(e) => updateDraft({ roundingMethod: e.target.value as RoundingMethod })}
+            fill
+          >
+            {ROUNDING_METHOD_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </HTMLSelect>
+          <div className="dg-stats-op-hint">Values are rounded for display only; underlying data is unchanged.</div>
+        </div>
+
+        <div className="dg-stats-live-preview">
+          <div>
+            <span>Before</span>
+            <strong>{formatRawPreview(sampleValue)}</strong>
+          </div>
+          <Icon icon="arrow-right" size={18} />
+          <div>
+            <span>After</span>
+            <strong>{formatStatsValue(sampleValue, draftFormat, true)}</strong>
+          </div>
+        </div>
+      </>
+    );
+  };
+
+  const renderComingSoonRows = (
+    rows: { icon: string; title: string; detail: string }[]
+  ) => (
+    <div className="dg-stats-op-list">
+      {rows.map((row) => (
+        <div className="dg-stats-op-row" key={row.title}>
+          <Icon icon={row.icon as any} size={14} />
+          <div>
+            <strong>{row.title}</strong>
+            <span>{row.detail}</span>
+          </div>
+          <Button minimal small text="Soon" disabled />
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="dg-stats-ops">
+      <div className="dg-stats-op-tabs" role="tablist" aria-label="Column operations">
+        {(["format", "clean", "transform"] as const).map((tab) => (
+          <button
+            type="button"
+            key={tab}
+            className={activeTab === tab ? "active" : ""}
+            role="tab"
+            aria-selected={activeTab === tab}
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      <div className="dg-stats-op-content">
+        {activeTab === "format" && renderFormatTab()}
+        {activeTab === "clean" && renderComingSoonRows([
+          { icon: "clean", title: `Fill ${formatStatNumber(stats.nullCount)} nulls`, detail: "Replace missing values with a fixed value, zero, or median." },
+          { icon: "horizontal-distribution", title: "Clamp outliers", detail: "Cap values outside the observed numeric range." },
+          { icon: "filter-remove", title: "Replace invalid values", detail: "Convert non-numeric entries to NULL before analysis." },
+        ])}
+        {activeTab === "transform" && renderComingSoonRows([
+          { icon: "one-to-one", title: "Normalize range", detail: "Scale values into a 0 to 1 range." },
+          { icon: "timeline-line-chart", title: "Log scale", detail: "Compress wide numeric ranges for analysis." },
+          { icon: "exchange", title: "Cast type", detail: `Convert ${columnType.toUpperCase()} to another compatible dtype.` },
+        ])}
+      </div>
+
+      {activeTab === "format" && (
+        <div className="dg-stats-op-footer">
+          <Button
+            text="Reset"
+            disabled={
+              draftFormat.decimalPlaces === defaultFormat.decimalPlaces
+              && draftFormat.numberStyle === defaultFormat.numberStyle
+              && draftFormat.roundingMethod === defaultFormat.roundingMethod
+            }
+            onClick={() => {
+              setDraftFormat(defaultFormat);
+              onFormatPreview(defaultFormat);
+            }}
+          />
+          <Button
+            intent="primary"
+            icon="tick"
+            text={isDirty ? "Apply" : "Applied"}
+            disabled={!isDirty || !isNumeric}
+            onClick={() => onFormatChange(draftFormat)}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1518,20 +1842,79 @@ function formatPercent(part: number, total: number): string {
   return `${Math.round((part / total) * 100)}%`;
 }
 
-function formatStatsValue(value: any, decimalPlaces: number): string {
+function formatStatsValue(value: any, format: ColumnDisplayFormat, isNumeric = false): string {
   if (value === null || value === undefined || value === "") return "-";
-  return formatCell(value, decimalPlaces);
+  return formatCell(value, format.decimalPlaces, isNumeric ? format.numberStyle : "standard", format.roundingMethod, isNumeric);
 }
 
 function isNumericColumnType(columnType: string): boolean {
   return /^(TINYINT|SMALLINT|INTEGER|INT|BIGINT|HUGEINT|FLOAT|REAL|DOUBLE|DECIMAL|NUMERIC)/i.test(columnType);
 }
 
-function formatCell(value: any, decimalPlaces: number): string {
+function parseNumericValue(value: any): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function roundForDisplay(value: number, decimalPlaces: number, roundingMethod: RoundingMethod): number {
+  const factor = 10 ** decimalPlaces;
+  const scaled = value * factor;
+  switch (roundingMethod) {
+    case "truncate":
+      return Math.trunc(scaled) / factor;
+    case "floor":
+      return Math.floor(scaled) / factor;
+    case "ceil":
+      return Math.ceil(scaled) / factor;
+    case "half_up":
+    default:
+      return Math.round(scaled) / factor;
+  }
+}
+
+function formatRawPreview(value: any): string {
+  if (value === null || value === undefined || value === "") return "-";
+  const numeric = parseNumericValue(value);
+  if (numeric === null) return String(value);
+  return Number.isInteger(numeric) ? numeric.toString() : numeric.toLocaleString("en-US", { maximumFractionDigits: 6 });
+}
+
+function formatCell(
+  value: any,
+  decimalPlaces: number,
+  numberStyle: NumberDisplayStyle = "standard",
+  roundingMethod: RoundingMethod = "half_up",
+  forceNumeric = false
+): string {
   if (value === null || value === undefined) return "";
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) return String(value);
-    return Number.isInteger(value) ? value.toString() : value.toFixed(decimalPlaces);
+  const numericValue = forceNumeric ? parseNumericValue(value) : (typeof value === "number" ? parseNumericValue(value) : null);
+  if (numericValue !== null) {
+    const rounded = roundForDisplay(numericValue, decimalPlaces, roundingMethod);
+    if (!Number.isFinite(rounded)) return String(value);
+    if (numberStyle === "currency") {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: decimalPlaces,
+        maximumFractionDigits: decimalPlaces,
+      }).format(rounded);
+    }
+    if (numberStyle === "percent") {
+      return new Intl.NumberFormat("en-US", {
+        style: "percent",
+        minimumFractionDigits: decimalPlaces,
+        maximumFractionDigits: decimalPlaces,
+      }).format(rounded);
+    }
+    if (numberStyle === "scientific") {
+      return rounded.toExponential(decimalPlaces);
+    }
+    return Number.isInteger(numericValue) ? numericValue.toString() : rounded.toFixed(decimalPlaces);
   }
   return String(value);
 }
