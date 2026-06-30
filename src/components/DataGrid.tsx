@@ -4,8 +4,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue } from "../types";
 
 const TOOLTIP_DELAY = 600; // ms before tooltip appears
-const COLUMN_STATS_DELAY = 350;
-const COLUMN_STATS_DISMISS_DELAY = 900;
 
 const ROW_HEIGHT = 28;
 const DEFAULT_COLUMN_WIDTH = 150;
@@ -105,18 +103,10 @@ export function DataGrid({
 
   // ── Column stats rail state ──
   const [columnStatsPanel, setColumnStatsPanel] = useState<ColumnStatsPanelState | null>(null);
-  const columnStatsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const columnStatsDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const columnStatsRequestId = useRef(0);
   const columnUniquesRequestId = useRef(0);
   const columnStatsHovered = useRef(false);
-
-  const clearColumnStatsTimer = useCallback(() => {
-    if (columnStatsTimer.current) {
-      clearTimeout(columnStatsTimer.current);
-      columnStatsTimer.current = null;
-    }
-  }, []);
 
   const clearColumnStatsDismissTimer = useCallback(() => {
     if (columnStatsDismissTimer.current) {
@@ -126,12 +116,11 @@ export function DataGrid({
   }, []);
 
   const closeColumnStatsPanel = useCallback(() => {
-    clearColumnStatsTimer();
     clearColumnStatsDismissTimer();
     columnStatsRequestId.current += 1;
     columnUniquesRequestId.current += 1;
     setColumnStatsPanel(null);
-  }, [clearColumnStatsDismissTimer, clearColumnStatsTimer]);
+  }, [clearColumnStatsDismissTimer]);
 
   const scheduleColumnStatsDismiss = useCallback(
     (delay: number) => {
@@ -294,7 +283,6 @@ export function DataGrid({
     return () => {
       if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
       if (tooltipDismissTimer.current) clearTimeout(tooltipDismissTimer.current);
-      if (columnStatsTimer.current) clearTimeout(columnStatsTimer.current);
       if (columnStatsDismissTimer.current) clearTimeout(columnStatsDismissTimer.current);
     };
   }, []);
@@ -572,34 +560,21 @@ export function DataGrid({
     [virtualizer, getRow, pivotMode, pivotFlatRows, columns, displayDecimalPlaces]
   );
 
-  const handleHeaderMouseEnter = useCallback(
-    (col: string) => {
-      if (!onGetColumnStats || pivotMode || columnStatsPanel?.pinned) return;
-      if (isDragging.current || headerDragCol.current) return;
+  const handleHeaderStatsClick = useCallback(
+    (e: React.MouseEvent, col: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!onGetColumnStats || pivotMode) return;
       clearColumnStatsDismissTimer();
-      clearColumnStatsTimer();
       setTooltip(null);
       setCopied(false);
-      columnStatsTimer.current = setTimeout(() => {
-        requestColumnStats(col);
-      }, COLUMN_STATS_DELAY);
+      requestColumnStats(col);
+      setColumnStatsPanel((prev) =>
+        prev?.column === col ? { ...prev, view: "overview", pinned: true } : prev
+      );
     },
-    [
-      clearColumnStatsDismissTimer,
-      clearColumnStatsTimer,
-      columnStatsPanel?.pinned,
-      onGetColumnStats,
-      pivotMode,
-      requestColumnStats,
-    ]
+    [clearColumnStatsDismissTimer, onGetColumnStats, pivotMode, requestColumnStats]
   );
-
-  const handleHeaderMouseLeave = useCallback(() => {
-    clearColumnStatsTimer();
-    if (!columnStatsPanel?.pinned) {
-      scheduleColumnStatsDismiss(COLUMN_STATS_DISMISS_DELAY);
-    }
-  }, [clearColumnStatsTimer, columnStatsPanel?.pinned, scheduleColumnStatsDismiss]);
 
   const handleColumnStatsMouseEnter = useCallback(() => {
     columnStatsHovered.current = true;
@@ -998,8 +973,6 @@ export function DataGrid({
                   onDragLeave={handleHeaderDragLeave}
                   onDrop={handleHeaderDrop}
                   onDragEnd={handleHeaderDragEnd}
-                  onMouseEnter={() => handleHeaderMouseEnter(col)}
-                  onMouseLeave={handleHeaderMouseLeave}
                 >
                   <span className="dg-header-text" title={onGetColumnStats ? undefined : col}>{col}</span>
                   {sortInfo && (
@@ -1013,6 +986,22 @@ export function DataGrid({
                         size={10}
                       />
                     </span>
+                  )}
+                  {onGetColumnStats && !pivotMode && (
+                    <button
+                      type="button"
+                      className={`dg-header-stats-btn${activeStatsColumn === col ? " active" : ""}`}
+                      title="Show column stats"
+                      aria-label={`Show stats for ${col}`}
+                      draggable={false}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      onClick={(e) => handleHeaderStatsClick(e, col)}
+                    >
+                      <Icon icon="chart" size={12} />
+                    </button>
                   )}
                   <div
                     className="col-resize-handle"
