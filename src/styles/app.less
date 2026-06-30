@@ -6904,6 +6904,53 @@ html.dark-theme #root {
     color: @dark-text-2;
   }
 
+  .update-notice-chip.bp4-button.bp4-minimal.bp4-intent-primary {
+    border: 1px solid @dark-accent-border;
+    background-color: @dark-accent-bg-subtle;
+    color: @dark-text-1;
+    box-shadow: none;
+
+    .bp4-icon {
+      color: @dark-accent;
+    }
+
+    .bp4-button-text {
+      color: inherit;
+    }
+
+    &:hover {
+      background-color: @dark-accent-bg;
+      color: @dark-text-1;
+    }
+
+    &:active,
+    &.bp4-active {
+      background-color: @dark-accent-bg-strong;
+      color: @dark-text-1;
+    }
+  }
+
+  .update-notice-ready .update-notice-chip.bp4-button.bp4-minimal.bp4-intent-success {
+    border-color: @dark-success-border;
+    background-color: @dark-success-bg;
+    color: @dark-text-1;
+
+    .bp4-icon {
+      color: @dark-success;
+    }
+
+    .bp4-button-text {
+      color: inherit;
+    }
+
+    &:hover,
+    &:active,
+    &.bp4-active {
+      background-color: @dark-success-bg-strong;
+      color: @dark-text-1;
+    }
+  }
+
   .update-notice-panel {
     background: @dark-bg-3;
     border-color: @dark-border-1;
