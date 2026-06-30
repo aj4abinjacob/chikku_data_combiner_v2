@@ -1976,6 +1976,27 @@ button.dg-stats-metric {
   display: flex;
   align-items: center;
   gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.filter-panel-close-button.bp4-button {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 !important;
+  color: #5c7080;
+
+  &:hover {
+    background: rgba(92, 112, 128, 0.12) !important;
+    color: #394b59;
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(19, 124, 189, 0.22);
+  }
 }
 
 .filter-panel-body {
@@ -7681,6 +7702,19 @@ html.dark-theme #root {
 
   .filter-panel-title {
     color: @dark-text-3;
+  }
+
+  .filter-panel-close-button.bp4-button {
+    color: @dark-text-3;
+
+    &:hover {
+      background: rgba(167, 182, 194, 0.12) !important;
+      color: @dark-text-1;
+    }
+
+    &:focus-visible {
+      box-shadow: 0 0 0 2px @dark-accent-bg;
+    }
   }
 
   .filter-panel-tab-separator {

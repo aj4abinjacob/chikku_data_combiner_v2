@@ -1278,7 +1278,17 @@ export function FilterPanel({
             )}
           </div>
         </div>
-        <div className="filter-panel-header-right" />
+        <div className="filter-panel-header-right">
+          <Button
+            className="filter-panel-close-button"
+            icon="cross"
+            small
+            minimal
+            onClick={onClose}
+            title="Close filters, column operations, and row operations"
+            aria-label="Close filters, column operations, and row operations"
+          />
+        </div>
       </div>
 
       {/* Filters + Views side-by-side */}
