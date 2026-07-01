@@ -19,6 +19,7 @@ import {
   LoadedTable,
 } from "../types";
 import { escapeIdent } from "../utils/sqlBuilder";
+import { SearchableColumnSelect } from "./SearchableColumnSelect";
 
 const ROW_HEIGHT = 28;
 const CHUNK_SIZE = 700;
@@ -934,8 +935,6 @@ export function ComparisonView({
   }, [exporting, model.canQuery, model.exportSql]);
 
   const virtualRows = virtualizer.getVirtualItems();
-  const baseColumnOptions = baseSchema.map((column) => column.column_name);
-  const compareColumnOptions = selectedTargetTable ? selectedTargetTable.schema.map((column) => column.column_name) : [];
   const diffRows = stats?.pairs.reduce((sum, pair) => sum + pair.diffCount, 0) ?? 0;
   const statRows = stats?.pairs.reduce((sum, pair) => sum + pair.totalRows, 0) ?? 0;
   const overallDiff = percent(diffRows, statRows);
@@ -1229,25 +1228,27 @@ export function ComparisonView({
               <div className="comparison-pair-list">
                 {selectedTargetConfig.keyPairs.map((pair) => (
                   <div key={pair.id} className="comparison-map-row">
-                    <HTMLSelect
+                    <SearchableColumnSelect
                       value={pair.baseColumn}
-                      onChange={(event) => handleKeyPairChange(pair.id, "baseColumn", event.currentTarget.value)}
-                    >
-                      <option value="">Base key</option>
-                      {baseColumnOptions.map((column) => (
-                        <option key={column} value={column}>{column}</option>
-                      ))}
-                    </HTMLSelect>
+                      onChange={(value) => handleKeyPairChange(pair.id, "baseColumn", value)}
+                      columns={baseSchema}
+                      placeholder="Base key"
+                      leftIcon="key"
+                      showType
+                      fill
+                      className="comparison-col-select"
+                    />
                     <span className="comparison-map-arrow">=</span>
-                    <HTMLSelect
+                    <SearchableColumnSelect
                       value={pair.compareColumn}
-                      onChange={(event) => handleKeyPairChange(pair.id, "compareColumn", event.currentTarget.value)}
-                    >
-                      <option value="">Compare key</option>
-                      {compareColumnOptions.map((column) => (
-                        <option key={column} value={column}>{column}</option>
-                      ))}
-                    </HTMLSelect>
+                      onChange={(value) => handleKeyPairChange(pair.id, "compareColumn", value)}
+                      columns={selectedTargetTable.schema}
+                      placeholder="Compare key"
+                      leftIcon="key"
+                      showType
+                      fill
+                      className="comparison-col-select"
+                    />
                     <Button
                       icon="cross"
                       minimal
@@ -1295,25 +1296,25 @@ export function ComparisonView({
               <div className="comparison-pair-list">
                 {selectedTargetConfig.columnPairs.map((pair) => (
                   <div key={pair.id} className="comparison-map-row comparison-column-map-row">
-                    <HTMLSelect
+                    <SearchableColumnSelect
                       value={pair.baseColumn}
-                      onChange={(event) => handleColumnPairChange(pair.id, "baseColumn", event.currentTarget.value)}
-                    >
-                      <option value="">Base column</option>
-                      {baseColumnOptions.map((column) => (
-                        <option key={column} value={column}>{column}</option>
-                      ))}
-                    </HTMLSelect>
+                      onChange={(value) => handleColumnPairChange(pair.id, "baseColumn", value)}
+                      columns={baseSchema}
+                      placeholder="Base column"
+                      showType
+                      fill
+                      className="comparison-col-select"
+                    />
                     <span className="comparison-map-arrow">=</span>
-                    <HTMLSelect
+                    <SearchableColumnSelect
                       value={pair.compareColumn}
-                      onChange={(event) => handleColumnPairChange(pair.id, "compareColumn", event.currentTarget.value)}
-                    >
-                      <option value="">Compare column</option>
-                      {compareColumnOptions.map((column) => (
-                        <option key={column} value={column}>{column}</option>
-                      ))}
-                    </HTMLSelect>
+                      onChange={(value) => handleColumnPairChange(pair.id, "compareColumn", value)}
+                      columns={selectedTargetTable.schema}
+                      placeholder="Compare column"
+                      showType
+                      fill
+                      className="comparison-col-select"
+                    />
                     <Button
                       icon="cross"
                       minimal

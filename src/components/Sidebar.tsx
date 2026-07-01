@@ -6,6 +6,7 @@ import {
   Icon,
   Intent,
 } from "@blueprintjs/core";
+import { Tooltip2 } from "@blueprintjs/popover2";
 import { LoadedTable, ColumnInfo, SortColumn, PivotViewConfig, ComparisonTableRole } from "../types";
 import { DataOperationsDialog } from "./DataOperationsDialog";
 import { AggregateDialog } from "./AggregateDialog";
@@ -229,6 +230,7 @@ export function Sidebar({
   const allVisible = visibleColumns.length === allColumnNames.length;
   const noneVisible = visibleColumns.length === 0;
   const visibleColumnCount = visibleColumns.length;
+  const compareDisabled = tables.length < 2;
 
   return (
     <div className="sidebar">
@@ -546,14 +548,25 @@ export function Sidebar({
               small
             />
           )}
-          {tables.length >= 2 && onCompareTables && (
-            <Button
-              icon="data-lineage"
-              text="Compare"
-              title="Compare current table with another table"
-              onClick={onCompareTables}
-              small
-            />
+          {onCompareTables && (
+            <Tooltip2
+              content="Open another table to enable comparison."
+              disabled={!compareDisabled}
+              placement="top"
+              minimal
+            >
+              <span className="sidebar-action-tooltip">
+                <Button
+                  icon="data-lineage"
+                  text="Compare"
+                  title={compareDisabled ? undefined : "Compare current table with another table"}
+                  onClick={onCompareTables}
+                  small
+                  fill
+                  disabled={compareDisabled}
+                />
+              </span>
+            </Tooltip2>
           )}
           <Button
             icon="column-layout"

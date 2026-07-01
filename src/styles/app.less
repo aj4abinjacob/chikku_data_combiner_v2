@@ -789,7 +789,13 @@ html, body, #root {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
 
-    > .bp4-button {
+    .sidebar-action-tooltip {
+      min-width: 0;
+      display: block;
+    }
+
+    > .bp4-button,
+    .sidebar-action-tooltip .bp4-button {
       min-width: 0;
       min-height: 26px;
       justify-content: flex-start;
@@ -3031,7 +3037,8 @@ button.dg-stats-metric {
   align-items: center;
 
   .bp4-html-select,
-  .bp4-html-select select {
+  .bp4-html-select select,
+  .comparison-col-select.col-select-trigger {
     width: 100%;
     min-width: 0;
   }
@@ -8636,7 +8643,8 @@ html.dark-theme #root {
       background: @dark-bg-2;
     }
 
-    .sidebar-actions > .bp4-button {
+    .sidebar-actions > .bp4-button,
+    .sidebar-actions .sidebar-action-tooltip .bp4-button {
       background: @dark-bg-3;
       border-color: @dark-border-2;
       color: @dark-text-1;

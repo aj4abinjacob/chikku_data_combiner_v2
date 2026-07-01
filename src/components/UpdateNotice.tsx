@@ -228,22 +228,7 @@ export function UpdateNotice(): React.ReactElement | null {
     setPhase("hidden");
   }, [releaseClaim, update]);
 
-  if (!window.api?.checkForUpdate) return null;
-
-  if (phase === "hidden") {
-    return (
-      <div className="update-notice update-notice-hidden">
-        <Button
-          className="update-notice-chip"
-          icon="automatic-updates"
-          text="Check updates"
-          small
-          minimal
-          onClick={() => void runUpdateCheck(true)}
-        />
-      </div>
-    );
-  }
+  if (!window.api?.checkForUpdate || phase === "hidden") return null;
 
   if (!update) {
     const statusText =
@@ -259,11 +244,11 @@ export function UpdateNotice(): React.ReactElement | null {
           ? "error"
           : "automatic-updates";
     const statusIntent =
-      phase === "current"
-        ? Intent.SUCCESS
-        : phase === "error"
+      phase === "error"
           ? Intent.DANGER
-          : Intent.PRIMARY;
+          : phase === "checking"
+            ? Intent.PRIMARY
+            : undefined;
 
     return (
       <div className={`update-notice update-notice-${phase}`}>

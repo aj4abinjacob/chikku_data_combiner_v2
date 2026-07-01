@@ -22,6 +22,10 @@ npm run tauri:dev             # Launch Tauri shell with webpack-dev-server
 npm run tauri:build           # Package Tauri app
 ```
 
+## Release Process
+
+Follow `RELEASE.md` whenever the user asks to publish a new tag. Always bump all app version files before tagging, push the branch and tag, wait for the GitHub release workflow, and verify `latest.json` reports the new version and all supported platforms.
+
 ## Tauri Backend
 
 `src-tauri/` hosts the Rust/Tauri app and runs the React renderer on top of a Rust process.
@@ -77,7 +81,7 @@ Tauri 2, Rust, React 18, TypeScript 5 (strict, ES2020, CommonJS), DuckDB (in-mem
 - Layout: `Sidebar + PivotToolbar + DataGrid + FilterPanel + StatusBar + dialogs`
 
 ### Sidebar.tsx — Left Panel
-Three sections: Tables, Columns, Operations. Table management, column visibility/search, sort/group controls, and operation buttons for data operations, aggregate, pivot table, lookup merge, date conversion, and export.
+Three sections: Tables, Columns, Operations. Table management, column visibility/search, sort/group controls, and operation buttons for data operations, aggregate, pivot table, lookup merge, comparison, date conversion, and export.
 
 ### DataGrid.tsx — Virtualized Data Grid
 Virtual scrolling via `@tanstack/react-virtual`. Div-based layout. Dual-mode: flat (chunk cache) and pivot (tree with group/data rows). Cell selection, copy (TSV), multi-sort, column resize/reorder. `ROW_HEIGHT = 28`.
