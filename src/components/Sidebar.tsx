@@ -6,7 +6,7 @@ import {
   Icon,
   Intent,
 } from "@blueprintjs/core";
-import { LoadedTable, ColumnInfo, SortColumn, PivotViewConfig } from "../types";
+import { LoadedTable, ColumnInfo, SortColumn, PivotViewConfig, ComparisonTableRole } from "../types";
 import { DataOperationsDialog } from "./DataOperationsDialog";
 import { AggregateDialog } from "./AggregateDialog";
 import { PivotDialog } from "./PivotDialog";
@@ -37,11 +37,13 @@ interface SidebarProps {
   onCreateAggregateTable: (sql: string) => void;
   onCreatePivotTable: (sql: string) => void;
   onLookupMerge: (sql: string, options: { replaceActive: boolean }) => void;
+  onCompareTables?: () => void;
   onExport: () => void;
   onOpenHistory: () => void;
   onOpenFiles: () => void;
   onHide: () => void;
   jsonWorkspaceActive?: boolean;
+  comparisonTableRoles?: Record<string, ComparisonTableRole>;
 }
 
 type FileListIcon = {
@@ -89,11 +91,13 @@ export function Sidebar({
   onCreateAggregateTable,
   onCreatePivotTable,
   onLookupMerge,
+  onCompareTables,
   onExport,
   onOpenHistory,
   onOpenFiles,
   onHide,
   jsonWorkspaceActive = false,
+  comparisonTableRoles,
 }: SidebarProps): React.ReactElement {
   const [dataOpDialogOpen, setDataOpDialogOpen] = useState(false);
   const [aggregateDialogOpen, setAggregateDialogOpen] = useState(false);
@@ -272,11 +276,16 @@ export function Sidebar({
         )}
         {filteredTables.map((t) => {
           const fileIcon = getFileListIcon(t);
+          const comparisonRole = comparisonTableRoles?.[t.tableName];
+          const tableStyle = comparisonRole
+            ? ({ "--table-accent": comparisonRole.color } as React.CSSProperties)
+            : undefined;
 
           return (
             <div
               key={t.tableName}
-              className={`table-list-item${t.tableName === activeTable ? " active" : ""}${selectedForCombine.has(t.tableName) ? " selected" : ""}`}
+              className={`table-list-item${t.tableName === activeTable ? " active" : ""}${selectedForCombine.has(t.tableName) ? " selected" : ""}${comparisonRole ? " comparison-role" : ""}`}
+              style={tableStyle}
             >
               {tables.length >= 2 && (
                 <Checkbox
@@ -298,6 +307,12 @@ export function Sidebar({
                   <span className="row-count">
                     {t.rowCount.toLocaleString()} rows
                   </span>
+                  {comparisonRole && (
+                    <span className="table-comparison-role">
+                      <span className="table-comparison-dot" />
+                      {comparisonRole.label}
+                    </span>
+                  )}
                 </span>
               </span>
               <Button
@@ -528,6 +543,15 @@ export function Sidebar({
               text="Lookup"
               title="Lookup Merge"
               onClick={() => setMergeDialogOpen(true)}
+              small
+            />
+          )}
+          {tables.length >= 2 && onCompareTables && (
+            <Button
+              icon="data-lineage"
+              text="Compare"
+              title="Compare current table with another table"
+              onClick={onCompareTables}
               small
             />
           )}

@@ -1,0 +1,13 @@
+customer_id,order_date,status,total,region,account_tier,sales_rep,channel,notes
+CUST-0001,2026-05-01,paid,128.40,West,Gold,Ana,web,baseline match
+CUST-0002,2026-05-01,pending,132.90,South,Standard,Ben,store,status differs
+CUST-0003,2026-05-01,paid,58.12,East,Gold,Ana,web,total differs
+CUST-0004,2026-05-02,cancelled,0.00,West,Standard,Chen,phone,matched cancel
+CUST-0005,2026-05-02,paid,245.00,North,Gold,Ben,web,status and total differ
+CUST-0006,2026-05-02,paid,75.00,South,Standard,Dee,store,match
+CUST-0007,2026-05-03,pending,199.99,West,Gold,Ana,web,region differs
+CUST-0008,2026-05-03,paid,310.10,West,Gold,Chen,partner,total differs
+CUST-0009,2026-05-03,cancelled,15.00,South,Standard,Dee,store,match
+CUST-0010,2026-05-04,paid,87.30,East,Gold,Ben,web,missing in compare
+CUST-0011,2026-05-04,pending,20.00,West,Standard,Ana,phone,status differs
+CUST-0012,2026-05-04,paid,640.00,North,Gold,Chen,partner,total differs

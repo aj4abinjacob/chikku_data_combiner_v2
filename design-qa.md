@@ -30,4 +30,22 @@ focused region comparison evidence: blocked, no implementation screenshot availa
 
 patches made since previous QA pass: initial JSON workspace implementation, flatten utility, Tauri text read/write commands, main app JSON-mode integration, status bar filter toggle guard, light/dark workspace styling
 
+## Comparison View QA
+
+source visual truth path: `/Users/abinjacob/.codex/generated_images/019f1c63-871a-73b1-8245-5fab46a054e0/ig_0bab2eb0f9e244de016a44b84d37c4819a9ddfc3fda62d8f9b.png`
+
+source header reference path: `/Users/abinjacob/.codex/generated_images/019f1c63-871a-73b1-8245-5fab46a054e0/ig_0bab2eb0f9e244de016a44b8d5790c819a9258ecebd5f88139.png`
+
+implementation screenshot path: blocked
+
+viewport: intended desktop comparison view
+
+state: tabular files loaded, comparison mode active, light theme
+
+full-view comparison evidence: blocked, no implementation screenshot available
+
+focused region comparison evidence: blocked, no implementation screenshot available
+
+patches made since previous QA pass: comparison view state, auto same-name pairing, composite superkey mapping, paired comparison grid headers, differences-only mode, freeze-key toggle, pair stats rail, sidebar table color roles, compared-file export naming.
+
 final result: blocked

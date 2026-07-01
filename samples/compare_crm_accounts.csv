@@ -1,0 +1,13 @@
+customer_id,order_date,status,total,region,account_tier,owner,risk_score
+CUST-0001,2026-05-01,paid,128.40,West,Gold,Mira,12
+CUST-0002,2026-05-01,pending,132.90,West,Standard,Omar,21
+CUST-0003,2026-05-01,paid,58.12,East,Gold,Mira,9
+CUST-0004,2026-05-02,cancelled,0.00,West,Standard,Omar,30
+CUST-0005,2026-05-02,paid,245.00,North,Silver,Nia,18
+CUST-0006,2026-05-02,paid,75.00,South,Standard,Nia,16
+CUST-0007,2026-05-03,pending,199.99,West,Gold,Mira,25
+CUST-0008,2026-05-03,paid,310.10,West,Platinum,Omar,11
+CUST-0009,2026-05-03,cancelled,15.00,South,Standard,Nia,29
+CUST-0010,2026-05-04,paid,87.30,East,Gold,Mira,13
+CUST-0011,2026-05-04,pending,20.00,South,Standard,Omar,27
+CUST-0012,2026-05-04,paid,640.00,North,Gold,Nia,8

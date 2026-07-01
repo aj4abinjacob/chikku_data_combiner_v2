@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Button, Icon, Intent } from "@blueprintjs/core";
-import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions, ColumnStats, ColumnStatsUniqueValue } from "../types";
+import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions, ColumnStats, ColumnStatsUniqueValue, ComparisonViewConfig, ComparisonTableRole } from "../types";
 import { Sidebar } from "./Sidebar";
 import { DataGrid } from "./DataGrid";
+import { ComparisonView, createDefaultComparisonConfig } from "./ComparisonView";
 import { FilterPanel } from "./FilterPanel";
 import { StatusBar } from "./StatusBar";
 import { PivotToolbar } from "./PivotToolbar";
@@ -23,6 +24,7 @@ const FILTER_PANEL_EXIT_MS = 180;
 const DEFAULT_DISPLAY_DECIMAL_PLACES = 4;
 const MIN_DISPLAY_DECIMAL_PLACES = 0;
 const MAX_DISPLAY_DECIMAL_PLACES = 10;
+const COMPARISON_TABLE_COLORS = ["#137cbd", "#0f766e", "#d9822b", "#8f398f", "#6f3cc3"];
 
 function makeTableName(filePath: string): string {
   const name = filePath.split(/[/\\]/).pop() || "table";
@@ -246,6 +248,7 @@ export function App(): React.ReactElement {
     sortColumns: [],
     pivotConfig: null,
   });
+  const [comparisonConfig, setComparisonConfig] = useState<ComparisonViewConfig | null>(null);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [savedViewNextId, setSavedViewNextId] = useState(1);
   const [tableHistories, setTableHistories] = useState<Map<string, TableHistory>>(new Map());
@@ -276,8 +279,10 @@ export function App(): React.ReactElement {
   const rowOpsStepsRef = useRef(rowOpsSteps);
   rowOpsStepsRef.current = rowOpsSteps;
 
+  const comparisonActive = !!comparisonConfig && comparisonConfig.baseTable === activeTable;
+
   // Determine if pivot mode is active
-  const pivotActive = !!viewState.pivotConfig && viewState.pivotConfig.groupColumns.length > 0;
+  const pivotActive = !comparisonActive && !!viewState.pivotConfig && viewState.pivotConfig.groupColumns.length > 0;
 
   // Numeric columns set for pivot aggregate display
   const numericColumns = useMemo(() => {
@@ -297,6 +302,23 @@ export function App(): React.ReactElement {
     () => activeTable ? tables.find((t) => t.tableName === activeTable) ?? null : null,
     [activeTable, tables]
   );
+
+  const comparisonTableRoles = useMemo<Record<string, ComparisonTableRole> | undefined>(() => {
+    if (!comparisonConfig) return undefined;
+    const roles: Record<string, ComparisonTableRole> = {
+      [comparisonConfig.baseTable]: {
+        color: COMPARISON_TABLE_COLORS[0],
+        label: "BASE",
+      },
+    };
+    comparisonConfig.compareTables.forEach((target, index) => {
+      roles[target.tableName] = {
+        color: COMPARISON_TABLE_COLORS[(index + 1) % COMPARISON_TABLE_COLORS.length],
+        label: `COMPARE ${String.fromCharCode(65 + index)}`,
+      };
+    });
+    return roles;
+  }, [comparisonConfig]);
 
   const jsonWorkspaceActive = !!activeLoadedTable
     && !activeLoadedTable.filePath.startsWith("(")
@@ -382,7 +404,7 @@ export function App(): React.ReactElement {
   const { totalRows, getRow, ensureRange } = useChunkCache({
     tableName: activeTable,
     viewState,
-    enabled: viewState.visibleColumns.length > 0 && !pivotActive && !jsonWorkspaceActive,
+    enabled: viewState.visibleColumns.length > 0 && !pivotActive && !jsonWorkspaceActive && !comparisonActive,
     dataVersion,
   });
 
@@ -725,6 +747,15 @@ export function App(): React.ReactElement {
     await loadFiles(filePaths, false);
   }, [loadFiles]);
 
+  const handleStartComparison = useCallback(() => {
+    if (!activeTable || schema.length === 0) return;
+    const compareTable = tablesRef.current.find((table) => table.tableName !== activeTable && table.schema.length > 0) ?? null;
+    setComparisonConfig(createDefaultComparisonConfig(activeTable, schema, compareTable));
+    setViewState((prev) => ({ ...prev, pivotConfig: null }));
+    setFilterPanelOpen(false);
+    setResetKey((k) => k + 1);
+  }, [activeTable, schema]);
+
   const handleReloadActiveJsonTable = useCallback(async () => {
     const currentTableName = activeTableRef.current;
     if (!currentTableName) return;
@@ -821,20 +852,22 @@ export function App(): React.ReactElement {
   }, [filterPanelOpen, filterPanelMounted]);
 
   useEffect(() => {
-    if (jsonWorkspaceActive) setFilterPanelOpen(false);
-  }, [jsonWorkspaceActive]);
+    if (jsonWorkspaceActive || comparisonActive) setFilterPanelOpen(false);
+  }, [jsonWorkspaceActive, comparisonActive]);
 
   // When active table changes, refresh schema and reset columns
   useEffect(() => {
     if (!activeTable) {
       setSchema([]);
       setViewState((prev) => ({ ...prev, visibleColumns: [], columnOrder: [] }));
+      setComparisonConfig(null);
       return;
     }
 
     const currentTable = tablesRef.current.find((table) => table.tableName === activeTable);
     if (currentTable && !currentTable.filePath.startsWith("(") && isJsonFilePath(currentTable.filePath)) {
       setSchema([]);
+      setComparisonConfig(null);
       setViewState((prev) => ({
         ...prev,
         visibleColumns: [],
@@ -858,6 +891,14 @@ export function App(): React.ReactElement {
 
     fetchSchema();
   }, [activeTable, schemaVersion]);
+
+  useEffect(() => {
+    if (!comparisonConfig) return;
+    const tableNames = new Set(tables.map((table) => table.tableName));
+    if (!activeTable || comparisonConfig.baseTable !== activeTable || !tableNames.has(comparisonConfig.baseTable)) {
+      setComparisonConfig(null);
+    }
+  }, [activeTable, comparisonConfig, tables]);
 
   // Clean up colOps and rowOps state when active table changes
   const prevActiveTableRef = useRef<string | null>(null);
@@ -2019,6 +2060,7 @@ export function App(): React.ReactElement {
               onClearPivotGroups={handleClearPivotGroups}
               onSelectTable={(name) => {
                 setActiveTable(name);
+                setComparisonConfig(null);
                 setViewState((prev) => ({
                   ...prev,
                   filters: { logic: "AND", children: [] },
@@ -2042,11 +2084,13 @@ export function App(): React.ReactElement {
               onCreateAggregateTable={handleCreateAggregateTable}
               onCreatePivotTable={handleCreatePivotTable}
               onLookupMerge={handleLookupMerge}
+              onCompareTables={handleStartComparison}
               onExport={() => setExportDialogOpen(true)}
               onOpenHistory={() => setHistoryDialogOpen(true)}
               onOpenFiles={handleChooseFiles}
               onHide={() => setSidebarVisible(false)}
               jsonWorkspaceActive={jsonWorkspaceActive}
+              comparisonTableRoles={comparisonTableRoles}
             />
           </div>
           <div className="sidebar-shell-strip" aria-hidden={sidebarVisible}>
@@ -2069,6 +2113,17 @@ export function App(): React.ReactElement {
                   table={activeLoadedTable}
                   onOpenFiles={handleChooseFiles}
                   onReloadTable={handleReloadActiveJsonTable}
+                />
+              ) : comparisonActive && comparisonConfig && activeTable ? (
+                <ComparisonView
+                  tables={tables}
+                  baseTableName={activeTable}
+                  baseSchema={schema}
+                  config={comparisonConfig}
+                  dataVersion={dataVersion}
+                  onConfigChange={setComparisonConfig}
+                  onExit={() => setComparisonConfig(null)}
+                  onOpenFiles={handleChooseFiles}
                 />
               ) : (
                 <>
@@ -2199,21 +2254,27 @@ export function App(): React.ReactElement {
         </div>
       </div>
       <StatusBar
-        totalRows={pivotActive ? (tables.find((t) => t.tableName === activeTable)?.rowCount ?? 0) : totalRows}
+        totalRows={
+          comparisonActive
+            ? activeLoadedTable?.rowCount ?? 0
+            : pivotActive
+              ? (tables.find((t) => t.tableName === activeTable)?.rowCount ?? 0)
+              : totalRows
+        }
         unfilteredRows={
-          hasActiveFilters(viewState.filters)
+          !comparisonActive && hasActiveFilters(viewState.filters)
             ? tables.find((t) => t.tableName === activeTable)?.rowCount ?? null
             : null
         }
         activeTable={activeTable}
-        pivotConfig={viewState.pivotConfig}
+        pivotConfig={comparisonActive ? null : viewState.pivotConfig}
         groupCount={pivotActive ? pivotGroupCount : 0}
         filterPanelOpen={filterPanelOpen}
         onToggleFilterPanel={() => setFilterPanelOpen((v) => !v)}
         activeFilterCount={countConditions(viewState.filters)}
         sidebarVisible={sidebarVisible}
         updateNotice={<UpdateNotice />}
-        filterEnabled={!jsonWorkspaceActive}
+        filterEnabled={!jsonWorkspaceActive && !comparisonActive}
       />
       <CombineDialog
         isOpen={combineDialogOpen}

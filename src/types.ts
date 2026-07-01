@@ -235,6 +235,42 @@ export interface ViewState {
   pivotConfig: PivotViewConfig | null;
 }
 
+export type ComparisonViewMode = "all" | "pairs" | "differences";
+export type ComparisonSaveNameMode = "suffix" | "prefix";
+
+export interface ComparisonKeyPair {
+  id: string;
+  baseColumn: string;
+  compareColumn: string;
+}
+
+export interface ComparisonColumnPair {
+  id: string;
+  baseColumn: string;
+  compareColumn: string;
+}
+
+export interface ComparisonTableConfig {
+  id: string;
+  tableName: string;
+  keyPairs: ComparisonKeyPair[];
+  columnPairs: ComparisonColumnPair[];
+}
+
+export interface ComparisonViewConfig {
+  baseTable: string;
+  compareTables: ComparisonTableConfig[];
+  viewMode: ComparisonViewMode;
+  freezeKeys: boolean;
+  saveNameMode: ComparisonSaveNameMode;
+  saveAffix: string;
+}
+
+export interface ComparisonTableRole {
+  color: string;
+  label: string;
+}
+
 export type FileFormat = "csv" | "tsv" | "json" | "parquet" | "xlsx" | "xls";
 
 export interface ImportOptions {
