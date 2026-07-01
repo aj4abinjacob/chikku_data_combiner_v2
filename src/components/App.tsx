@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Button, Icon, Intent } from "@blueprintjs/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions, ColumnStats, ColumnStatsUniqueValue, ComparisonViewConfig, ComparisonTableRole } from "../types";
 import { Sidebar } from "./Sidebar";
 import { DataGrid } from "./DataGrid";
@@ -19,6 +20,7 @@ import { buildColOpUpdateSQL, buildStepDescription } from "../utils/colOpsSQL";
 import { buildRowOpSQL, buildRowOpStepDescription } from "../utils/rowOpsSQL";
 import { useChunkCache } from "../hooks/useChunkCache";
 import { usePivotCache } from "../hooks/usePivotCache";
+import { isTauri } from "../tauri-api";
 
 const FILTER_PANEL_EXIT_MS = 180;
 const DEFAULT_DISPLAY_DECIMAL_PLACES = 4;
@@ -2045,6 +2047,17 @@ export function App(): React.ReactElement {
   }, []);
 
   const hasData = tables.length > 0;
+  const activeDisplayFileName = activeLoadedTable ? getDisplayFileName(activeLoadedTable) : null;
+
+  useEffect(() => {
+    const nextTitle = activeDisplayFileName ?? "Chikku Parser";
+    document.title = nextTitle;
+    if (!isTauri()) return;
+
+    getCurrentWindow()
+      .setTitle(nextTitle)
+      .catch((err) => console.warn("Failed to set window title", err));
+  }, [activeDisplayFileName]);
 
   return (
     <div className={`app-container${darkMode ? " bp4-dark dark-theme" : ""}`}>
@@ -2272,8 +2285,6 @@ export function App(): React.ReactElement {
             : null
         }
         activeTable={activeTable}
-        currentFileName={activeLoadedTable ? getDisplayFileName(activeLoadedTable) : null}
-        currentFileTitle={activeLoadedTable?.filePath ?? null}
         pivotConfig={comparisonActive ? null : viewState.pivotConfig}
         groupCount={pivotActive ? pivotGroupCount : 0}
         filterPanelOpen={filterPanelOpen}
