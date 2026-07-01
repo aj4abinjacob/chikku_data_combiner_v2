@@ -26,6 +26,9 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> AppResult<Menu<R>> {
         .id("file:export")
         .accelerator("CmdOrCtrl+E")
         .build(app)?;
+    let check_updates_item = MenuItemBuilder::new("Check for Updates...")
+        .id("app:check-updates")
+        .build(app)?;
     let quit_item = PredefinedMenuItem::quit(app, None)?;
 
     let file_menu = SubmenuBuilder::new(app, "File")
@@ -58,6 +61,11 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> AppResult<Menu<R>> {
         .item(&PredefinedMenuItem::fullscreen(app, None)?)
         .build()?;
 
+    #[cfg(not(target_os = "macos"))]
+    let help_menu = SubmenuBuilder::new(app, "Help")
+        .item(&check_updates_item)
+        .build()?;
+
     let mut builder = MenuBuilder::new(app);
 
     #[cfg(target_os = "macos")]
@@ -79,6 +87,8 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> AppResult<Menu<R>> {
         let app_menu = SubmenuBuilder::new(app, "Chikku Parser")
             .item(&PredefinedMenuItem::about(app, None, Some(about_metadata))?)
             .separator()
+            .item(&check_updates_item)
+            .separator()
             .item(&PredefinedMenuItem::services(app, None)?)
             .separator()
             .item(&PredefinedMenuItem::hide(app, None)?)
@@ -90,11 +100,14 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> AppResult<Menu<R>> {
         builder = builder.item(&app_menu);
     }
 
-    Ok(builder
-        .item(&file_menu)
-        .item(&edit_menu)
-        .item(&view_menu)
-        .build()?)
+    builder = builder.item(&file_menu).item(&edit_menu).item(&view_menu);
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.item(&help_menu);
+    }
+
+    Ok(builder.build()?)
 }
 
 pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
@@ -102,6 +115,7 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
         "file:open" => pick_and_emit(app, "open-files"),
         "file:add" => pick_and_emit(app, "add-files"),
         "file:export" => emit_focused(app, "export-csv", ()),
+        "app:check-updates" => emit_focused(app, "check-for-updates", ()),
         "view:dark" => {
             let state: tauri::State<'_, MenuState> = app.state();
             let next = {

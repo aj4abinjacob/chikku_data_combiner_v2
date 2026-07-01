@@ -176,6 +176,10 @@ function installTauriApi() {
       listen("export-csv", () => callback());
     },
 
+    onCheckForUpdates: (callback: () => void) => {
+      listen("check-for-updates", () => callback());
+    },
+
     onSetDarkMode: (callback: (isDark: boolean) => void) => {
       listen<boolean>("set-dark-mode", (e) => callback(e.payload));
     },

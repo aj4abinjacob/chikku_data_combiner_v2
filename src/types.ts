@@ -33,6 +33,7 @@ export interface DbApi {
   onOpenFiles: (callback: (filePaths: string[]) => void) => void;
   onAddFiles: (callback: (filePaths: string[]) => void) => void;
   onExportCSV: (callback: () => void) => void;
+  onCheckForUpdates: (callback: () => void) => void;
   onSetDarkMode: (callback: (isDark: boolean) => void) => void;
   syncTheme: (isDark: boolean) => void;
   getAppVersion: () => Promise<string>;

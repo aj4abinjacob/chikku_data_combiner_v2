@@ -3,9 +3,10 @@ import { Button, Icon, Intent, ProgressBar, Spinner } from "@blueprintjs/core";
 import { AppUpdateInfo, UpdateDownloadEvent } from "../types";
 
 const CHECK_DELAY_MS = 1800;
+const CURRENT_NOTICE_MS = 6000;
 const SNOOZE_MS = 3 * 24 * 60 * 60 * 1000;
 
-type NoticePhase = "hidden" | "available" | "installing" | "ready" | "error";
+type NoticePhase = "hidden" | "checking" | "current" | "available" | "installing" | "ready" | "error";
 
 function snoozeKey(version: string): string {
   return `chikku:update:snoozedUntil:${version}`;
@@ -46,6 +47,10 @@ function notesText(update: AppUpdateInfo): string {
   return body || "Release notes were not provided for this update.";
 }
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export function UpdateNotice(): React.ReactElement | null {
   const [phase, setPhase] = useState<NoticePhase>("hidden");
   const [update, setUpdate] = useState<AppUpdateInfo | null>(null);
@@ -54,6 +59,15 @@ export function UpdateNotice(): React.ReactElement | null {
   const [contentLength, setContentLength] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const claimedVersionRef = useRef<string | null>(null);
+  const checkInFlightRef = useRef(false);
+  const mountedRef = useRef(true);
+  const statusTimerRef = useRef<number | null>(null);
+
+  const clearStatusTimer = useCallback(() => {
+    if (statusTimerRef.current === null) return;
+    window.clearTimeout(statusTimerRef.current);
+    statusTimerRef.current = null;
+  }, []);
 
   const releaseClaim = useCallback((version: string | null) => {
     if (!version) return;
@@ -61,38 +75,94 @@ export function UpdateNotice(): React.ReactElement | null {
     void window.api.releaseUpdateNotice(version).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (!window.api?.checkForUpdate) return;
+  const showCurrentNotice = useCallback(() => {
+    clearStatusTimer();
+    setPhase("current");
+    statusTimerRef.current = window.setTimeout(() => {
+      statusTimerRef.current = null;
+      setPhase("hidden");
+    }, CURRENT_NOTICE_MS);
+  }, [clearStatusTimer]);
 
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          const found = await window.api.checkForUpdate();
-          if (cancelled || !found) return;
-          if (isSnoozed(found.version) || isInstalledPendingRestart(found.version)) return;
+  const runUpdateCheck = useCallback(async (manual: boolean) => {
+    if (!window.api?.checkForUpdate || checkInFlightRef.current || !mountedRef.current) return;
+    checkInFlightRef.current = true;
 
-          const claimed = await window.api.claimUpdateNotice(found.version);
-          if (cancelled || !claimed) {
-            if (claimed) releaseClaim(found.version);
-            return;
-          }
+    if (manual) {
+      clearStatusTimer();
+      setError(null);
+      setDetailsOpen(false);
+      setPhase("checking");
+    }
 
-          claimedVersionRef.current = found.version;
-          setUpdate(found);
-          setPhase("available");
-        } catch (err) {
-          console.debug("Update check failed:", err);
+    try {
+      const found = await window.api.checkForUpdate();
+      if (!mountedRef.current) return;
+
+      if (!found) {
+        claimedVersionRef.current = null;
+        if (manual) {
+          setUpdate(null);
+          setDetailsOpen(false);
+          showCurrentNotice();
         }
-      })();
-    }, CHECK_DELAY_MS);
+        return;
+      }
 
+      if (!manual && (isSnoozed(found.version) || isInstalledPendingRestart(found.version))) return;
+
+      const claimed = await window.api.claimUpdateNotice(found.version);
+      if (!mountedRef.current) {
+        if (claimed) releaseClaim(found.version);
+        return;
+      }
+      if (!claimed && !manual) return;
+
+      if (claimed) claimedVersionRef.current = found.version;
+      clearStatusTimer();
+      setUpdate(found);
+      setError(null);
+      setDownloaded(0);
+      setContentLength(null);
+      setDetailsOpen(manual);
+      setPhase(isInstalledPendingRestart(found.version) ? "ready" : "available");
+    } catch (err) {
+      if (manual && mountedRef.current) {
+        clearStatusTimer();
+        setUpdate(null);
+        setError(errorMessage(err));
+        setDetailsOpen(true);
+        setPhase("error");
+      } else {
+        console.debug("Update check failed:", err);
+      }
+    } finally {
+      checkInFlightRef.current = false;
+    }
+  }, [clearStatusTimer, releaseClaim, showCurrentNotice]);
+
+  useEffect(() => {
     return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
+      mountedRef.current = false;
+      clearStatusTimer();
       releaseClaim(claimedVersionRef.current);
     };
-  }, [releaseClaim]);
+  }, [clearStatusTimer, releaseClaim]);
+
+  useEffect(() => {
+    if (!window.api?.checkForUpdate) return;
+    const timer = window.setTimeout(() => {
+      void runUpdateCheck(false);
+    }, CHECK_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [runUpdateCheck]);
+
+  useEffect(() => {
+    if (!window.api?.onCheckForUpdates) return;
+    window.api.onCheckForUpdates(() => {
+      void runUpdateCheck(true);
+    });
+  }, [runUpdateCheck]);
 
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
@@ -158,7 +228,68 @@ export function UpdateNotice(): React.ReactElement | null {
     setPhase("hidden");
   }, [releaseClaim, update]);
 
-  if (!update || phase === "hidden") return null;
+  if (phase === "hidden") return null;
+
+  if (!update) {
+    const statusText =
+      phase === "checking"
+        ? "Checking for updates..."
+        : phase === "current"
+          ? "Up to date"
+          : "Update check failed";
+    const statusIcon =
+      phase === "current"
+        ? "tick-circle"
+        : phase === "error"
+          ? "error"
+          : "automatic-updates";
+    const statusIntent =
+      phase === "current"
+        ? Intent.SUCCESS
+        : phase === "error"
+          ? Intent.DANGER
+          : Intent.PRIMARY;
+
+    return (
+      <div className={`update-notice update-notice-${phase}`}>
+        <Button
+          className="update-notice-chip"
+          icon={statusIcon}
+          text={statusText}
+          small
+          minimal
+          loading={phase === "checking"}
+          intent={statusIntent}
+          onClick={phase === "error" ? () => setDetailsOpen((open) => !open) : undefined}
+        />
+
+        {phase === "error" && detailsOpen && (
+          <div className="update-notice-panel">
+            <div className="update-notice-header">
+              <div className="update-notice-title">
+                <Icon icon="error" size={16} />
+                <div>
+                  <strong>Update check failed</strong>
+                  <span>The update check did not complete.</span>
+                </div>
+              </div>
+              <Button
+                icon="cross"
+                minimal
+                small
+                title="Close update details"
+                onClick={() => setDetailsOpen(false)}
+              />
+            </div>
+
+            <div className="update-notice-error">
+              {error || "The update server could not be reached."}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const versionLabel = `v${update.version}`;
 
