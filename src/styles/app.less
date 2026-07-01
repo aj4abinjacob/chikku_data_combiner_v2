@@ -4,6 +4,7 @@
 
 :root {
   --sidebar-width: 300px;
+  --titlebar-height: 38px;
   --statusbar-height: 28px;
   --control-radius: 6px;
   --surface-radius: 8px;
@@ -184,6 +185,30 @@ html, body, #root {
   flex-direction: column;
   height: 100vh;
   width: 100vw;
+}
+
+.window-titlebar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  justify-items: center;
+  height: var(--titlebar-height);
+  padding: 0 84px;
+  background: #f5f8fa;
+  color: #394b59;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.window-titlebar-title {
+  max-width: min(52vw, 680px);
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 // ── Main layout: sidebar + data grid ──
@@ -8870,6 +8895,11 @@ html.dark-theme #root {
 }
 
 .dark-theme {
+  .window-titlebar {
+    background: @dark-bg-2;
+    color: @dark-text-1;
+  }
+
   .main-layout {
     border-top-color: @dark-border-1;
   }
