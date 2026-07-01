@@ -228,7 +228,22 @@ export function UpdateNotice(): React.ReactElement | null {
     setPhase("hidden");
   }, [releaseClaim, update]);
 
-  if (phase === "hidden") return null;
+  if (!window.api?.checkForUpdate) return null;
+
+  if (phase === "hidden") {
+    return (
+      <div className="update-notice update-notice-hidden">
+        <Button
+          className="update-notice-chip"
+          icon="automatic-updates"
+          text="Check updates"
+          small
+          minimal
+          onClick={() => void runUpdateCheck(true)}
+        />
+      </div>
+    );
+  }
 
   if (!update) {
     const statusText =
