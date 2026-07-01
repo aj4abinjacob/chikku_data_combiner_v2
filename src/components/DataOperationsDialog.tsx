@@ -3,7 +3,6 @@ import {
   Button,
   Callout,
   Intent,
-  HTMLSelect,
   InputGroup,
   Dialog,
   DialogBody,
@@ -12,6 +11,7 @@ import {
   RadioGroup,
   Radio,
 } from "@blueprintjs/core";
+import { SoftSelect } from "./SoftSelect";
 import { ColumnInfo, ColOpTargetMode } from "../types";
 import {
   guardNumberInputDrop,
@@ -596,7 +596,7 @@ export function DataOperationsDialog({
       <DialogBody>
         <div className="column-op-form">
           <FormGroup label="Operation">
-            <HTMLSelect
+            <SoftSelect
               value={opType}
               onChange={(e) => setOpType(e.target.value as OpType)}
               fill
@@ -606,7 +606,7 @@ export function DataOperationsDialog({
                   {label}
                 </option>
               ))}
-            </HTMLSelect>
+            </SoftSelect>
           </FormGroup>
 
           {/* Source Column — hidden for create_column, combine_columns, rename_column, delete_column, sample_table, remove_duplicates, remove_empty_rows, conditional_column, replace_empty_null, replace_sentinel_null */}
@@ -707,7 +707,7 @@ export function DataOperationsDialog({
                     const availableCols = schema.filter((c) => !usedCols.includes(c.column_name));
                     return (
                       <div key={idx} className="rename-col-row">
-                        <HTMLSelect
+                        <SoftSelect
                           value={row.sourceCol}
                           onChange={(e) => {
                             setRenameRows((prev) => prev.map((r, i) => (i === idx ? { ...r, sourceCol: e.target.value } : r)));
@@ -720,7 +720,7 @@ export function DataOperationsDialog({
                               {col.column_name}
                             </option>
                           ))}
-                        </HTMLSelect>
+                        </SoftSelect>
                         <span className="rename-arrow">&rarr;</span>
                         <InputGroup
                           value={row.newName}
@@ -987,7 +987,7 @@ export function DataOperationsDialog({
                           placeholder="Column..."
                           className="case-condition-col"
                         />
-                        <HTMLSelect
+                        <SoftSelect
                           value={cond.operator}
                           onChange={(e) => {
                             const nextOperator = e.target.value;
@@ -1004,7 +1004,7 @@ export function DataOperationsDialog({
                           {CASE_OPERATORS.map((op) => (
                             <option key={op} value={op}>{op}</option>
                           ))}
-                        </HTMLSelect>
+                        </SoftSelect>
                         {cond.operator !== "IS NULL" && cond.operator !== "IS NOT NULL" && (
                           <InputGroup
                             value={cond.value}

@@ -15,6 +15,7 @@ interface SearchableColumnSelectProps {
   className?: string;
   allowEmpty?: boolean;
   emptyLabel?: string;
+  disabled?: boolean;
 }
 
 export function SearchableColumnSelect({
@@ -28,6 +29,7 @@ export function SearchableColumnSelect({
   className = "",
   allowEmpty = false,
   emptyLabel = "— None —",
+  disabled = false,
 }: SearchableColumnSelectProps): React.ReactElement {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -49,6 +51,12 @@ export function SearchableColumnSelect({
       });
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (disabled) {
+      setIsOpen(false);
+    }
+  }, [disabled]);
 
   // Filter and sort columns (always alphabetical, case-insensitive)
   const filteredColumns = React.useMemo(() => {
@@ -165,20 +173,27 @@ export function SearchableColumnSelect({
         {items.length === 0 && (
           <div className="col-select-empty">No columns found</div>
         )}
-        {items.map((item, idx) => (
-          <div
-            key={item.value || "__empty__"}
-            id={`${listId}-option-${idx}`}
-            className={`col-select-item${item.value === value ? " col-select-item-selected" : ""}${idx === highlightIndex ? " col-select-item-highlight" : ""}`}
-            role="option"
-            aria-selected={item.value === value}
-            onClick={() => handleSelect(item.value)}
-            onMouseEnter={() => setHighlightIndex(idx)}
-          >
-            <span className="col-select-item-name">{item.label}</span>
-            {item.type && <span className="col-select-item-type">{item.type}</span>}
-          </div>
-        ))}
+        {items.map((item, idx) => {
+          const isSelected = item.value === value;
+
+          return (
+            <div
+              key={item.value || "__empty__"}
+              id={`${listId}-option-${idx}`}
+              className={`col-select-item${isSelected ? " col-select-item-selected" : ""}${idx === highlightIndex ? " col-select-item-highlight" : ""}`}
+              role="option"
+              aria-selected={isSelected}
+              onClick={() => handleSelect(item.value)}
+              onMouseEnter={() => setHighlightIndex(idx)}
+            >
+              <span className="col-select-item-name">{item.label}</span>
+              <span className="col-select-item-meta">
+                {item.type && <span className="col-select-item-type">{item.type}</span>}
+                {isSelected && <Icon icon="tick" iconSize={12} className="col-select-item-check" />}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -186,8 +201,12 @@ export function SearchableColumnSelect({
   return (
     <Popover2
       content={popoverContent}
-      isOpen={isOpen}
+      isOpen={disabled ? false : isOpen}
       onInteraction={(nextOpen) => {
+        if (disabled) {
+          setIsOpen(false);
+          return;
+        }
         if (nextOpen) openHighlightRef.current = null;
         setIsOpen(nextOpen);
       }}
@@ -203,6 +222,7 @@ export function SearchableColumnSelect({
           setIsOpen((v) => !v);
         }}
         onKeyDown={handleTriggerKeyDown}
+        disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-controls={isOpen ? listId : undefined}

@@ -1,7 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
 import {
   Button,
-  HTMLSelect,
   InputGroup,
   Checkbox,
   Intent,
@@ -11,6 +10,7 @@ import {
   Radio,
   Tag,
 } from "@blueprintjs/core";
+import { SoftSelect } from "./SoftSelect";
 import { ColumnInfo, ColOpType, ColOpStep, UndoStrategy, FilterGroup, ColOpTargetMode } from "../types";
 import { buildColOpExpr } from "../utils/colOpsSQL";
 import {
@@ -416,7 +416,7 @@ export function ColumnOpsPanel({
             </div>
             <div className="colops-field">
               <label>Type</label>
-              <HTMLSelect
+              <SoftSelect
                 value={params.numberType ?? "any"}
                 onChange={(e) => updateParam("numberType", e.target.value)}
                 fill
@@ -424,7 +424,7 @@ export function ColumnOpsPanel({
                 <option value="any">Any number (text)</option>
                 <option value="integer">Integer</option>
                 <option value="float">Float</option>
-              </HTMLSelect>
+              </SoftSelect>
             </div>
             {params.mode === "all" && (
               <div className="colops-field">
@@ -574,7 +574,7 @@ export function ColumnOpsPanel({
 
           <div className="colops-field">
             <label>Action</label>
-            <HTMLSelect
+            <SoftSelect
               value={opType}
               onChange={(e) => {
                 const newOp = e.target.value as ColOpType;
@@ -596,7 +596,7 @@ export function ColumnOpsPanel({
                   ))}
                 </optgroup>
               ))}
-            </HTMLSelect>
+            </SoftSelect>
           </div>
 
           {needsParams && renderParams()}

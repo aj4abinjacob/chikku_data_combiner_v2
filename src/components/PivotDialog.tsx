@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Button,
-  HTMLSelect,
   Intent,
   Dialog,
   DialogBody,
   DialogFooter,
   Callout,
 } from "@blueprintjs/core";
+import { SoftSelect } from "./SoftSelect";
 import { ColumnInfo } from "../types";
 import { PreviewTableDialog } from "./PreviewTableDialog";
 import { ColumnCheckList } from "./ColumnCheckList";
@@ -277,7 +277,7 @@ export function PivotDialog({
             <div className="aggregate-section-header">
               Pivot Column (required — values become column headers)
             </div>
-            <HTMLSelect
+            <SoftSelect
               value={pivotColumn}
               onChange={(e) => {
                 setPivotColumn(e.target.value);
@@ -291,7 +291,7 @@ export function PivotDialog({
                   {col}
                 </option>
               ))}
-            </HTMLSelect>
+            </SoftSelect>
 
             {/* Distinct values preview */}
             {pivotColumn && (
@@ -368,7 +368,7 @@ export function PivotDialog({
             <div className="aggregate-section-header">
               Aggregate Function
             </div>
-            <HTMLSelect
+            <SoftSelect
               value={aggFunction}
               onChange={(e) => {
                 setAggFunction(e.target.value as AggFunc);
@@ -381,7 +381,7 @@ export function PivotDialog({
                   {fn}
                 </option>
               ))}
-            </HTMLSelect>
+            </SoftSelect>
           </div>
 
           {/* Error */}

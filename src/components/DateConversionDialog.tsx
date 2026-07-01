@@ -5,7 +5,6 @@ import {
   Dialog,
   DialogBody,
   DialogFooter,
-  HTMLSelect,
   InputGroup,
   Intent,
   Radio,
@@ -13,6 +12,7 @@ import {
   Spinner,
   Tag,
 } from "@blueprintjs/core";
+import { SoftSelect } from "./SoftSelect";
 import { ColumnInfo, LoadedTable } from "../types";
 import {
   detectDateFormat,
@@ -504,7 +504,7 @@ export function DateConversionDialog({
                           </td>
                           <td>
                             {g.detection.confidence === "ambiguous" ? (
-                              <HTMLSelect
+                              <SoftSelect
                                 value={g.selectedFormat}
                                 onChange={(e) => updateGroupFormat(i, e.target.value)}
                                 className="date-conv-format-select"
@@ -514,7 +514,7 @@ export function DateConversionDialog({
                                     {alt}
                                   </option>
                                 ))}
-                              </HTMLSelect>
+                              </SoftSelect>
                             ) : g.detection.confidence === "unknown" ? (
                               <InputGroup
                                 value={g.selectedFormat}
@@ -559,7 +559,7 @@ export function DateConversionDialog({
           {dateColumn && groupDetections.length > 0 && (
             <div className="aggregate-section">
               <div className="aggregate-section-header">Output Format</div>
-              <HTMLSelect
+              <SoftSelect
                 value={outputFormatPreset}
                 onChange={(e) => setOutputFormatPreset(e.target.value)}
                 fill
@@ -570,7 +570,7 @@ export function DateConversionDialog({
                   </option>
                 ))}
                 <option value="custom">Custom...</option>
-              </HTMLSelect>
+              </SoftSelect>
               {outputFormatPreset === "custom" && (
                 <InputGroup
                   value={customOutputFormat}

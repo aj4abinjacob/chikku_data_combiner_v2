@@ -1,5 +1,6 @@
 import React from "react";
-import { Button, HTMLSelect, Icon } from "@blueprintjs/core";
+import { Button, Icon } from "@blueprintjs/core";
+import { SoftSelect } from "./SoftSelect";
 import { PivotViewConfig, PivotAggFunction } from "../types";
 
 const AGG_OPTIONS: { value: PivotAggFunction; label: string }[] = [
@@ -81,7 +82,7 @@ export function PivotToolbar({
         onClick={onToggleGrandTotal}
         title="Toggle grand total row"
       />
-      <HTMLSelect
+      <SoftSelect
         value={pivotConfig.defaultAggFunction}
         onChange={(e) => onDefaultAggChange(e.target.value as PivotAggFunction)}
         options={AGG_OPTIONS}

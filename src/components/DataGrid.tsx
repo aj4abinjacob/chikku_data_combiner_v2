@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, ButtonGroup, HTMLSelect, Icon } from "@blueprintjs/core";
+import { Button, ButtonGroup, Icon } from "@blueprintjs/core";
+import { SoftSelect } from "./SoftSelect";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy } from "../types";
 
@@ -1827,7 +1828,7 @@ function ColumnStatsOpsPanel({
           <div className="dg-stats-op-label-row">
             <span>Rounding method</span>
           </div>
-          <HTMLSelect
+          <SoftSelect
             value={draftFormat.roundingMethod}
             onChange={(e) => updateDraft({ roundingMethod: e.target.value as RoundingMethod })}
             fill
@@ -1837,7 +1838,7 @@ function ColumnStatsOpsPanel({
                 {option.label}
               </option>
             ))}
-          </HTMLSelect>
+          </SoftSelect>
           <div className="dg-stats-op-hint">Values are rounded for display only; underlying data is unchanged.</div>
         </div>
 

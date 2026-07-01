@@ -3,11 +3,11 @@ import {
   Button,
   ButtonGroup,
   Checkbox,
-  HTMLSelect,
   Icon,
   InputGroup,
   Intent,
 } from "@blueprintjs/core";
+import { SoftSelect } from "./SoftSelect";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ColumnInfo,
@@ -1197,7 +1197,7 @@ export function ComparisonView({
               })}
             </div>
             <div className="comparison-add-target-row">
-              <HTMLSelect
+              <SoftSelect
                 value={targetToAdd}
                 onChange={(event) => setTargetToAdd(event.currentTarget.value)}
                 disabled={availableTargets.length === 0}
@@ -1210,7 +1210,7 @@ export function ComparisonView({
                     {table.tableName}
                   </option>
                 ))}
-              </HTMLSelect>
+              </SoftSelect>
               <Button
                 icon="plus"
                 text="Add"
@@ -1372,13 +1372,13 @@ export function ComparisonView({
             <div className="comparison-section-title">Save Naming</div>
             <div className="comparison-helper-text">Use <code>{"{table}"}</code> to include the compare table name.</div>
             <div className="comparison-save-row">
-              <HTMLSelect
+              <SoftSelect
                 value={config.saveNameMode}
                 onChange={(event) => updateConfig({ saveNameMode: event.currentTarget.value as "suffix" | "prefix" })}
               >
                 <option value="suffix">Suffix</option>
                 <option value="prefix">Prefix</option>
-              </HTMLSelect>
+              </SoftSelect>
               <InputGroup
                 value={config.saveAffix}
                 onChange={(event) => updateConfig({ saveAffix: event.currentTarget.value })}

@@ -2,7 +2,6 @@ import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import ReactDOM from "react-dom";
 import {
   Button,
-  HTMLSelect,
   Intent,
   Alert,
   Icon,
@@ -10,6 +9,7 @@ import {
   Radio,
   Tag,
 } from "@blueprintjs/core";
+import { SoftSelect } from "./SoftSelect";
 import { ColumnInfo, RowOpType, RowOpStep, UndoStrategy, FilterGroup, hasActiveFilters } from "../types";
 import { ColumnCheckList } from "./ColumnCheckList";
 
@@ -425,7 +425,7 @@ export function RowOpsPanel({
                   </span>
                 </div>
                 <div className="rowops-empty-actions">
-                  <HTMLSelect
+                  <SoftSelect
                     className="rowops-empty-op-select"
                     value={opType}
                     onChange={(e) => setOpType(e.target.value as RowOpType)}
@@ -433,7 +433,7 @@ export function RowOpsPanel({
                     {OP_OPTIONS.map((op) => (
                       <option key={op.value} value={op.value}>{op.label}</option>
                     ))}
-                  </HTMLSelect>
+                  </SoftSelect>
                 </div>
               </div>
             </div>
@@ -442,7 +442,7 @@ export function RowOpsPanel({
               <div className="rowops-form-row">
                 <div className="rowops-field">
                   <label>Operation</label>
-                  <HTMLSelect
+                  <SoftSelect
                     className="rowops-op-select"
                     value={opType}
                     onChange={(e) => setOpType(e.target.value as RowOpType)}
@@ -451,7 +451,7 @@ export function RowOpsPanel({
                     {OP_OPTIONS.map((op) => (
                       <option key={op.value} value={op.value}>{op.label}</option>
                     ))}
-                  </HTMLSelect>
+                  </SoftSelect>
                 </div>
 
                 {opType === "remove_empty" && (

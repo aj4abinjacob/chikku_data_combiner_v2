@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Button,
   Checkbox,
-  HTMLSelect,
   InputGroup,
   Intent,
   Dialog,
@@ -12,6 +11,7 @@ import {
   Radio,
   RadioGroup,
 } from "@blueprintjs/core";
+import { SoftSelect } from "./SoftSelect";
 import { ColumnInfo, LoadedTable } from "../types";
 import { PreviewTableDialog } from "./PreviewTableDialog";
 import { SearchableColumnSelect } from "./SearchableColumnSelect";
@@ -421,7 +421,7 @@ export function LookupMergeDialog({
           {/* Section 1: Right Table */}
           <div className="aggregate-section">
             <div className="aggregate-section-header">Right Table</div>
-            <HTMLSelect
+            <SoftSelect
               value={rightTable}
               onChange={(e) => setRightTable(e.target.value)}
               fill
@@ -432,7 +432,7 @@ export function LookupMergeDialog({
                   {t.tableName} ({t.rowCount.toLocaleString()} rows)
                 </option>
               ))}
-            </HTMLSelect>
+            </SoftSelect>
           </div>
 
           {/* Section 2: Key Columns */}

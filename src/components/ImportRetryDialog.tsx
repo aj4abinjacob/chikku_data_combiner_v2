@@ -5,10 +5,10 @@ import {
   Checkbox,
   Classes,
   Dialog,
-  HTMLSelect,
   InputGroup,
   Intent,
 } from "@blueprintjs/core";
+import { SoftSelect } from "./SoftSelect";
 
 interface ImportRetryDialogProps {
   isOpen: boolean;
@@ -64,7 +64,7 @@ export function ImportRetryDialog({
           <div style={{ marginBottom: 12 }}>
             <label className="merge-option-label">Delimiter</label>
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
-              <HTMLSelect
+              <SoftSelect
                 value={delimiterChoice}
                 onChange={(e) => setDelimiterChoice(e.target.value)}
                 style={{ flex: 1 }}
@@ -74,7 +74,7 @@ export function ImportRetryDialog({
                     {opt.label}
                   </option>
                 ))}
-              </HTMLSelect>
+              </SoftSelect>
               {delimiterChoice === "custom" && (
                 <InputGroup
                   value={customDelimiter}

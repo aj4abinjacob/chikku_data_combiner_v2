@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, us
 import {
   Button,
   Callout,
-  HTMLSelect,
   Icon,
   InputGroup,
   Intent,
@@ -10,6 +9,7 @@ import {
   Switch,
   Tag,
 } from "@blueprintjs/core";
+import { SoftSelect } from "./SoftSelect";
 import { LoadedTable } from "../types";
 import {
   FlattenOptions,
@@ -846,7 +846,7 @@ export function JsonWorkspace({
           <div className="json-flatten-options">
             <label>
               <span>Array mode:</span>
-              <HTMLSelect
+              <SoftSelect
                 value={flattenOptions.arrayMode}
                 onChange={(event) => {
                   const arrayMode = event.currentTarget.value as FlattenOptions["arrayMode"];
@@ -855,7 +855,7 @@ export function JsonWorkspace({
               >
                 <option value="unwind">Unwind rows</option>
                 <option value="stringify">Stringify arrays</option>
-              </HTMLSelect>
+              </SoftSelect>
             </label>
             <label>
               <span>Delimiter:</span>
