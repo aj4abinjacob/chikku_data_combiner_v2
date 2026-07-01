@@ -33,6 +33,11 @@ function makeTableName(filePath: string): string {
   return base.replace(/[^a-zA-Z0-9_]/g, "_");
 }
 
+function getDisplayFileName(table: LoadedTable): string {
+  if (table.filePath.startsWith("(")) return table.tableName;
+  return table.filePath.split(/[/\\]/).pop() || table.filePath;
+}
+
 function makeUniqueTableName(baseName: string, existingNames: Set<string>): string {
   if (!existingNames.has(baseName)) {
     existingNames.add(baseName);
@@ -2267,6 +2272,8 @@ export function App(): React.ReactElement {
             : null
         }
         activeTable={activeTable}
+        currentFileName={activeLoadedTable ? getDisplayFileName(activeLoadedTable) : null}
+        currentFileTitle={activeLoadedTable?.filePath ?? null}
         pivotConfig={comparisonActive ? null : viewState.pivotConfig}
         groupCount={pivotActive ? pivotGroupCount : 0}
         filterPanelOpen={filterPanelOpen}

@@ -2266,7 +2266,8 @@ button.dg-stats-metric {
 // ── Status bar ──
 .status-bar {
   position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
   align-items: center;
   padding: 0 12px;
   height: var(--statusbar-height);
@@ -2277,6 +2278,27 @@ button.dg-stats-metric {
   flex-shrink: 0;
 }
 
+.status-bar-file {
+  grid-column: 2;
+  justify-self: center;
+  max-width: min(44vw, 560px);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #394b59;
+  font-weight: 600;
+}
+
+.status-bar-right {
+  grid-column: 3;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .status-bar-update {
   position: relative;
   flex: 0 0 auto;
@@ -2285,7 +2307,6 @@ button.dg-stats-metric {
 }
 
 .status-bar-rows {
-  margin-left: auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -9338,6 +9359,10 @@ html.dark-theme #root {
     background: @dark-bg-2;
     border-top-color: @dark-border-1;
     color: @dark-text-2;
+  }
+
+  .status-bar-file {
+    color: @dark-text-1;
   }
 
   .update-notice-chip.bp4-button.bp4-minimal.bp4-intent-primary {

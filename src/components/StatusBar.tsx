@@ -5,6 +5,8 @@ interface StatusBarProps {
   totalRows: number;
   unfilteredRows: number | null;
   activeTable: string | null;
+  currentFileName?: string | null;
+  currentFileTitle?: string | null;
   pivotConfig?: PivotViewConfig | null;
   groupCount: number;
   filterPanelOpen: boolean;
@@ -19,6 +21,8 @@ export function StatusBar({
   totalRows,
   unfilteredRows,
   activeTable,
+  currentFileName,
+  currentFileTitle,
   pivotConfig,
   groupCount,
   filterPanelOpen,
@@ -42,12 +46,19 @@ export function StatusBar({
 
   return (
     <div className="status-bar">
-      <span className="status-bar-rows">
-        {activeTable
-          ? `${rowsDisplay}${groupDisplay}${pivotDisplay}`
-          : "No table selected"}
-      </span>
-      {updateNotice && <div className="status-bar-update">{updateNotice}</div>}
+      {currentFileName && (
+        <span className="status-bar-file" title={currentFileTitle ?? currentFileName}>
+          {currentFileName}
+        </span>
+      )}
+      <div className="status-bar-right">
+        <span className="status-bar-rows">
+          {activeTable
+            ? `${rowsDisplay}${groupDisplay}${pivotDisplay}`
+            : "No table selected"}
+        </span>
+        {updateNotice && <div className="status-bar-update">{updateNotice}</div>}
+      </div>
       {activeTable && filterEnabled && (
         <div
           className={`filter-toggle${filterPanelOpen ? " active" : ""}`}
