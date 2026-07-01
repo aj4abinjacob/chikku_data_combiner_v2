@@ -4,6 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy } from "../types";
 
 const TOOLTIP_DELAY = 600; // ms before tooltip appears
+const HEADER_TOOLTIP_DELAY = 250;
 
 const ROW_HEIGHT = 28;
 const DEFAULT_COLUMN_WIDTH = 150;
@@ -122,6 +123,7 @@ export function DataGrid({
 
   // ── Cell tooltip state ──
   const [tooltip, setTooltip] = useState<{
+    kind: "cell" | "header";
     text: string;
     x: number;
     y: number;
@@ -314,6 +316,7 @@ export function DataGrid({
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       tooltipTimer.current = setTimeout(() => {
         setTooltip({
+          kind: "cell",
           text: value,
           x: rect.left,
           y: rect.top,
@@ -323,6 +326,33 @@ export function DataGrid({
     },
     [clearDismissTimer]
   );
+
+  const handleHeaderMouseEnter = useCallback(
+    (e: React.MouseEvent, column: string) => {
+      clearDismissTimer();
+      const target = e.target as HTMLElement;
+      if (target.closest(".dg-header-stats-btn, .col-resize-handle")) return;
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      tooltipTimer.current = setTimeout(() => {
+        setTooltip({
+          kind: "header",
+          text: column,
+          x: rect.left,
+          y: rect.top,
+          cellHeight: rect.height,
+        });
+      }, HEADER_TOOLTIP_DELAY);
+    },
+    [clearDismissTimer]
+  );
+
+  const handleHeaderMouseLeave = useCallback(() => {
+    if (tooltipTimer.current) {
+      clearTimeout(tooltipTimer.current);
+      tooltipTimer.current = null;
+    }
+    scheduleDismiss(100);
+  }, [scheduleDismiss]);
 
   const handleCellMouseLeave = useCallback(() => {
     if (tooltipTimer.current) {
@@ -1035,7 +1065,10 @@ export function DataGrid({
                     .filter(Boolean)
                     .join(" ")}
                   style={{ width: columnWidths[col] ?? DEFAULT_COLUMN_WIDTH }}
+                  aria-label={`Column header: ${col}`}
                   draggable={!pivotMode && !!onReorderColumns}
+                  onMouseEnter={(e) => handleHeaderMouseEnter(e, col)}
+                  onMouseLeave={handleHeaderMouseLeave}
                   onClick={(e) => { if (!justFinishedResize.current) onSort(col, e.shiftKey); }}
                   onDragStart={(e) => handleHeaderDragStart(e, col)}
                   onDragOver={(e) => handleHeaderDragOver(e, col)}
@@ -1043,7 +1076,7 @@ export function DataGrid({
                   onDrop={handleHeaderDrop}
                   onDragEnd={handleHeaderDragEnd}
                 >
-                  <span className="dg-header-text" title={onGetColumnStats ? undefined : col}>{col}</span>
+                  <span className="dg-header-text">{col}</span>
                   {sortInfo && (
                     <span className="sort-indicator">
                       {sortColumns.length > 1 && (
@@ -1063,6 +1096,7 @@ export function DataGrid({
                       title="Show column stats"
                       aria-label={`Show stats for ${col}`}
                       draggable={false}
+                      onMouseEnter={handleHeaderMouseLeave}
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -1334,7 +1368,11 @@ export function DataGrid({
       {tooltip && (
         <div
           ref={tooltipRef}
-          className={`dg-tooltip${tooltipFlipped ? " dg-tooltip-below" : ""}`}
+          className={[
+            "dg-tooltip",
+            tooltip.kind === "header" ? "dg-header-tooltip" : "",
+            tooltipFlipped ? "dg-tooltip-below" : "",
+          ].filter(Boolean).join(" ")}
           style={{
             left: tooltip.x,
             top: tooltipFlipped ? tooltip.y + tooltip.cellHeight : tooltip.y,
@@ -1342,16 +1380,25 @@ export function DataGrid({
           onMouseEnter={handleTooltipMouseEnter}
           onMouseLeave={handleTooltipMouseLeave}
         >
-          <div className="dg-tooltip-body">
-            <TooltipContent text={tooltip.text} />
-          </div>
-          <button
-            className={`dg-tooltip-copy${copied ? " copied" : ""}`}
-            onClick={handleCopyTooltip}
-            title="Copy to clipboard"
-          >
-            <Icon icon={copied ? "tick" : "clipboard"} size={12} />
-          </button>
+          {tooltip.kind === "header" ? (
+            <div className="dg-header-tooltip-body">
+              <span className="dg-header-tooltip-label">Column header</span>
+              <span className="dg-header-tooltip-name">{tooltip.text}</span>
+            </div>
+          ) : (
+            <>
+              <div className="dg-tooltip-body">
+                <TooltipContent text={tooltip.text} />
+              </div>
+              <button
+                className={`dg-tooltip-copy${copied ? " copied" : ""}`}
+                onClick={handleCopyTooltip}
+                title="Copy to clipboard"
+              >
+                <Icon icon={copied ? "tick" : "clipboard"} size={12} />
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

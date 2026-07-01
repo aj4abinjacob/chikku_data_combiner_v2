@@ -2140,6 +2140,45 @@ button.dg-stats-metric {
   animation: dg-tooltip-in 0.12s ease-out;
 }
 
+.dg-header-tooltip {
+  max-width: min(380px, calc(100vw - 24px));
+  padding: 0;
+  gap: 0;
+  background: #f7fbff;
+  color: #182026;
+  border: 1px solid #8abbff;
+  border-left: 3px solid #137cbd;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-shadow: 0 8px 22px rgba(16, 22, 26, 0.18);
+  pointer-events: none;
+}
+
+.dg-header-tooltip-body {
+  min-width: 0;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dg-header-tooltip-label {
+  color: #137cbd;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.dg-header-tooltip-name {
+  color: #182026;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .dg-tooltip-body {
   flex: 1;
   min-width: 0;
@@ -8855,6 +8894,22 @@ html.dark-theme #root {
         box-shadow: 0 0 0 2px @dark-accent-bg;
       }
     }
+  }
+
+  .dg-header-tooltip {
+    background: @dark-bg-3;
+    color: @dark-text-1;
+    border-color: @dark-accent-border;
+    border-left-color: @dark-accent;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  }
+
+  .dg-header-tooltip-label {
+    color: @dark-accent;
+  }
+
+  .dg-header-tooltip-name {
+    color: @dark-text-1;
   }
 
   .dg-row {
