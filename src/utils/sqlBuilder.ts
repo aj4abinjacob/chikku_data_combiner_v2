@@ -254,9 +254,12 @@ export function buildColumnStatsSummaryQuery(
   tableName: string,
   column: string,
   filters: FilterGroup,
-  includeNumericStats: boolean
+  includeNumericStats: boolean,
+  includeTextStats = false
 ): string {
   const col = escapeIdent(column);
+  const table = escapeIdent(tableName);
+  const whereClause = buildFilterGroupClause(filters);
   const selects = [
     "COUNT(*) AS row_count",
     `SUM(CASE WHEN ${col} IS NULL THEN 1 ELSE 0 END) AS null_count`,
@@ -272,8 +275,28 @@ export function buildColumnStatsSummaryQuery(
     );
   }
 
-  let sql = `SELECT ${selects.join(", ")} FROM ${escapeIdent(tableName)}`;
-  const whereClause = buildFilterGroupClause(filters);
+  if (includeTextStats) {
+    const textValue = `CAST(${col} AS VARCHAR)`;
+    const textWhereParts = [`${col} IS NOT NULL`, `TRIM(${textValue}) <> ''`];
+    if (whereClause) textWhereParts.unshift(whereClause);
+    selects.push(
+      `MIN(LENGTH(${textValue})) AS min_length`,
+      `MAX(LENGTH(${textValue})) AS max_length`,
+      `AVG(LENGTH(${textValue})) AS avg_length`,
+      `SUM(CASE WHEN ${textValue} = '' THEN 1 ELSE 0 END) AS empty_string_count`,
+      `SUM(CASE WHEN ${col} IS NOT NULL AND ${textValue} <> TRIM(${textValue}) THEN 1 ELSE 0 END) AS leading_trailing_space_count`,
+      `COUNT(DISTINCT CASE WHEN LENGTH(${textValue}) > 80 THEN ${textValue} ELSE NULL END) AS long_value_count`,
+      `(SELECT COUNT(*) FROM (
+        SELECT LOWER(TRIM(${textValue})) AS normalized_value
+        FROM ${table}
+        WHERE ${textWhereParts.join(" AND ")}
+        GROUP BY normalized_value
+        HAVING COUNT(DISTINCT TRIM(${textValue})) > 1
+      ) _case_variants) AS case_variant_groups`
+    );
+  }
+
+  let sql = `SELECT ${selects.join(", ")} FROM ${table}`;
   if (whereClause) {
     sql += ` WHERE ${whereClause}`;
   }

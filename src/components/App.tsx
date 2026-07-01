@@ -70,6 +70,18 @@ function toStatNumber(value: any): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function toNullableStatNumber(value: any): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "bigint") return Number(value);
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isTextColumnType(columnType?: string): boolean {
+  return /^(VARCHAR|TEXT|CHAR|STRING|UUID)/i.test(columnType ?? "");
+}
+
 function estimateJsonRowCount(text: string, filePath: string): number {
   const ext = getFileExtension(filePath);
   if (ext === "jsonl" || ext === "ndjson") {
@@ -296,13 +308,15 @@ export function App(): React.ReactElement {
 
       const columnType = columnTypes.get(column);
       const includeNumericStats = numericColumns.has(column);
+      const includeTextStats = isTextColumnType(columnType);
       const [summaryRows, topValueRows] = await Promise.all([
         window.api.query(
           buildColumnStatsSummaryQuery(
             activeTable,
             column,
             viewState.filters,
-            includeNumericStats
+            includeNumericStats,
+            includeTextStats
           )
         ),
         window.api.query(
@@ -323,6 +337,17 @@ export function App(): React.ReactElement {
         maxValue: summary.max_value ?? null,
         avgValue: includeNumericStats && summary.avg_value != null ? toStatNumber(summary.avg_value) : null,
         medianValue: includeNumericStats && summary.median_value != null ? toStatNumber(summary.median_value) : null,
+        textStats: includeTextStats
+          ? {
+              minLength: toNullableStatNumber(summary.min_length),
+              maxLength: toNullableStatNumber(summary.max_length),
+              avgLength: toNullableStatNumber(summary.avg_length),
+              emptyStringCount: toStatNumber(summary.empty_string_count),
+              leadingTrailingSpaceCount: toStatNumber(summary.leading_trailing_space_count),
+              caseVariantGroups: toStatNumber(summary.case_variant_groups),
+              longValueCount: toStatNumber(summary.long_value_count),
+            }
+          : null,
         topValues: topValueRows.map((row) => ({
           value: String(row.value ?? ""),
           count: toStatNumber(row.count),
@@ -1500,6 +1525,7 @@ export function App(): React.ReactElement {
           // If the operation produces string output, ensure the target column is VARCHAR
           const STRING_OPS: Set<ColOpType> = new Set([
             "prefix_suffix", "find_replace", "regex_extract", "upper", "lower", "trim", "assign_value",
+            "empty_to_null", "placeholder_to_null",
           ]);
           // extract_numbers in "all" mode or "any" type also produces string output
           const isStringOp = STRING_OPS.has(opType)
@@ -2075,6 +2101,10 @@ export function App(): React.ReactElement {
                     columnTypes={columnTypes}
                     onGetColumnStats={pivotActive ? undefined : handleGetColumnStats}
                     onGetColumnUniques={pivotActive ? undefined : handleGetColumnUniques}
+                    colOpsSteps={colOpsSteps}
+                    undoStrategy={undoStrategy}
+                    onColOpApply={handleColOpApply}
+                    onColOpUndo={handleColOpUndo}
                     groupSortMode={pivotActive ? viewState.pivotConfig?.groupSortMode : undefined}
                     groupSortDirection={pivotActive ? viewState.pivotConfig?.groupSortDirection : undefined}
                     onGroupSort={pivotActive ? handleGroupSort : undefined}

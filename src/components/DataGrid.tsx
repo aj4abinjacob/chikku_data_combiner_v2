@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, ButtonGroup, HTMLSelect, Icon } from "@blueprintjs/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue } from "../types";
+import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy } from "../types";
 
 const TOOLTIP_DELAY = 600; // ms before tooltip appears
 
@@ -28,6 +28,8 @@ type ColumnStatsPanelState = {
 
 type NumberDisplayStyle = "standard" | "currency" | "percent" | "scientific";
 type RoundingMethod = "half_up" | "truncate" | "floor" | "ceil";
+type ColumnOpsTab = "format" | "clean";
+type TextCleanOp = "trim" | "empty_to_null" | "placeholder_to_null";
 
 interface ColumnDisplayFormat {
   decimalPlaces: number;
@@ -49,6 +51,8 @@ const ROUNDING_METHOD_OPTIONS: { value: RoundingMethod; label: string }[] = [
   { value: "ceil", label: "Round up" },
 ];
 
+const TEXT_PLACEHOLDER_VALUES = ["NA", "N/A", "NULL", "NONE"];
+
 interface DataGridProps {
   totalRows: number;
   getRow: (absoluteIndex: number) => any | null;
@@ -68,6 +72,10 @@ interface DataGridProps {
   columnTypes?: Map<string, string>;
   onGetColumnStats?: (column: string) => Promise<ColumnStats>;
   onGetColumnUniques?: (column: string) => Promise<ColumnStatsUniqueValue[]>;
+  colOpsSteps?: ColOpStep[];
+  undoStrategy?: UndoStrategy;
+  onColOpApply?: (opType: ColOpType, column: string, params: Record<string, string>) => Promise<void>;
+  onColOpUndo?: () => Promise<void>;
   groupSortMode?: PivotGroupSortMode | null;
   groupSortDirection?: "ASC" | "DESC";
   onGroupSort?: (mode: PivotGroupSortMode, direction: "ASC" | "DESC" | null) => void;
@@ -96,6 +104,10 @@ export function DataGrid({
   columnTypes,
   onGetColumnStats,
   onGetColumnUniques,
+  colOpsSteps = [],
+  undoStrategy = "per-step",
+  onColOpApply,
+  onColOpUndo,
   groupSortMode,
   groupSortDirection,
   onGroupSort,
@@ -128,6 +140,7 @@ export function DataGrid({
   const [columnStatsPanel, setColumnStatsPanel] = useState<ColumnStatsPanelState | null>(null);
   const columnStatsRequestId = useRef(0);
   const columnUniquesRequestId = useRef(0);
+  const suppressNextStatsResetClose = useRef(false);
   const defaultColumnFormat = useMemo<ColumnDisplayFormat>(() => ({
     decimalPlaces: displayDecimalPlaces,
     numberStyle: "standard",
@@ -410,6 +423,10 @@ export function DataGrid({
   }, [columnsKey]);
 
   useEffect(() => {
+    if (suppressNextStatsResetClose.current) {
+      suppressNextStatsResetClose.current = false;
+      return;
+    }
     closeColumnStatsPanel();
   }, [columnsKey, closeColumnStatsPanel, pivotMode, resetKey]);
 
@@ -710,6 +727,36 @@ export function DataGrid({
     }
     requestColumnStats(columnStatsPanel.column);
   }, [columnStatsPanel, requestColumnStats, requestColumnUniques]);
+
+  const handleColumnStatsCleanApply = useCallback(
+    async (opType: ColOpType, column: string, params: Record<string, string>) => {
+      if (!onColOpApply) return;
+      suppressNextStatsResetClose.current = true;
+      try {
+        await onColOpApply(opType, column, { ...params, targetMode: "replace" });
+        requestColumnStats(column);
+      } catch (err) {
+        suppressNextStatsResetClose.current = false;
+        throw err;
+      }
+    },
+    [onColOpApply, requestColumnStats]
+  );
+
+  const handleColumnStatsCleanUndo = useCallback(
+    async (column: string) => {
+      if (!onColOpUndo) return;
+      suppressNextStatsResetClose.current = true;
+      try {
+        await onColOpUndo();
+        requestColumnStats(column);
+      } catch (err) {
+        suppressNextStatsResetClose.current = false;
+        throw err;
+      }
+    },
+    [onColOpUndo, requestColumnStats]
+  );
 
   // ── Click-drag selection state ──
   const dragSelecting = useRef(false);
@@ -1273,6 +1320,10 @@ export function DataGrid({
             maxDecimalPlaces={maxDisplayDecimalPlaces}
             onFormatPreview={(format) => previewFormatForColumn(columnStatsPanel.column, format)}
             onFormatChange={(format) => applyFormatForColumn(columnStatsPanel.column, format)}
+            colOpsSteps={colOpsSteps}
+            undoStrategy={undoStrategy}
+            onCleanApply={handleColumnStatsCleanApply}
+            onCleanUndo={handleColumnStatsCleanUndo}
             onShowUniques={handleShowUniqueValues}
             onBack={handleColumnStatsBack}
             onRefresh={handleColumnStatsRefresh}
@@ -1317,6 +1368,10 @@ interface ColumnStatsRailProps {
   maxDecimalPlaces: number;
   onFormatPreview: (format: ColumnDisplayFormat) => void;
   onFormatChange: (format: ColumnDisplayFormat) => void;
+  colOpsSteps: ColOpStep[];
+  undoStrategy: UndoStrategy;
+  onCleanApply: (opType: ColOpType, column: string, params: Record<string, string>) => Promise<void>;
+  onCleanUndo: (column: string) => Promise<void>;
   onShowUniques: () => void;
   onBack: () => void;
   onRefresh: () => void;
@@ -1333,6 +1388,10 @@ function ColumnStatsRail({
   maxDecimalPlaces,
   onFormatPreview,
   onFormatChange,
+  colOpsSteps,
+  undoStrategy,
+  onCleanApply,
+  onCleanUndo,
   onShowUniques,
   onBack,
   onRefresh,
@@ -1346,6 +1405,8 @@ function ColumnStatsRail({
     : 1;
   const hasNumericStats = stats?.avgValue != null || stats?.medianValue != null;
   const isNumeric = isNumericColumnType(columnType);
+  const isText = isTextColumnType(columnType);
+  const hasTextProfile = isText && !!stats?.textStats;
   const uniqueSortLabel = isNumericColumnType(columnType)
     ? "Sorted numerically"
     : "Sorted A-Z, case-insensitive";
@@ -1442,10 +1503,25 @@ function ColumnStatsRail({
 
           <div className="dg-stats-section">
             <div className="dg-stats-section-title">
-              {hasNumericStats ? "Numeric summary" : "Range"}
+              {hasTextProfile ? "Text profile" : hasNumericStats ? "Numeric summary" : "Range"}
             </div>
             <div className="dg-stats-kv">
-              {hasNumericStats && (
+              {hasTextProfile ? (
+                <>
+                  <StatsKeyValue
+                    label="Shortest"
+                    value={formatTextLength(stats.textStats?.minLength)}
+                  />
+                  <StatsKeyValue
+                    label="Average"
+                    value={formatTextLength(stats.textStats?.avgLength)}
+                  />
+                  <StatsKeyValue
+                    label="Longest"
+                    value={formatTextLength(stats.textStats?.maxLength)}
+                  />
+                </>
+              ) : hasNumericStats && (
                 <>
                   <StatsKeyValue
                     label="Median"
@@ -1457,8 +1533,12 @@ function ColumnStatsRail({
                   />
                 </>
               )}
-              <StatsKeyValue label="Min" value={formatStatsValue(stats.minValue, format, isNumeric)} />
-              <StatsKeyValue label="Max" value={formatStatsValue(stats.maxValue, format, isNumeric)} />
+              {!hasTextProfile && (
+                <>
+                  <StatsKeyValue label="Min" value={formatStatsValue(stats.minValue, format, isNumeric)} />
+                  <StatsKeyValue label="Max" value={formatStatsValue(stats.maxValue, format, isNumeric)} />
+                </>
+              )}
             </div>
           </div>
 
@@ -1503,6 +1583,10 @@ function ColumnStatsRail({
             maxDecimalPlaces={maxDecimalPlaces}
             onFormatPreview={onFormatPreview}
             onFormatChange={onFormatChange}
+            colOpsSteps={colOpsSteps}
+            undoStrategy={undoStrategy}
+            onCleanApply={(opType, params) => onCleanApply(opType, stats.column, params)}
+            onCleanUndo={() => onCleanUndo(stats.column)}
           />
         </>
       )}
@@ -1566,6 +1650,10 @@ function ColumnStatsOpsPanel({
   maxDecimalPlaces,
   onFormatPreview,
   onFormatChange,
+  colOpsSteps,
+  undoStrategy,
+  onCleanApply,
+  onCleanUndo,
 }: {
   columnType: string;
   stats: ColumnStats;
@@ -1576,10 +1664,27 @@ function ColumnStatsOpsPanel({
   maxDecimalPlaces: number;
   onFormatPreview: (format: ColumnDisplayFormat) => void;
   onFormatChange: (format: ColumnDisplayFormat) => void;
+  colOpsSteps: ColOpStep[];
+  undoStrategy: UndoStrategy;
+  onCleanApply: (opType: ColOpType, params: Record<string, string>) => Promise<void>;
+  onCleanUndo: () => Promise<void>;
 }): React.ReactElement {
-  const [activeTab, setActiveTab] = useState<"format" | "clean" | "transform">("format");
-  const [draftFormat, setDraftFormat] = useState<ColumnDisplayFormat>(format);
   const isNumeric = isNumericColumnType(columnType);
+  const isText = isTextColumnType(columnType);
+  const tabs: ColumnOpsTab[] = isNumeric ? ["format"] : ["clean"];
+  const defaultCleanOp: TextCleanOp =
+    (stats.textStats?.leadingTrailingSpaceCount ?? 0) > 0
+      ? "trim"
+      : (stats.textStats?.emptyStringCount ?? 0) > 0
+        ? "empty_to_null"
+        : "placeholder_to_null";
+  const [activeTab, setActiveTab] = useState<ColumnOpsTab>(isNumeric ? "format" : "clean");
+  const activeOpsTab = tabs.includes(activeTab) ? activeTab : tabs[0];
+  const [draftFormat, setDraftFormat] = useState<ColumnDisplayFormat>(format);
+  const [selectedCleanOp, setSelectedCleanOp] = useState<TextCleanOp>(defaultCleanOp);
+  const [workingCleanOp, setWorkingCleanOp] = useState<TextCleanOp | "undo" | null>(null);
+  const [cleanError, setCleanError] = useState<string | null>(null);
+  const [cleanSuccess, setCleanSuccess] = useState<string | null>(null);
   const sampleValue = stats.medianValue ?? stats.avgValue ?? stats.minValue ?? stats.topValues[0]?.value ?? null;
 
   useEffect(() => {
@@ -1587,8 +1692,15 @@ function ColumnStatsOpsPanel({
   }, [format, stats.column]);
 
   useEffect(() => {
-    setActiveTab("format");
-  }, [stats.column]);
+    setActiveTab(isNumeric ? "format" : "clean");
+  }, [isNumeric, stats.column]);
+
+  useEffect(() => {
+    setSelectedCleanOp(defaultCleanOp);
+    setCleanError(null);
+    setCleanSuccess(null);
+    setWorkingCleanOp(null);
+  }, [defaultCleanOp, stats.column]);
 
   const updateDraft = (patch: Partial<ColumnDisplayFormat>) => {
     const nextFormat = { ...draftFormat, ...patch };
@@ -1611,12 +1723,7 @@ function ColumnStatsOpsPanel({
 
   const renderFormatTab = () => {
     if (!isNumeric) {
-      return (
-        <div className="dg-stats-op-empty">
-          <Icon icon="info-sign" size={14} />
-          <span>Formatting controls adapt to the selected column type.</span>
-        </div>
-      );
+      return null;
     }
 
     return (
@@ -1719,16 +1826,221 @@ function ColumnStatsOpsPanel({
     </div>
   );
 
+  const renderTextCleanTab = () => {
+    const textStats = stats.textStats;
+    const whitespaceRows = textStats?.leadingTrailingSpaceCount ?? 0;
+    const emptyStringRows = textStats?.emptyStringCount ?? 0;
+    const placeholderLabel = TEXT_PLACEHOLDER_VALUES.join(", ");
+    const selectedOp = selectedCleanOp;
+    const hasPerStepUndo = undoStrategy === "per-step";
+    const lastColOp = colOpsSteps[colOpsSteps.length - 1];
+    const canUndo = lastColOp?.column === stats.column && hasPerStepUndo && !workingCleanOp;
+    const signals = [
+      {
+        label: "Whitespace",
+        detail: `${formatStatNumber(whitespaceRows)} ${whitespaceRows === 1 ? "row" : "rows"}`,
+        route: "Detect",
+        tone: whitespaceRows > 0 ? "warning" : "ok",
+      },
+      {
+        label: "Empty strings",
+        detail: `${formatStatNumber(emptyStringRows)} ${emptyStringRows === 1 ? "row" : "rows"}`,
+        route: "Detect",
+        tone: emptyStringRows > 0 ? "warning" : "ok",
+      },
+      {
+        label: "Placeholders",
+        detail: "Common tokens",
+        route: "Quick",
+        tone: "info",
+      },
+    ];
+    const cleanOps: {
+      id: TextCleanOp;
+      opType: ColOpType;
+      icon: string;
+      title: string;
+      detail: string;
+      meta: string;
+      params: Record<string, string>;
+      disabled?: boolean;
+    }[] = [
+      {
+        id: "trim",
+        opType: "trim",
+        icon: "alignment-vertical-center",
+        title: "Trim whitespace",
+        detail: "Remove leading and trailing spaces.",
+        meta: whitespaceRows > 0 ? `${formatStatNumber(whitespaceRows)} rows` : "Clean",
+        params: {},
+        disabled: whitespaceRows === 0,
+      },
+      {
+        id: "empty_to_null",
+        opType: "empty_to_null",
+        icon: "clean",
+        title: "Empty strings to NULL",
+        detail: "Convert blank text into true missing values.",
+        meta: emptyStringRows > 0 ? `${formatStatNumber(emptyStringRows)} rows` : "None found",
+        params: {},
+        disabled: emptyStringRows === 0,
+      },
+      {
+        id: "placeholder_to_null",
+        opType: "placeholder_to_null",
+        icon: "filter-remove",
+        title: "Placeholders to NULL",
+        detail: placeholderLabel,
+        meta: "Apply if present",
+        params: { placeholders: TEXT_PLACEHOLDER_VALUES.join("\n") },
+      },
+    ];
+    const selectedCleanConfig = cleanOps.find((op) => op.id === selectedOp) ?? cleanOps[0];
+    const applyDisabled = !!selectedCleanConfig.disabled || !!workingCleanOp;
+
+    const handleApplyClean = async () => {
+      if (!selectedCleanConfig || applyDisabled) return;
+      setWorkingCleanOp(selectedCleanConfig.id);
+      setCleanError(null);
+      setCleanSuccess(null);
+      try {
+        await onCleanApply(selectedCleanConfig.opType, selectedCleanConfig.params);
+        setCleanSuccess(`${selectedCleanConfig.title} applied`);
+      } catch (err) {
+        setCleanError(err instanceof Error ? err.message : "Unable to apply operation");
+      } finally {
+        setWorkingCleanOp(null);
+      }
+    };
+
+    const handleUndoClean = async () => {
+      if (!canUndo) return;
+      setWorkingCleanOp("undo");
+      setCleanError(null);
+      setCleanSuccess(null);
+      try {
+        await onCleanUndo();
+        setCleanSuccess("Last column operation undone");
+      } catch (err) {
+        setCleanError(err instanceof Error ? err.message : "Unable to undo operation");
+      } finally {
+        setWorkingCleanOp(null);
+      }
+    };
+
+    return (
+      <>
+        <div className="dg-stats-quality-panel">
+          <div className="dg-stats-quality-heading">
+            <strong>Clean signals</strong>
+            <span>{whitespaceRows + emptyStringRows > 0 ? `${formatStatNumber(whitespaceRows + emptyStringRows)} found` : "Ready"}</span>
+          </div>
+          <div className="dg-stats-quality-list">
+            {signals.map((signal) => (
+              <div className="dg-stats-quality-row" key={signal.label}>
+                <span className={`dg-stats-signal-dot ${signal.tone}`} aria-hidden="true" />
+                <span className="dg-stats-quality-label">{signal.label}</span>
+                <span className="dg-stats-quality-detail">{signal.detail}</span>
+                <span className={`dg-stats-quality-route ${signal.tone}`}>{signal.route}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="dg-stats-clean-panel">
+          <div className="dg-stats-suggested-heading">Operations</div>
+          <div className="dg-stats-clean-list" role="radiogroup" aria-label="Clean operations">
+            {cleanOps.map((row) => {
+              const selected = selectedCleanOp === row.id;
+              return (
+                <button
+                  type="button"
+                  className={`dg-stats-clean-row${selected ? " selected" : ""}${row.disabled ? " disabled" : ""}`}
+                  key={row.id}
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => {
+                    setSelectedCleanOp(row.id);
+                    setCleanError(null);
+                    setCleanSuccess(null);
+                  }}
+                  disabled={!!workingCleanOp}
+                >
+                  <span className="dg-stats-suggested-icon">
+                    <Icon icon={row.icon as any} size={14} />
+                  </span>
+                  <span className="dg-stats-suggested-copy">
+                    <strong>{row.title}</strong>
+                    <span title={row.detail}>{row.detail}</span>
+                  </span>
+                  <span className={`dg-stats-clean-meta${row.disabled ? " muted" : ""}`}>{row.meta}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {(cleanError || cleanSuccess) && (
+          <div className={`dg-stats-op-message${cleanError ? " error" : " success"}`}>
+            <Icon icon={cleanError ? "error" : "tick"} size={14} />
+            <span>{cleanError ?? cleanSuccess}</span>
+          </div>
+        )}
+
+        <div className="dg-stats-op-footer">
+          <Button
+            icon="undo"
+            text="Undo"
+            disabled={!canUndo}
+            loading={workingCleanOp === "undo"}
+            title={
+              colOpsSteps.length === 0
+                ? "No column operations to undo"
+                : !hasPerStepUndo
+                  ? "Undo is unavailable while using snapshot history"
+                  : lastColOp?.column === stats.column
+                    ? "Undo last column operation"
+                    : "Last column operation belongs to another column"
+            }
+            onClick={handleUndoClean}
+          />
+          <Button
+            intent="primary"
+            icon="tick"
+            text="Apply"
+            disabled={applyDisabled}
+            loading={workingCleanOp !== null && workingCleanOp !== "undo"}
+            onClick={handleApplyClean}
+          />
+        </div>
+      </>
+    );
+  };
+
+  const renderCleanTab = () => {
+    if (isText) return renderTextCleanTab();
+    return renderComingSoonRows([
+      { icon: "clean", title: `Fill ${formatStatNumber(stats.nullCount)} nulls`, detail: "Replace missing values with a fixed value or NULL." },
+      { icon: "filter-remove", title: "Replace invalid values", detail: "Normalize values that do not match the column dtype." },
+      { icon: "exchange", title: "Cast type", detail: `Convert ${columnType.toUpperCase()} to another compatible dtype.` },
+    ]);
+  };
+
   return (
     <div className="dg-stats-ops">
-      <div className="dg-stats-op-tabs" role="tablist" aria-label="Column operations">
-        {(["format", "clean", "transform"] as const).map((tab) => (
+      <div
+        className="dg-stats-op-tabs"
+        role="tablist"
+        aria-label="Column operations"
+        style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}
+      >
+        {tabs.map((tab) => (
           <button
             type="button"
             key={tab}
-            className={activeTab === tab ? "active" : ""}
+            className={activeOpsTab === tab ? "active" : ""}
             role="tab"
-            aria-selected={activeTab === tab}
+            aria-selected={activeOpsTab === tab}
             onClick={() => setActiveTab(tab)}
           >
             {tab}
@@ -1737,20 +2049,11 @@ function ColumnStatsOpsPanel({
       </div>
 
       <div className="dg-stats-op-content">
-        {activeTab === "format" && renderFormatTab()}
-        {activeTab === "clean" && renderComingSoonRows([
-          { icon: "clean", title: `Fill ${formatStatNumber(stats.nullCount)} nulls`, detail: "Replace missing values with a fixed value, zero, or median." },
-          { icon: "horizontal-distribution", title: "Clamp outliers", detail: "Cap values outside the observed numeric range." },
-          { icon: "filter-remove", title: "Replace invalid values", detail: "Convert non-numeric entries to NULL before analysis." },
-        ])}
-        {activeTab === "transform" && renderComingSoonRows([
-          { icon: "one-to-one", title: "Normalize range", detail: "Scale values into a 0 to 1 range." },
-          { icon: "timeline-line-chart", title: "Log scale", detail: "Compress wide numeric ranges for analysis." },
-          { icon: "exchange", title: "Cast type", detail: `Convert ${columnType.toUpperCase()} to another compatible dtype.` },
-        ])}
+        {activeOpsTab === "format" && renderFormatTab()}
+        {activeOpsTab === "clean" && renderCleanTab()}
       </div>
 
-      {activeTab === "format" && (
+      {activeOpsTab === "format" && isNumeric && (
         <div className="dg-stats-op-footer">
           <Button
             text="Reset"
@@ -1837,6 +2140,12 @@ function formatStatNumber(value: number): string {
   return value.toLocaleString();
 }
 
+function formatTextLength(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "-";
+  const label = Number.isInteger(value) ? formatStatNumber(value) : value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  return `${label} ${Math.round(value) === 1 ? "char" : "chars"}`;
+}
+
 function formatPercent(part: number, total: number): string {
   if (total <= 0) return "0%";
   return `${Math.round((part / total) * 100)}%`;
@@ -1849,6 +2158,10 @@ function formatStatsValue(value: any, format: ColumnDisplayFormat, isNumeric = f
 
 function isNumericColumnType(columnType: string): boolean {
   return /^(TINYINT|SMALLINT|INTEGER|INT|BIGINT|HUGEINT|FLOAT|REAL|DOUBLE|DECIMAL|NUMERIC)/i.test(columnType);
+}
+
+function isTextColumnType(columnType: string): boolean {
+  return /^(VARCHAR|TEXT|CHAR|STRING|UUID)/i.test(columnType);
 }
 
 function parseNumericValue(value: any): number | null {

@@ -86,6 +86,19 @@ export function buildColOpExpr(
       return `LOWER(CAST(${col} AS VARCHAR))`;
     case "clear_null":
       return "NULL";
+    case "empty_to_null":
+      return `CASE WHEN ${col} IS NULL THEN NULL WHEN TRIM(CAST(${col} AS VARCHAR)) = '' THEN NULL ELSE ${col} END`;
+    case "placeholder_to_null": {
+      const placeholders = (params.placeholders ?? "")
+        .split(/[\n,]/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (placeholders.length === 0) return col;
+      const placeholderList = placeholders
+        .map((value) => `'${value.toLowerCase().replace(/'/g, "''")}'`)
+        .join(", ");
+      return `CASE WHEN ${col} IS NULL THEN NULL WHEN LOWER(TRIM(CAST(${col} AS VARCHAR))) IN (${placeholderList}) THEN NULL ELSE ${col} END`;
+    }
     case "prefix_suffix": {
       const prefix = params.prefix?.replace(/'/g, "''") ?? "";
       const suffix = params.suffix?.replace(/'/g, "''") ?? "";
@@ -157,6 +170,10 @@ export function buildStepDescription(
       return `Lowercase "${column}"${targetSuffix}`;
     case "clear_null":
       return `Clear "${column}" to NULL${targetSuffix}`;
+    case "empty_to_null":
+      return `Convert empty strings in "${column}" to NULL${targetSuffix}`;
+    case "placeholder_to_null":
+      return `Convert placeholder values in "${column}" to NULL${targetSuffix}`;
     case "prefix_suffix": {
       const parts: string[] = [];
       if (params.prefix) parts.push(`prefix "${params.prefix}"`);

@@ -74,6 +74,16 @@ export interface ColumnStatsUniqueValue {
   count: number;
 }
 
+export interface ColumnTextStats {
+  minLength: number | null;
+  maxLength: number | null;
+  avgLength: number | null;
+  emptyStringCount: number;
+  leadingTrailingSpaceCount: number;
+  caseVariantGroups: number;
+  longValueCount: number;
+}
+
 export interface ColumnStats {
   column: string;
   columnType?: string;
@@ -85,6 +95,7 @@ export interface ColumnStats {
   maxValue: any;
   avgValue?: number | null;
   medianValue?: number | null;
+  textStats?: ColumnTextStats | null;
   topValues: ColumnStatsTopValue[];
 }
 
@@ -239,6 +250,7 @@ export interface SheetInfo {
 
 export type ColOpType = "assign_value" | "find_replace" | "regex_extract"
   | "extract_numbers" | "trim" | "upper" | "lower" | "clear_null" | "prefix_suffix"
+  | "empty_to_null" | "placeholder_to_null"
   | "rename_column" | "delete_column";
 
 export type ColOpTargetMode = "replace" | "new_column" | "existing_column";
