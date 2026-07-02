@@ -2216,11 +2216,6 @@ export function App(): React.ReactElement {
           </div>
         </div>
       )}
-      <div className="window-titlebar" data-tauri-drag-region="deep">
-        <span className="window-titlebar-title" title={activeDisplayFileName ?? "Chikku Parser"}>
-          {activeDisplayFileName ?? "Chikku Parser"}
-        </span>
-      </div>
       <div className="main-layout">
         <div className={`sidebar-shell${sidebarVisible ? " sidebar-shell-open" : " sidebar-shell-collapsed"}`}>
           <div className="sidebar-shell-panel" aria-hidden={!sidebarVisible}>
