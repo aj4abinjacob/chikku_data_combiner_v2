@@ -228,12 +228,56 @@ html, body, #root {
   }
 }
 
+.app-window-titlebar {
+  position: relative;
+  flex: 0 0 30px;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px 0 78px;
+  background: #fff;
+  border-bottom: 1px solid #d8e1e8;
+  color: #25384a;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  user-select: none;
+}
+
+.app-window-titlebar-name {
+  min-width: 0;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.app-window-titlebar-file {
+  position: absolute;
+  left: 50%;
+  max-width: min(56vw, calc(100% - 280px));
+  transform: translateX(-50%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #25384a;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  pointer-events: none;
+}
+
 // ── Main layout: sidebar + data grid ──
 .main-layout {
   display: flex;
   flex: 1;
   overflow: hidden;
   border-top: 1px solid #bfccd6;
+}
+
+.app-window-titlebar + .main-layout {
+  border-top: 0;
 }
 
 .sidebar-shell {
@@ -9370,6 +9414,16 @@ html.dark-theme #root {
       color: @dark-warning;
       border-color: fade(@dark-warning, 48%);
     }
+  }
+
+  .app-window-titlebar {
+    background: @dark-bg-2;
+    border-bottom-color: @dark-border-1;
+    color: @dark-text-1;
+  }
+
+  .app-window-titlebar-file {
+    color: @dark-text-1;
   }
 
   .main-layout {

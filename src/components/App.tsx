@@ -2190,9 +2190,14 @@ export function App(): React.ReactElement {
   const hasData = tables.length > 0;
   const activeDisplayFileName = activeLoadedTable ? getDisplayFileName(activeLoadedTable) : null;
   const fileDragClass = fileDragState === "idle" ? "" : ` file-drag-${fileDragState}`;
+  const usesMacTitlebarOverlay = isTauri()
+    && typeof navigator !== "undefined"
+    && /Mac/i.test(navigator.platform);
 
   useEffect(() => {
-    const nextTitle = activeDisplayFileName ?? "Chikku Parser";
+    const nextTitle = activeDisplayFileName
+      ? `Chikku Parser - ${activeDisplayFileName}`
+      : "Chikku Parser";
     document.title = nextTitle;
     if (!isTauri()) return;
 
@@ -2213,6 +2218,20 @@ export function App(): React.ReactElement {
             <span>
               {fileDragState === "supported" ? "Import or refresh" : "Unsupported file type"}
             </span>
+          </div>
+        </div>
+      )}
+      {usesMacTitlebarOverlay && (
+        <div className="app-window-titlebar" data-tauri-drag-region="">
+          <div className="app-window-titlebar-name" data-tauri-drag-region="">
+            Chikku Parser
+          </div>
+          <div
+            className="app-window-titlebar-file"
+            data-tauri-drag-region=""
+            title={activeDisplayFileName ?? undefined}
+          >
+            {activeDisplayFileName ?? ""}
           </div>
         </div>
       )}

@@ -4,6 +4,8 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(target_os = "macos")]
+use tauri::TitleBarStyle;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const SUPPORTED_EXTS: &[&str] = &[
@@ -69,12 +71,19 @@ pub fn spawn_window(app: &AppHandle, files: Option<Vec<String>>) -> AppResult<St
     let label = label_for(window_id);
     let cascade_offset = ((window_id - 1) % 8) as f64 * 36.0;
     let url = WebviewUrl::App("index.html".into());
-    let builder = WebviewWindowBuilder::new(app, &label, url)
+    let mut builder = WebviewWindowBuilder::new(app, &label, url)
         .title("Chikku Parser")
         .inner_size(1400.0, 900.0)
         .min_inner_size(800.0, 600.0)
         .position(80.0 + cascade_offset, 80.0 + cascade_offset)
         .resizable(true);
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .title_bar_style(TitleBarStyle::Overlay)
+            .hidden_title(true);
+    }
 
     let window = builder
         .build()
