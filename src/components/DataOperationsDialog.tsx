@@ -587,14 +587,69 @@ export function DataOperationsDialog({
     resetForm();
   };
 
+  const validRenameCount = renameRows.filter((r) => r.sourceCol && r.newName.trim()).length;
+  const validConditionCount = caseConditions.filter((c) => c.column && c.operator && c.result).length;
+  const applyDisabled =
+    opType === "delete_column"
+      ? deleteColumns.length === 0 || deleteColumns.length >= schema.length
+      : opType === "create_column"
+      ? !targetCol
+      : opType === "combine_columns"
+      ? combineSourceCols.length < 2 || !targetCol
+      : opType === "rename_column"
+      ? validRenameCount === 0
+      : opType === "sample_table"
+      ? !param1 || Number(param1) <= 0 || (sampleMode === "percent" && Number(param1) > 100)
+      : opType === "remove_duplicates"
+      ? dedupColumns.length === 0
+      : opType === "conditional_column"
+      ? !targetCol || validConditionCount === 0
+      : opType === "remove_empty_rows" || opType === "replace_empty_null" || opType === "replace_sentinel_null"
+      ? false
+      : !sourceCol
+        || ((opType === "substring" || opType === "custom_sql") && targetMode === "new_column" && (!targetCol.trim() || schema.some((c) => c.column_name === targetCol.trim())))
+        || ((opType === "substring" || opType === "custom_sql") && targetMode === "existing_column" && !targetCol);
+
+  const sourceSummary = sourceCol ? `${sourceCol}${colTypeMap.get(sourceCol) ? ` (${colTypeMap.get(sourceCol)})` : ""}` : "No source selected";
+  const targetSummary = (() => {
+    if (opType === "create_column" || opType === "combine_columns" || opType === "conditional_column") {
+      return targetCol ? `New column "${targetCol}"` : "New column not named";
+    }
+    if (opType === "substring" || opType === "custom_sql") {
+      if (targetMode === "new_column") return targetCol ? `New column "${targetCol}"` : "New column not named";
+      if (targetMode === "existing_column") return targetCol ? `Existing column "${targetCol}"` : "No target selected";
+      return sourceCol ? `Replace "${sourceCol}"` : "Replace source";
+    }
+    if (opType === "delete_column") return `${deleteColumns.length} column${deleteColumns.length !== 1 ? "s" : ""} selected`;
+    if (opType === "rename_column") return `${validRenameCount} rename${validRenameCount !== 1 ? "s" : ""} ready`;
+    if (opType === "remove_duplicates") return `${dedupColumns.length} key column${dedupColumns.length !== 1 ? "s" : ""}`;
+    if (opType === "remove_empty_rows") {
+      const count = removeEmptyColumns.length || schema.length;
+      return `${removeEmptyMode === "any" ? "Any" : "All"} empty across ${count} column${count !== 1 ? "s" : ""}`;
+    }
+    if (opType === "replace_empty_null") {
+      const count = emptyNullColumns.length || schema.filter((c) => isVarcharType(c.column_type)).length;
+      return `${count} text column${count !== 1 ? "s" : ""}`;
+    }
+    if (opType === "replace_sentinel_null") {
+      const count = sentinelNullColumns.length || schema.filter((c) => isVarcharType(c.column_type)).length;
+      return `${count} text column${count !== 1 ? "s" : ""}`;
+    }
+    if (opType === "sample_table") return param1 ? `${param1}${sampleMode === "percent" ? "%" : " rows"}` : "Sample size not set";
+    return "Current table";
+  })();
+
   return (
     <Dialog
       isOpen={isOpen}
       onClose={handleClose}
       title="Data Operations"
+      className="workbench-dialog data-operations-workbench-dialog"
+      style={{ width: 860, maxWidth: "94vw" }}
     >
-      <DialogBody>
-        <div className="column-op-form">
+      <DialogBody className="workbench-dialog-body">
+        <div className="workbench-layout data-operations-workbench-layout">
+        <div className="column-op-form workbench-config">
           <FormGroup label="Operation">
             <SoftSelect
               value={opType}
@@ -637,19 +692,21 @@ export function DataOperationsDialog({
           {/* Target Mode — only for extract-type ops */}
           {(opType === "substring" || opType === "custom_sql") && (
             <FormGroup label="Write Result To">
-              <RadioGroup
-                inline
-                selectedValue={targetMode}
-                onChange={(e) => {
-                  const mode = (e.target as HTMLInputElement).value as ColOpTargetMode;
-                  setTargetMode(mode);
-                  setTargetCol("");
-                }}
-              >
-                <Radio label="Replace source" value="replace" />
-                <Radio label="New column" value="new_column" />
-                <Radio label="Existing column" value="existing_column" />
-              </RadioGroup>
+              <div className="workbench-segmented-radio">
+                <RadioGroup
+                  inline
+                  selectedValue={targetMode}
+                  onChange={(e) => {
+                    const mode = (e.target as HTMLInputElement).value as ColOpTargetMode;
+                    setTargetMode(mode);
+                    setTargetCol("");
+                  }}
+                >
+                  <Radio label="Replace source" value="replace" />
+                  <Radio label="New column" value="new_column" />
+                  <Radio label="Existing column" value="existing_column" />
+                </RadioGroup>
+              </div>
               {targetMode === "new_column" && (
                 <InputGroup
                   value={targetCol}
@@ -1079,7 +1136,7 @@ export function DataOperationsDialog({
           )}
 
           {opType === "substring" && (
-            <>
+            <div className="workbench-field-row">
               <FormGroup label="Start Position">
                 <InputGroup
                   value={param1}
@@ -1122,7 +1179,7 @@ export function DataOperationsDialog({
                   min={0}
                 />
               </FormGroup>
-            </>
+            </div>
           )}
 
           {opType === "custom_sql" && (
@@ -1138,32 +1195,67 @@ export function DataOperationsDialog({
             </FormGroup>
           )}
 
-          {/* Preview — shown for operations that produce a result */}
-          {opType !== "delete_column" && opType !== "create_column" && opType !== "rename_column" && opType !== "sample_table" && opType !== "remove_duplicates" && opType !== "remove_empty_rows" && opType !== "replace_empty_null" && opType !== "replace_sentinel_null" && (previews.length > 0 || previewError) && (
-            <div className="op-preview">
-              <div className="op-preview-header">Preview</div>
-              {previewError ? (
-                <div className="op-preview-error">{previewError}</div>
-              ) : (
-                <table className="op-preview-table">
-                  <thead>
-                    <tr>
-                      {opType !== "combine_columns" && opType !== "conditional_column" && <th>Original</th>}
-                      <th>Result</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {previews.map((p, i) => (
-                      <tr key={i}>
-                        {opType !== "combine_columns" && opType !== "conditional_column" && <td>{p.original}</td>}
-                        <td>{p.result}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+        </div>
+        <aside className="workbench-sidecar data-operation-sidecar">
+          <div className="workbench-sidecar-title">
+            Preview
+            <span>first rows</span>
+          </div>
+
+          {previewError ? (
+            <div className="op-preview-error">{previewError}</div>
+          ) : previews.length > 0 ? (
+            <table className="op-preview-table workbench-preview-table">
+              <thead>
+                <tr>
+                  {opType !== "combine_columns" && opType !== "conditional_column" && <th>Original</th>}
+                  <th>Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {previews.map((p, i) => (
+                  <tr key={i}>
+                    {opType !== "combine_columns" && opType !== "conditional_column" && <td>{p.original}</td>}
+                    <td>{p.result}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : dedupPreview ? (
+            <div className="workbench-impact-card">
+              <strong>{(dedupPreview.before - dedupPreview.after).toLocaleString()}</strong>
+              <span>duplicate row{dedupPreview.before - dedupPreview.after !== 1 ? "s" : ""} will be removed.</span>
+            </div>
+          ) : removeEmptyPreview ? (
+            <div className="workbench-impact-card">
+              <strong>{(removeEmptyPreview.before - removeEmptyPreview.after).toLocaleString()}</strong>
+              <span>empty row{removeEmptyPreview.before - removeEmptyPreview.after !== 1 ? "s" : ""} will be removed.</span>
+            </div>
+          ) : (
+            <div className="workbench-empty-preview">
+              <strong>{applyDisabled ? "Waiting for required input" : "Ready to apply"}</strong>
+              <span>{OP_LABELS[opType]}</span>
             </div>
           )}
+
+          <div className="workbench-summary-block">
+            <div className="workbench-summary-label">Impact Summary</div>
+            <div className="workbench-summary-lines">
+              <div>
+                <span>Operation</span>
+                <strong>{OP_LABELS[opType]}</strong>
+              </div>
+              <div>
+                <span>Source</span>
+                <strong>{sourceSummary}</strong>
+              </div>
+              <div>
+                <span>Target</span>
+                <strong>{targetSummary}</strong>
+              </div>
+            </div>
+          </div>
+        </aside>
         </div>
       </DialogBody>
       <DialogFooter
@@ -1174,27 +1266,7 @@ export function DataOperationsDialog({
               intent={opType === "delete_column" ? Intent.DANGER : Intent.PRIMARY}
               onClick={handleApply}
               text={opType === "delete_column" ? "Delete" : "Apply"}
-              disabled={
-                opType === "delete_column"
-                  ? deleteColumns.length === 0 || deleteColumns.length >= schema.length
-                  : opType === "create_column"
-                  ? !targetCol
-                  : opType === "combine_columns"
-                  ? combineSourceCols.length < 2 || !targetCol
-                  : opType === "rename_column"
-                  ? renameRows.filter((r) => r.sourceCol && r.newName.trim()).length === 0
-                  : opType === "sample_table"
-                  ? !param1 || Number(param1) <= 0 || (sampleMode === "percent" && Number(param1) > 100)
-                  : opType === "remove_duplicates"
-                  ? dedupColumns.length === 0
-                  : opType === "conditional_column"
-                  ? !targetCol || caseConditions.filter((c) => c.column && c.operator && c.result).length === 0
-                  : opType === "remove_empty_rows" || opType === "replace_empty_null" || opType === "replace_sentinel_null"
-                  ? false
-                  : !sourceCol
-                    || ((opType === "substring" || opType === "custom_sql") && targetMode === "new_column" && (!targetCol.trim() || schema.some((c) => c.column_name === targetCol.trim())))
-                    || ((opType === "substring" || opType === "custom_sql") && targetMode === "existing_column" && !targetCol)
-              }
+              disabled={applyDisabled}
             />
           </>
         }

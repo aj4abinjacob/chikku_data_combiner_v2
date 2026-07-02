@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Button,
   Intent,
@@ -246,6 +246,21 @@ export function PivotDialog({
   })();
 
   const canRun = !!pivotColumn && valueFields.size > 0 && hasValidUsing && !!activeTable;
+  const rowFieldList = useMemo(() => Array.from(rowFields), [rowFields]);
+  const valueFieldList = useMemo(() => Array.from(valueFields), [valueFields]);
+  const validValueFields = useMemo(
+    () =>
+      valueFieldList.filter((col) => {
+        const colInfo = schema.find((c) => c.column_name === col);
+        const colIsNumeric = colInfo ? isNumeric(colInfo.column_type) : false;
+        return colIsNumeric || NON_NUMERIC_FUNCTIONS.has(aggFunction);
+      }),
+    [aggFunction, schema, valueFieldList]
+  );
+  const estimatedPivotColumns =
+    pivotDistinctCount !== null
+      ? rowFields.size + Math.max(1, validValueFields.length) * pivotDistinctCount
+      : null;
 
   return (
     <Dialog
@@ -253,15 +268,22 @@ export function PivotDialog({
       onClose={onClose}
       title="Pivot Table"
       icon="pivot-table"
-      style={{ width: 780, maxWidth: "90vw" }}
+      className="workbench-dialog pivot-workbench-dialog"
+      style={{ width: 1100, maxWidth: "94vw" }}
       canOutsideClickClose={false}
     >
-      <DialogBody>
-        <div className="aggregate-dialog-content">
+      <DialogBody className="workbench-dialog-body">
+        <div className="workbench-layout pivot-workbench-layout">
+          <div className="workbench-config">
           {/* Row Fields Section */}
-          <div className="aggregate-section">
-            <div className="aggregate-section-header">
-              Row Fields (optional — becomes GROUP BY)
+          <div className="aggregate-section workbench-section">
+            <div className="aggregate-section-header workbench-step-header">
+              <span className="workbench-step-title">
+                <span className="workbench-step-badge">1</span>
+                Row Fields
+                <span className="workbench-muted-label">(optional)</span>
+              </span>
+              <span className="workbench-section-count">{rowFields.size} selected</span>
             </div>
             <ColumnCheckList
               items={schema.map((c) => ({ name: c.column_name }))}
@@ -269,13 +291,44 @@ export function PivotDialog({
               onChange={handleRowFieldsChange}
               emptyMeans="all"
               emptyAllText="No row grouping — values are aggregated across all rows."
+              maxHeight={246}
             />
           </div>
 
+          {/* Aggregate Function Section */}
+          <div className="aggregate-section workbench-section">
+            <div className="aggregate-section-header workbench-step-header">
+              <span className="workbench-step-title">
+                <span className="workbench-step-badge">3</span>
+                Aggregate Function
+              </span>
+            </div>
+            <SoftSelect
+              value={aggFunction}
+              onChange={(e) => {
+                setAggFunction(e.target.value as AggFunc);
+                setResults(null);
+              }}
+              fill
+            >
+              {AGG_FUNCTIONS.map((fn) => (
+                <option key={fn} value={fn}>
+                  {fn}
+                </option>
+              ))}
+            </SoftSelect>
+          </div>
+          </div>
+
+          <div className="workbench-config">
           {/* Pivot Column Section */}
-          <div className="aggregate-section">
-            <div className="aggregate-section-header">
-              Pivot Column (required — values become column headers)
+          <div className="aggregate-section workbench-section">
+            <div className="aggregate-section-header workbench-step-header">
+              <span className="workbench-step-title">
+                <span className="workbench-step-badge">2</span>
+                Pivot Column
+                <span className="workbench-required-label">required</span>
+              </span>
             </div>
             <SoftSelect
               value={pivotColumn}
@@ -295,7 +348,7 @@ export function PivotDialog({
 
             {/* Distinct values preview */}
             {pivotColumn && (
-              <div className="pivot-distinct-preview">
+              <div className="pivot-distinct-preview workbench-distinct-preview">
                 {loadingDistinct ? (
                   <span className="pivot-distinct-loading">
                     Loading distinct values...
@@ -346,9 +399,14 @@ export function PivotDialog({
           </div>
 
           {/* Value Fields Section */}
-          <div className="aggregate-section">
-            <div className="aggregate-section-header">
-              <span>Value Fields (required — columns to aggregate)</span>
+          <div className="aggregate-section workbench-section">
+            <div className="aggregate-section-header workbench-step-header">
+              <span className="workbench-step-title">
+                <span className="workbench-step-badge">4</span>
+                Value Fields
+                <span className="workbench-required-label">required</span>
+              </span>
+              <span className="workbench-section-count">{valueFields.size} selected</span>
             </div>
             <ColumnCheckList
               items={schema.map((c) => ({
@@ -360,28 +418,42 @@ export function PivotDialog({
               isNumeric={(t) => isNumeric(t ?? "")}
               numericHint=" (count/min/max/first only)"
               emptyMeans="invalid"
+              maxHeight={246}
             />
           </div>
 
-          {/* Aggregate Function Section */}
-          <div className="aggregate-section">
-            <div className="aggregate-section-header">
-              Aggregate Function
+          <div className="workbench-preview-card pivot-summary-card">
+            <div className="workbench-preview-title">Preview Summary</div>
+            <div className="workbench-summary-lines">
+              <div>
+                <span>Rows after pivot</span>
+                <strong>{rowFields.size > 0 ? "Grouped" : "1 row"}</strong>
+              </div>
+              <div>
+                <span>Pivot columns</span>
+                <strong>{pivotDistinctCount !== null ? pivotDistinctCount.toLocaleString() : "—"}</strong>
+              </div>
+              <div>
+                <span>Value fields</span>
+                <strong>{validValueFields.length}</strong>
+              </div>
+              <div>
+                <span>Estimated output columns</span>
+                <strong>{estimatedPivotColumns !== null ? estimatedPivotColumns.toLocaleString() : "—"}</strong>
+              </div>
             </div>
-            <SoftSelect
-              value={aggFunction}
-              onChange={(e) => {
-                setAggFunction(e.target.value as AggFunc);
-                setResults(null);
-              }}
-              fill
-            >
-              {AGG_FUNCTIONS.map((fn) => (
-                <option key={fn} value={fn}>
-                  {fn}
-                </option>
+            <div className="workbench-chip-row">
+              {rowFieldList.slice(0, 3).map((field) => (
+                <span key={field} className="workbench-chip">{field}</span>
               ))}
-            </SoftSelect>
+              {rowFieldList.length > 3 && (
+                <span className="workbench-chip workbench-chip-muted">+{rowFieldList.length - 3} rows</span>
+              )}
+              {valueFieldList.slice(0, 3).map((field) => (
+                <span key={field} className="workbench-chip workbench-chip-accent">{aggFunction}({field})</span>
+              ))}
+            </div>
+          </div>
           </div>
 
           {/* Error */}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Button,
   Checkbox,
@@ -190,21 +190,48 @@ export function AggregateDialog({
   }, [buildSQL, onCreateTable, onClose]);
 
   const canRun = selectedCols.size > 0 && selectedFuncs.size > 0 && activeTable;
+  const groupByList = useMemo(() => Array.from(groupByCols), [groupByCols]);
+  const aggregateOutputs = useMemo(() => {
+    const outputs: string[] = [];
+    for (const col of selectedCols) {
+      const colInfo = schema.find((c) => c.column_name === col);
+      const colIsNumeric = colInfo ? isNumeric(colInfo.column_type) : false;
+
+      for (const fn of ALL_FUNCTIONS) {
+        if (!selectedFuncs.has(fn)) continue;
+        if (!colIsNumeric && !NON_NUMERIC_FUNCTIONS.has(fn)) continue;
+        outputs.push(`${fn}(${col})`);
+      }
+    }
+    return outputs;
+  }, [schema, selectedCols, selectedFuncs]);
+  const estimatedColumnCount = groupByCols.size + aggregateOutputs.length;
 
   return (
     <Dialog
       isOpen={isOpen}
       onClose={onClose}
       title="Aggregate Summary"
-      style={{ width: 720, maxWidth: "90vw" }}
+      className="workbench-dialog"
+      style={{ width: 980, maxWidth: "94vw" }}
       canOutsideClickClose={false}
     >
-      <DialogBody>
-        <div className="aggregate-dialog-content">
+      <DialogBody className="workbench-dialog-body">
+        <div className="workbench-layout aggregate-workbench-layout">
+          <div className="workbench-config">
           {/* Group By Section */}
-          <div className="aggregate-section">
-            <div className="aggregate-section-header">Group By (optional)</div>
-            <div className="aggregate-checkbox-list">
+          <div className="aggregate-section workbench-section">
+            <div className="aggregate-section-header workbench-step-header">
+              <span className="workbench-step-title">
+                <span className="workbench-step-badge">1</span>
+                Group By
+                <span className="workbench-muted-label">(optional)</span>
+              </span>
+              {groupByCols.size > 0 && (
+                <Button minimal small text="Clear all" onClick={() => setGroupByCols(new Set())} />
+              )}
+            </div>
+            <div className="aggregate-checkbox-list workbench-chip-grid">
               {allColNames.map((col) => (
                 <Checkbox
                   key={col}
@@ -218,9 +245,15 @@ export function AggregateDialog({
           </div>
 
           {/* Function Selection */}
-          <div className="aggregate-section">
-            <div className="aggregate-section-header">Aggregate Functions</div>
-            <div className="aggregate-func-row">
+          <div className="aggregate-section workbench-section">
+            <div className="aggregate-section-header workbench-step-header">
+              <span className="workbench-step-title">
+                <span className="workbench-step-badge">2</span>
+                Aggregate Functions
+              </span>
+              <span className="workbench-section-count">{selectedFuncs.size} selected</span>
+            </div>
+            <div className="aggregate-func-row workbench-token-row">
               {ALL_FUNCTIONS.map((fn) => (
                 <Checkbox
                   key={fn}
@@ -234,9 +267,13 @@ export function AggregateDialog({
           </div>
 
           {/* Column Selection */}
-          <div className="aggregate-section">
-            <div className="aggregate-section-header">
-              <span>Columns</span>
+          <div className="aggregate-section workbench-section">
+            <div className="aggregate-section-header workbench-step-header">
+              <span className="workbench-step-title">
+                <span className="workbench-step-badge">3</span>
+                Columns to Aggregate
+              </span>
+              <span className="workbench-section-count">{selectedCols.size} selected</span>
             </div>
             <ColumnCheckList
               items={schema.map((col) => ({ name: col.column_name, type: col.column_type }))}
@@ -245,8 +282,71 @@ export function AggregateDialog({
               isNumeric={(type) => isNumeric(type ?? "")}
               numericHint=" (count/count null/min/max only)"
               emptyMeans="invalid"
+              maxHeight={234}
             />
           </div>
+          </div>
+
+          <aside className="workbench-sidecar">
+            <div className="workbench-sidecar-title">Query Summary</div>
+
+            <div className="workbench-summary-block">
+              <div className="workbench-summary-label">Group By</div>
+              <div className="workbench-chip-row">
+                {groupByList.length > 0 ? (
+                  groupByList.map((col) => <span key={col} className="workbench-chip">{col}</span>)
+                ) : (
+                  <span className="workbench-empty-text">All rows</span>
+                )}
+              </div>
+            </div>
+
+            <div className="workbench-summary-block">
+              <div className="workbench-summary-label">Aggregations</div>
+              <div className="workbench-chip-row">
+                {aggregateOutputs.length > 0 ? (
+                  aggregateOutputs.slice(0, 8).map((label) => (
+                    <span key={label} className="workbench-chip workbench-chip-accent">{label}</span>
+                  ))
+                ) : (
+                  <span className="workbench-empty-text">No aggregate columns yet</span>
+                )}
+                {aggregateOutputs.length > 8 && (
+                  <span className="workbench-chip workbench-chip-muted">+{aggregateOutputs.length - 8} more</span>
+                )}
+              </div>
+            </div>
+
+            <div className="workbench-summary-metrics">
+              <div>
+                <span>{groupByCols.size}</span>
+                <small>group columns</small>
+              </div>
+              <div>
+                <span>{aggregateOutputs.length}</span>
+                <small>aggregate columns</small>
+              </div>
+              <div>
+                <span>{estimatedColumnCount}</span>
+                <small>total columns</small>
+              </div>
+            </div>
+
+            <div className="workbench-preview-card">
+              <div className="workbench-preview-title">Result Preview</div>
+              {results ? (
+                <div className="workbench-preview-state success">
+                  {results.length.toLocaleString()} row{results.length !== 1 ? "s" : ""} ready in preview.
+                </div>
+              ) : canRun ? (
+                <div className="workbench-preview-state ready">
+                  Ready to run with {estimatedColumnCount} output column{estimatedColumnCount !== 1 ? "s" : ""}.
+                </div>
+              ) : (
+                <div className="workbench-preview-state">Select at least one function and one column.</div>
+              )}
+            </div>
+          </aside>
 
           {/* Error */}
           {error && (

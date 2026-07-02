@@ -4821,6 +4821,450 @@ button.dg-stats-metric {
 }
 
 // ── Aggregate dialog ──
+// ── Split workbench dialogs ──
+.workbench-dialog {
+  .bp4-dialog-header {
+    min-height: 48px;
+    padding: 0 16px;
+    border-bottom: 1px solid #e6edf3;
+    box-shadow: none;
+
+    .bp4-heading {
+      font-size: 15px;
+      font-weight: 650;
+      color: #1f2d3d;
+    }
+
+    .bp4-icon {
+      color: #5c7080;
+    }
+  }
+
+  .bp4-dialog-footer {
+    margin: 0;
+    padding: 12px 16px;
+    border-top: 1px solid #e6edf3;
+    background: #fbfdff;
+
+    .bp4-dialog-footer-actions {
+      gap: 8px;
+    }
+  }
+}
+
+.workbench-dialog-body.bp4-dialog-body {
+  margin: 0;
+  padding: 0;
+}
+
+.workbench-layout {
+  display: grid;
+  gap: 0;
+  min-height: 440px;
+  background: #fff;
+}
+
+.aggregate-workbench-layout {
+  grid-template-columns: minmax(0, 1.05fr) minmax(288px, 0.78fr);
+}
+
+.pivot-workbench-layout {
+  grid-template-columns: minmax(0, 0.84fr) minmax(0, 1.16fr);
+}
+
+.data-operations-workbench-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.72fr);
+  min-height: 420px;
+}
+
+.workbench-config,
+.workbench-sidecar {
+  min-width: 0;
+  padding: 16px;
+}
+
+.workbench-config {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pivot-workbench-layout {
+  .workbench-config + .workbench-config {
+    border-left: 1px solid #e6edf3;
+  }
+}
+
+.workbench-sidecar {
+  border-left: 1px solid #e6edf3;
+  background: linear-gradient(180deg, #fbfdff 0%, #f7fafc 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.workbench-section {
+  padding-bottom: 2px;
+}
+
+.workbench-step-header {
+  min-height: 24px;
+
+  .bp4-button.bp4-minimal {
+    color: #137cbd;
+    font-weight: 600;
+  }
+}
+
+.workbench-step-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.workbench-step-badge {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #137cbd;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0;
+  flex-shrink: 0;
+}
+
+.workbench-muted-label,
+.workbench-required-label,
+.workbench-section-count {
+  color: #738091;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.workbench-required-label {
+  color: #bf7326;
+}
+
+.workbench-chip-grid,
+.workbench-token-row {
+  border-color: #dce6ee;
+  background: #fbfdff;
+}
+
+.workbench-token-row {
+  gap: 8px;
+
+  .bp4-control.bp4-checkbox {
+    margin: 0;
+    padding: 4px 8px 4px 28px;
+    border: 1px solid #dce6ee;
+    border-radius: var(--control-radius);
+    background: #fff;
+    transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+
+    &:hover {
+      background: #f7fafc;
+      border-color: #cbd9e3;
+    }
+
+    .bp4-control-indicator {
+      margin-top: 4px;
+      margin-left: -22px;
+    }
+
+    &:has(input:checked) {
+      background: rgba(19, 124, 189, 0.06);
+      border-color: rgba(19, 124, 189, 0.28);
+      color: #106ba3;
+      box-shadow: inset 0 0 0 1px rgba(19, 124, 189, 0.08);
+    }
+  }
+}
+
+.workbench-sidecar-title,
+.workbench-preview-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #25384a;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+
+  span {
+    color: #7d8fa1;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+}
+
+.workbench-summary-block {
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e6edf3;
+}
+
+.workbench-summary-block:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.workbench-summary-label {
+  margin-bottom: 8px;
+  color: #66788a;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.workbench-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workbench-chip {
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid #dce6ee;
+  border-radius: var(--control-radius);
+  background: #fff;
+  color: #33495f;
+  font-size: 12px;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workbench-chip-accent {
+  border-color: rgba(19, 124, 189, 0.22);
+  background: rgba(19, 124, 189, 0.06);
+  color: #106ba3;
+}
+
+.workbench-chip-muted {
+  background: #f2f6f9;
+  color: #738091;
+}
+
+.workbench-empty-text {
+  color: #8a9ba8;
+  font-size: 12px;
+}
+
+.workbench-summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e6edf3;
+
+  > div {
+    min-width: 0;
+  }
+
+  span {
+    display: block;
+    color: #1f2d3d;
+    font-size: 24px;
+    font-weight: 650;
+    line-height: 1;
+  }
+
+  small {
+    display: block;
+    margin-top: 4px;
+    color: #738091;
+    font-size: 11px;
+    line-height: 1.25;
+  }
+}
+
+.workbench-preview-card,
+.workbench-impact-card,
+.workbench-empty-preview {
+  border: 1px solid #dce6ee;
+  border-radius: var(--surface-radius);
+  background: #fff;
+}
+
+.workbench-preview-card {
+  padding: 12px;
+}
+
+.workbench-preview-state {
+  margin-top: 10px;
+  color: #66788a;
+  font-size: 12px;
+  line-height: 1.45;
+
+  &.ready {
+    color: #106ba3;
+  }
+
+  &.success {
+    color: #0f9960;
+  }
+}
+
+.workbench-summary-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  > div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    color: #738091;
+    font-size: 12px;
+  }
+
+  strong {
+    min-width: 0;
+    max-width: 62%;
+    color: #25384a;
+    font-size: 12px;
+    font-weight: 650;
+    overflow: hidden;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.pivot-summary-card {
+  margin-top: auto;
+
+  .workbench-chip-row {
+    margin-top: 12px;
+  }
+}
+
+.workbench-distinct-preview {
+  box-shadow: none;
+}
+
+.data-operations-workbench-dialog {
+  .column-op-form {
+    gap: 12px;
+  }
+
+  .bp4-form-group {
+    margin-bottom: 0;
+  }
+}
+
+.workbench-field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.workbench-segmented-radio {
+  .bp4-radio {
+    margin: 0;
+    padding: 7px 12px;
+    border: 1px solid #d8e1e8;
+    border-left-width: 0;
+    background: #fff;
+    color: #394b59;
+    font-size: 12px;
+    text-align: center;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+
+    &:first-child {
+      border-left-width: 1px;
+      border-radius: var(--control-radius) 0 0 var(--control-radius);
+    }
+
+    &:last-child {
+      border-radius: 0 var(--control-radius) var(--control-radius) 0;
+    }
+
+    .bp4-control-indicator {
+      display: none;
+    }
+
+    &:has(input:checked) {
+      border-color: #137cbd;
+      background: #137cbd;
+      color: #fff;
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+    }
+  }
+}
+
+.data-operation-sidecar {
+  .op-preview-error {
+    margin-bottom: 0;
+  }
+}
+
+.workbench-preview-table {
+  border: 1px solid #dce6ee;
+  border-radius: var(--surface-radius);
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  background: #fff;
+}
+
+.workbench-impact-card,
+.workbench-empty-preview {
+  padding: 14px;
+
+  strong {
+    display: block;
+    color: #1f2d3d;
+    font-size: 20px;
+    line-height: 1.1;
+  }
+
+  span {
+    display: block;
+    margin-top: 6px;
+    color: #66788a;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+}
+
+@supports not selector(:has(*)) {
+  .workbench-token-row .bp4-control.bp4-checkbox,
+  .workbench-segmented-radio .bp4-radio {
+    &:hover {
+      border-color: #cbd9e3;
+    }
+  }
+}
+
+@media (max-width: 920px) {
+  .aggregate-workbench-layout,
+  .pivot-workbench-layout,
+  .data-operations-workbench-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workbench-sidecar,
+  .pivot-workbench-layout .workbench-config + .workbench-config {
+    border-left: none;
+    border-top: 1px solid #e6edf3;
+  }
+}
+
 .aggregate-dialog-content {
   display: flex;
   flex-direction: column;
