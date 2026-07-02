@@ -1000,8 +1000,8 @@ export function App(): React.ReactElement {
   }, [filterPanelOpen, filterPanelMounted]);
 
   useEffect(() => {
-    if (jsonWorkspaceActive || comparisonActive) setFilterPanelOpen(false);
-  }, [jsonWorkspaceActive, comparisonActive]);
+    if (jsonWorkspaceActive) setFilterPanelOpen(false);
+  }, [jsonWorkspaceActive]);
 
   // When active table changes, refresh schema and reset columns
   useEffect(() => {
@@ -1009,6 +1009,7 @@ export function App(): React.ReactElement {
       setSchema([]);
       setViewState((prev) => ({ ...prev, visibleColumns: [], columnOrder: [] }));
       setComparisonConfig(null);
+      setFilterPanelOpen(false);
       return;
     }
 
@@ -1016,6 +1017,7 @@ export function App(): React.ReactElement {
     if (currentTable && !currentTable.filePath.startsWith("(") && isJsonFilePath(currentTable.filePath)) {
       setSchema([]);
       setComparisonConfig(null);
+      setFilterPanelOpen(false);
       setViewState((prev) => ({
         ...prev,
         visibleColumns: [],
@@ -1045,6 +1047,7 @@ export function App(): React.ReactElement {
     const tableNames = new Set(tables.map((table) => table.tableName));
     if (!activeTable || comparisonConfig.baseTable !== activeTable || !tableNames.has(comparisonConfig.baseTable)) {
       setComparisonConfig(null);
+      setFilterPanelOpen(false);
     }
   }, [activeTable, comparisonConfig, tables]);
 
@@ -2253,6 +2256,7 @@ export function App(): React.ReactElement {
               onSelectTable={(name) => {
                 setActiveTable(name);
                 setComparisonConfig(null);
+                setFilterPanelOpen(false);
                 setViewState((prev) => ({
                   ...prev,
                   filters: { logic: "AND", children: [] },
@@ -2312,8 +2316,14 @@ export function App(): React.ReactElement {
                   baseSchema={schema}
                   config={comparisonConfig}
                   dataVersion={dataVersion}
+                  filterPanelOpen={filterPanelOpen}
+                  filterPanelMounted={filterPanelMounted}
                   onConfigChange={setComparisonConfig}
-                  onExit={() => setComparisonConfig(null)}
+                  onFilterPanelOpenChange={setFilterPanelOpen}
+                  onExit={() => {
+                    setComparisonConfig(null);
+                    setFilterPanelOpen(false);
+                  }}
                   onOpenFiles={handleChooseFiles}
                 />
               ) : (
@@ -2462,10 +2472,14 @@ export function App(): React.ReactElement {
         groupCount={pivotActive ? pivotGroupCount : 0}
         filterPanelOpen={filterPanelOpen}
         onToggleFilterPanel={() => setFilterPanelOpen((v) => !v)}
-        activeFilterCount={countConditions(viewState.filters)}
+        activeFilterCount={
+          comparisonActive && comparisonConfig
+            ? countConditions(comparisonConfig.filters)
+            : countConditions(viewState.filters)
+        }
         sidebarVisible={sidebarVisible}
         updateNotice={<UpdateNotice />}
-        filterEnabled={!jsonWorkspaceActive && !comparisonActive}
+        filterEnabled={!jsonWorkspaceActive}
       />
       <CombineDialog
         isOpen={combineDialogOpen}

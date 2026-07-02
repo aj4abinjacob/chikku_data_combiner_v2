@@ -270,6 +270,7 @@ export interface ComparisonViewConfig {
   viewMode: ComparisonViewMode;
   filters: FilterGroup;
   freezeKeys: boolean;
+  includeCompareOnlyRows?: boolean;
   saveNameMode: ComparisonSaveNameMode;
   saveAffix: string;
 }

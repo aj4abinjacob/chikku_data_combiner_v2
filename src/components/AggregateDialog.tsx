@@ -39,6 +39,14 @@ function escapeIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
+function compareColumnNamesCaseless(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { sensitivity: "accent", numeric: true }) || a.localeCompare(b);
+}
+
+function sortedColumnNames(columns: Iterable<string>): string[] {
+  return Array.from(columns).sort(compareColumnNamesCaseless);
+}
+
 interface AggregateDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -83,7 +91,16 @@ export function AggregateDialog({
     }
   }, [isOpen, activeTable]);
 
-  const allColNames = schema.map((c) => c.column_name);
+  const allColNames = useMemo(
+    () => sortedColumnNames(schema.map((c) => c.column_name)),
+    [schema]
+  );
+  const aggregateColumnItems = useMemo(
+    () => [...schema]
+      .sort((a, b) => compareColumnNamesCaseless(a.column_name, b.column_name))
+      .map((col) => ({ name: col.column_name, type: col.column_type })),
+    [schema]
+  );
 
   const toggleGroupBy = useCallback((col: string) => {
     setGroupByCols((prev) => {
@@ -117,12 +134,12 @@ export function AggregateDialog({
     const selectParts: string[] = [];
 
     // Group By columns first
-    for (const col of groupByCols) {
+    for (const col of sortedColumnNames(groupByCols)) {
       selectParts.push(escapeIdent(col));
     }
 
     // Aggregate expressions
-    for (const col of selectedCols) {
+    for (const col of sortedColumnNames(selectedCols)) {
       const colInfo = schema.find((c) => c.column_name === col);
       const colIsNumeric = colInfo ? isNumeric(colInfo.column_type) : false;
 
@@ -152,7 +169,7 @@ export function AggregateDialog({
 
     let sql = `SELECT ${selectParts.join(", ")} FROM ${escapeIdent(activeTable)}`;
     if (groupByCols.size > 0) {
-      sql += ` GROUP BY ${[...groupByCols].map(escapeIdent).join(", ")}`;
+      sql += ` GROUP BY ${sortedColumnNames(groupByCols).map(escapeIdent).join(", ")}`;
     }
 
     return sql;
@@ -190,10 +207,10 @@ export function AggregateDialog({
   }, [buildSQL, onCreateTable, onClose]);
 
   const canRun = selectedCols.size > 0 && selectedFuncs.size > 0 && activeTable;
-  const groupByList = useMemo(() => Array.from(groupByCols), [groupByCols]);
+  const groupByList = useMemo(() => sortedColumnNames(groupByCols), [groupByCols]);
   const aggregateOutputs = useMemo(() => {
     const outputs: string[] = [];
-    for (const col of selectedCols) {
+    for (const col of sortedColumnNames(selectedCols)) {
       const colInfo = schema.find((c) => c.column_name === col);
       const colIsNumeric = colInfo ? isNumeric(colInfo.column_type) : false;
 
@@ -276,7 +293,7 @@ export function AggregateDialog({
               <span className="workbench-section-count">{selectedCols.size} selected</span>
             </div>
             <ColumnCheckList
-              items={schema.map((col) => ({ name: col.column_name, type: col.column_type }))}
+              items={aggregateColumnItems}
               selected={selectedCols}
               onChange={handleColsChange}
               isNumeric={(type) => isNumeric(type ?? "")}

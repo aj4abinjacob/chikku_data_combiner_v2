@@ -239,7 +239,9 @@ html, body, #root {
   border-bottom: 1px solid #d8e1e8;
   color: #25384a;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-user-select: none;
   user-select: none;
+  cursor: default;
 }
 
 .app-window-titlebar-name {
@@ -251,6 +253,8 @@ html, body, #root {
   font-size: 12px;
   font-weight: 700;
   pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .app-window-titlebar-file {
@@ -266,6 +270,8 @@ html, body, #root {
   font-weight: 600;
   text-align: center;
   pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 // ── Main layout: sidebar + data grid ──
@@ -5399,8 +5405,29 @@ button.dg-stats-metric {
     border-color: rgba(19, 124, 189, 0.2);
   }
 
+  &.bp4-control:not(.bp4-align-right) {
+    padding: 4px 8px;
+
+    .bp4-control-indicator {
+      margin: 0 10px 0 0;
+    }
+  }
+
   .bp4-control-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    line-height: 1;
+  }
+
+  &.bp4-checkbox input:checked ~ .bp4-control-indicator::before,
+  &.bp4-checkbox input:indeterminate ~ .bp4-control-indicator::before {
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 16px 16px;
   }
 
   .aggregate-col-name {

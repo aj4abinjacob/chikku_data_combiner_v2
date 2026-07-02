@@ -171,6 +171,7 @@ export function ExportDialog({
               selected={selectedTables}
               onChange={setSelectedTables}
               emptyMeans="invalid"
+              sortItems={false}
             />
           )}
         </div>

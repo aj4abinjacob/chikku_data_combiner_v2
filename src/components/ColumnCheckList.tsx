@@ -49,12 +49,18 @@ export interface ColumnCheckListProps {
   emptyAllText?: string;
   renderItemHint?: (item: ColumnCheckItem) => React.ReactNode;
   renderItemBadge?: (item: ColumnCheckItem, isSelected: boolean) => React.ReactNode;
+  /** Sort rows alphabetically by label. Disable for non-column lists where source order matters. */
+  sortItems?: boolean;
   maxHeight?: number;
   className?: string;
 }
 
 const DEFAULT_NUMERIC_HINT = " (count/count null/min/max only)";
 const SEARCH_THRESHOLD = 8;
+
+function compareNamesCaseless(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { sensitivity: "accent", numeric: true }) || a.localeCompare(b);
+}
 
 export function ColumnCheckList({
   items,
@@ -72,18 +78,23 @@ export function ColumnCheckList({
   emptyAllText = "All items will be used.",
   renderItemHint,
   renderItemBadge,
+  sortItems = true,
   maxHeight = 200,
   className,
 }: ColumnCheckListProps) {
   const [query, setQuery] = React.useState("");
 
   const showSearch = search ?? items.length > SEARCH_THRESHOLD;
+  const orderedItems = React.useMemo(
+    () => sortItems ? [...items].sort((a, b) => compareNamesCaseless(a.name, b.name)) : items,
+    [items, sortItems]
+  );
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((it) => it.name.toLowerCase().includes(q));
-  }, [items, query]);
+    if (!q) return orderedItems;
+    return orderedItems.filter((it) => it.name.toLowerCase().includes(q));
+  }, [orderedItems, query]);
 
   const toggle = React.useCallback(
     (name: string) => {
@@ -96,7 +107,7 @@ export function ColumnCheckList({
   );
 
   const selectAll = React.useCallback(() => {
-    const source = selectAllScope === "filtered" ? filtered : items;
+    const source = selectAllScope === "filtered" ? filtered : orderedItems;
     if (selectAllMode === "merge") {
       const next = new Set(selected);
       source.forEach((it) => next.add(it.name));
@@ -104,11 +115,11 @@ export function ColumnCheckList({
     } else {
       onChange(new Set(source.map((it) => it.name)));
     }
-  }, [filtered, items, onChange, selectAllMode, selectAllScope, selected]);
+  }, [filtered, orderedItems, onChange, selectAllMode, selectAllScope, selected]);
   const deselectAll = React.useCallback(() => onChange(new Set()), [onChange]);
   const selectNumeric = React.useCallback(
-    () => onChange(new Set(items.filter((it) => isNumeric?.(it.type)).map((it) => it.name))),
-    [items, isNumeric, onChange]
+    () => onChange(new Set(orderedItems.filter((it) => isNumeric?.(it.type)).map((it) => it.name))),
+    [orderedItems, isNumeric, onChange]
   );
 
   const handleItemKeyDown = React.useCallback(

@@ -47,6 +47,7 @@ export function ExcelSheetPickerDialog({
             selected={selected}
             onChange={setSelected}
             emptyMeans="invalid"
+            sortItems={false}
           />
         </div>
       </div>
