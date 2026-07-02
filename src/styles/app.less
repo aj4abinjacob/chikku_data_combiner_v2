@@ -388,6 +388,17 @@ html, body, #root {
     background: #f7f9fb;
     padding-bottom: 4px;
 
+    &::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: -8px;
+      height: 8px;
+      background: inherit;
+      pointer-events: none;
+    }
+
     .bp4-input-group .bp4-input {
       box-shadow: none;
       border: 1px solid #d8e1e8;
