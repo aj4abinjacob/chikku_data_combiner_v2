@@ -140,14 +140,15 @@ jobs:
       - name: Copy GitHub release notes into updater feed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
           mkdir -p /tmp/chikku-updater
-          gh release download "$TAG_NAME" --pattern latest.json --dir /tmp/chikku-updater
+          gh release download "$TAG_NAME" --repo "$REPO" --pattern latest.json --dir /tmp/chikku-updater
 
-          release_body="$(gh release view "$TAG_NAME" --json body --jq '.body')"
+          release_body="$(gh release view "$TAG_NAME" --repo "$REPO" --json body --jq '.body')"
           if [ -z "$release_body" ] || [ "$release_body" = "null" ]; then
             echo "GitHub release body is empty; refusing to publish blank updater notes." >&2
             exit 1
@@ -164,4 +165,4 @@ jobs:
             /tmp/chikku-updater/latest.json > /tmp/chikku-updater/latest.with-notes.json
           mv /tmp/chikku-updater/latest.with-notes.json /tmp/chikku-updater/latest.json
 
-          gh release upload "$TAG_NAME" /tmp/chikku-updater/latest.json --clobber
+          gh release upload "$TAG_NAME" /tmp/chikku-updater/latest.json --repo "$REPO" --clobber
