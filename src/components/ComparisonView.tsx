@@ -16,10 +16,17 @@ import {
   ComparisonTableConfig,
   ComparisonViewConfig,
   ComparisonViewMode,
+  FilterGroup,
+  FilterNode,
   LoadedTable,
+  countConditions,
+  hasActiveFilters,
+  isColumnComparisonOperator,
+  isFilterGroup,
 } from "../types";
-import { escapeIdent } from "../utils/sqlBuilder";
+import { buildFilterGroupClause, escapeIdent } from "../utils/sqlBuilder";
 import { SearchableColumnSelect } from "./SearchableColumnSelect";
+import { FilterPanel } from "./FilterPanel";
 
 const ROW_HEIGHT = 28;
 const CHUNK_SIZE = 700;
@@ -29,6 +36,8 @@ const VALUE_COL_WIDTH = 136;
 const DIFF_COL_WIDTH = 38;
 const EXTRA_COL_WIDTH = 150;
 const COMPARE_COLORS = ["#137cbd", "#0f766e", "#d9822b", "#8f398f", "#6f3cc3"];
+const COMPARISON_ROWID_ALIAS = "__cmp_rowid";
+const EMPTY_FILTERS: FilterGroup = { logic: "AND", children: [] };
 
 let comparisonIdCounter = 0;
 
@@ -49,6 +58,8 @@ interface TargetMeta {
 interface ComparisonColumnDef {
   key: string;
   label: string;
+  filterLabel: string;
+  columnType: string;
   width: number;
   kind: ComparisonColumnKind;
   groupKey: string;
@@ -83,8 +94,7 @@ interface PairStatDefinition {
   color: string;
   diffAlias: string;
   missingAlias: string;
-  diffCondition: string;
-  missingCondition: string;
+  statusKey: string;
 }
 
 interface TargetStatDefinition {
@@ -130,10 +140,12 @@ interface ComparisonModel {
   selectSql: string;
   exportSql: string;
   countSql: string;
+  unfilteredCountSql: string;
   statsSql: string;
   queryKey: string;
   totalWidth: number;
   canQuery: boolean;
+  filterColumns: ColumnInfo[];
   pairStats: PairStatDefinition[];
   targetStats: TargetStatDefinition[];
   diffColumnCount: number;
@@ -168,28 +180,42 @@ function makePairId(tableName: string, baseColumn: string, compareColumn: string
   return `pair_${sanitizeToken(tableName)}_${sanitizeToken(baseColumn)}_${sanitizeToken(compareColumn)}`;
 }
 
-function makeKeyPairId(tableName: string, baseColumn: string, compareColumn: string): string {
-  return `key_${sanitizeToken(tableName)}_${sanitizeToken(baseColumn)}_${sanitizeToken(compareColumn)}`;
-}
-
-function isLikelyKeyColumn(columnName: string): boolean {
-  const name = normalizeName(columnName);
-  return (
-    name === "id" ||
-    name === "uuid" ||
-    name.endsWith("_id") ||
-    name.endsWith("id") ||
-    name.endsWith("_key") ||
-    name.includes("key")
-  );
-}
-
-function isLikelySecondaryKeyColumn(columnName: string): boolean {
-  return /(date|time|number|num|no|code|ref|sku)$/i.test(columnName);
-}
-
 function getColumnNames(schema: ColumnInfo[]): string[] {
   return schema.map((c) => c.column_name);
+}
+
+function getColumnType(schema: ColumnInfo[], columnName: string): string {
+  return schema.find((c) => c.column_name === columnName)?.column_type ?? "VARCHAR";
+}
+
+function makeFilterColumn(def: ComparisonColumnDef): ColumnInfo {
+  return {
+    column_name: def.key,
+    display_name: def.filterLabel,
+    column_type: def.columnType,
+    null: "",
+    key: null,
+    default: null,
+    extra: null,
+  };
+}
+
+function pruneFiltersToColumns(group: FilterGroup, columnNames: Set<string>): FilterGroup {
+  const children: FilterNode[] = [];
+
+  for (const child of group.children) {
+    if (isFilterGroup(child)) {
+      const nested = pruneFiltersToColumns(child, columnNames);
+      if (nested.children.length > 0) children.push(nested);
+      continue;
+    }
+
+    if (!columnNames.has(child.column)) continue;
+    if (isColumnComparisonOperator(child.operator) && child.value && !columnNames.has(child.value)) continue;
+    children.push(child);
+  }
+
+  return { ...group, children };
 }
 
 function getCommonColumns(leftSchema: ColumnInfo[], rightSchema: ColumnInfo[]): string[] {
@@ -199,34 +225,6 @@ function getCommonColumns(leftSchema: ColumnInfo[], rightSchema: ColumnInfo[]): 
 
 function hasColumn(schema: ColumnInfo[], columnName: string): boolean {
   return schema.some((c) => c.column_name === columnName);
-}
-
-function pickDefaultKeyPairs(baseSchema: ColumnInfo[], compareTable: LoadedTable): ComparisonKeyPair[] {
-  const common = getCommonColumns(baseSchema, compareTable.schema);
-  if (common.length === 0) {
-    return [{ id: nextId("key"), baseColumn: "", compareColumn: "" }];
-  }
-
-  const selected: string[] = [];
-  for (const name of common) {
-    if (isLikelyKeyColumn(name)) selected.push(name);
-    if (selected.length >= 2) break;
-  }
-
-  if (selected.length === 1) {
-    const secondary = common.find((name) => !selected.includes(name) && isLikelySecondaryKeyColumn(name));
-    if (secondary) selected.push(secondary);
-  }
-
-  if (selected.length === 0) {
-    selected.push(common[0]);
-  }
-
-  return selected.map((name) => ({
-    id: makeKeyPairId(compareTable.tableName, name, name),
-    baseColumn: name,
-    compareColumn: name,
-  }));
 }
 
 function pickDefaultColumnPairs(
@@ -249,7 +247,7 @@ export function createDefaultComparisonTableConfig(
   baseSchema: ColumnInfo[],
   compareTable: LoadedTable
 ): ComparisonTableConfig {
-  const keyPairs = pickDefaultKeyPairs(baseSchema, compareTable);
+  const keyPairs = [{ id: nextId("key"), baseColumn: "", compareColumn: "" }];
   return {
     id: `target_${sanitizeToken(compareTable.tableName)}`,
     tableName: compareTable.tableName,
@@ -267,6 +265,7 @@ export function createDefaultComparisonConfig(
     baseTable: baseTableName,
     compareTables: compareTable ? [createDefaultComparisonTableConfig(baseSchema, compareTable)] : [],
     viewMode: "pairs",
+    filters: { logic: "AND", children: [] },
     freezeKeys: true,
     saveNameMode: "suffix",
     saveAffix: "_{table}",
@@ -389,7 +388,7 @@ function buildComparisonModel(
   const addColumn = (def: ComparisonColumnDef, expr: string, exportAlias?: string) => {
     columns.push(def);
     selectedExpressions.push(`${expr} AS ${escapeIdent(def.key)}`);
-    exportExpressions.push(`${expr} AS ${escapeIdent(exportAlias ?? def.label)}`);
+    exportExpressions.push(`${escapeIdent(def.key)} AS ${escapeIdent(exportAlias ?? def.label)}`);
   };
 
   for (const keyColumn of keyColumns) {
@@ -397,6 +396,8 @@ function buildComparisonModel(
       {
         key: `key_${sanitizeToken(keyColumn)}`,
         label: keyColumn,
+        filterLabel: `Key: ${keyColumn}`,
+        columnType: getColumnType(baseSchema, keyColumn),
         width: KEY_COL_WIDTH,
         kind: "key",
         groupKey: "keys",
@@ -420,6 +421,8 @@ function buildComparisonModel(
       {
         key: baseKey,
         label: "Base",
+        filterLabel: `Base: ${baseColumn}`,
+        columnType: getColumnType(baseSchema, baseColumn),
         width: VALUE_COL_WIDTH,
         kind: "base",
         groupKey,
@@ -439,14 +442,14 @@ function buildComparisonModel(
 
       const statusKey = `diff_${sanitizeToken(target.config.id)}_${sanitizeToken(baseColumn)}_${sanitizeToken(pair.compareColumn)}`;
       const compareKey = `compare_${sanitizeToken(target.config.id)}_${sanitizeToken(baseColumn)}_${sanitizeToken(pair.compareColumn)}`;
-      const condition = diffExpr(baseColumn, target, pair.compareColumn);
-      const missing = missingExpr(target);
       const outputName = buildOutputName(baseColumn, target.table.tableName, config);
 
       addColumn(
         {
           key: statusKey,
           label: "vs",
+          filterLabel: `Status: ${baseColumn} (${target.roleLabel})`,
+          columnType: "comparison_status",
           width: DIFF_COL_WIDTH,
           kind: "diff",
           groupKey,
@@ -467,6 +470,8 @@ function buildComparisonModel(
         {
           key: compareKey,
           label: target.roleLabel,
+          filterLabel: `${target.roleLabel}: ${pair.compareColumn}`,
+          columnType: getColumnType(target.schema, pair.compareColumn),
           width: VALUE_COL_WIDTH,
           kind: "compare",
           groupKey,
@@ -494,8 +499,7 @@ function buildComparisonModel(
         color: target.color,
         diffAlias: `diff_${pairStats.length}`,
         missingAlias: `missing_${pairStats.length}`,
-        diffCondition: condition,
-        missingCondition: missing,
+        statusKey,
       });
     }
   }
@@ -509,6 +513,8 @@ function buildComparisonModel(
         {
           key: `extra_${sanitizeToken(column)}`,
           label: column,
+          filterLabel: `Current: ${column}`,
+          columnType: getColumnType(baseSchema, column),
           width: EXTRA_COL_WIDTH,
           kind: "extra",
           groupKey: "current",
@@ -581,14 +587,15 @@ function buildComparisonModel(
   });
   const fromJoin = `FROM ${escapeIdent(baseTableName)} b ${selectTargets.join(" ")}`;
   const differenceClause = pairStats.length > 0
-    ? pairStats.map((stat) => stat.diffCondition).join(" OR ")
+    ? pairStats.map((stat) => {
+      const target = activeTargets.find((candidate) => candidate.config.id === stat.targetId);
+      return target ? diffExpr(stat.baseColumn, target, stat.compareColumn) : "";
+    }).filter(Boolean).join(" OR ")
     : "";
   const whereClause = config.viewMode === "differences" && differenceClause
     ? ` WHERE ${differenceClause}`
     : "";
-  const orderClause = " ORDER BY b.rowid";
   const selectList = selectedExpressions.length > 0 ? selectedExpressions.join(", ") : "b.*";
-  const exportList = exportExpressions.length > 0 ? exportExpressions.join(", ") : "b.*";
 
   for (const target of activeTargets) {
     targetStats.push({
@@ -601,14 +608,37 @@ function buildComparisonModel(
     });
   }
 
+  const filterColumns = columns.map(makeFilterColumn);
+  const filterColumnNames = new Set(filterColumns.map((column) => column.column_name));
+  const activeFilters = pruneFiltersToColumns(config.filters ?? EMPTY_FILTERS, filterColumnNames);
+  const filterClause = buildFilterGroupClause(activeFilters);
+  const filterWhereClause = filterClause ? ` WHERE ${filterClause}` : "";
+  const hiddenStatExpressions = targetStats.map((target) =>
+    `CASE WHEN ${target.presentExpr} THEN 1 ELSE 0 END AS ${escapeIdent(target.matchedAlias)}`
+  );
+  const innerSelectParts = [
+    selectList,
+    `b.rowid AS ${escapeIdent(COMPARISON_ROWID_ALIAS)}`,
+    ...hiddenStatExpressions,
+  ].filter(Boolean);
+  const comparisonInnerSql = `SELECT ${innerSelectParts.join(", ")} ${fromJoin}${whereClause}`;
+  const outerSelectList = columns.length > 0
+    ? columns.map((column) => escapeIdent(column.key)).join(", ")
+    : "*";
+  const outerExportList = exportExpressions.length > 0 ? exportExpressions.join(", ") : "*";
+  const orderClause = ` ORDER BY cmp.${escapeIdent(COMPARISON_ROWID_ALIAS)}`;
+
   const totalWidth = ROW_NUM_WIDTH + columns.reduce((sum, column) => sum + column.width, 0);
-  const canQuery = activeTargets.length > 0 && keyColumns.length > 0 && columns.length > 0;
+  const allTargetsConfigured = targetMetas.length > 0
+    && targetMetas.length === config.compareTables.length
+    && targetMetas.every((target) => target.validKeyPairs.length > 0 && target.validColumnPairs.length > 0);
+  const canQuery = allTargetsConfigured && activeTargets.length > 0 && keyColumns.length > 0 && columns.length > 0;
   const statsExpressions = [
     "COUNT(*) AS total_rows",
-    ...targetStats.map((target) => `SUM(CASE WHEN ${target.presentExpr} THEN 1 ELSE 0 END) AS ${escapeIdent(target.matchedAlias)}`),
+    ...targetStats.map((target) => `SUM(${escapeIdent(target.matchedAlias)}) AS ${escapeIdent(target.matchedAlias)}`),
     ...pairStats.flatMap((stat) => [
-      `SUM(CASE WHEN ${stat.diffCondition} THEN 1 ELSE 0 END) AS ${escapeIdent(stat.diffAlias)}`,
-      `SUM(CASE WHEN ${stat.missingCondition} THEN 1 ELSE 0 END) AS ${escapeIdent(stat.missingAlias)}`,
+      `SUM(CASE WHEN ${escapeIdent(stat.statusKey)} IN ('different', 'missing') THEN 1 ELSE 0 END) AS ${escapeIdent(stat.diffAlias)}`,
+      `SUM(CASE WHEN ${escapeIdent(stat.statusKey)} = 'missing' THEN 1 ELSE 0 END) AS ${escapeIdent(stat.missingAlias)}`,
     ]),
   ];
 
@@ -617,20 +647,23 @@ function buildComparisonModel(
     headerGroups,
     targetMetas,
     keyColumns,
-    selectSql: `SELECT ${selectList} ${fromJoin}${whereClause}${orderClause}`,
-    exportSql: `SELECT ${exportList} ${fromJoin}${whereClause}${orderClause}`,
-    countSql: `SELECT COUNT(*) AS total ${fromJoin}${whereClause}`,
-    statsSql: `SELECT ${statsExpressions.join(", ")} ${fromJoin}`,
+    selectSql: `SELECT ${outerSelectList} FROM (${comparisonInnerSql}) cmp${filterWhereClause}${orderClause}`,
+    exportSql: `SELECT ${outerExportList} FROM (${comparisonInnerSql}) cmp${filterWhereClause}${orderClause}`,
+    countSql: `SELECT COUNT(*) AS total FROM (${comparisonInnerSql}) cmp${filterWhereClause}`,
+    unfilteredCountSql: `SELECT COUNT(*) AS total FROM (${comparisonInnerSql}) cmp`,
+    statsSql: `SELECT ${statsExpressions.join(", ")} FROM (${comparisonInnerSql}) cmp${filterWhereClause}`,
     queryKey: JSON.stringify({
       baseTableName,
       compareTables: config.compareTables,
       viewMode: config.viewMode,
+      filters: activeFilters,
       saveNameMode: config.saveNameMode,
       saveAffix: config.saveAffix,
       schema: baseColumns,
     }),
     totalWidth,
     canQuery,
+    filterColumns,
     pairStats,
     targetStats,
     diffColumnCount: pairStats.length,
@@ -639,6 +672,7 @@ function buildComparisonModel(
 
 function useComparisonCache(model: ComparisonModel, dataVersion: number) {
   const [totalRows, setTotalRows] = useState(0);
+  const [unfilteredRows, setUnfilteredRows] = useState(0);
   const cacheRef = useRef<Map<number, any[]>>(new Map());
   const loadingRef = useRef<Set<number>>(new Set());
   const generationRef = useRef(0);
@@ -658,19 +692,27 @@ function useComparisonCache(model: ComparisonModel, dataVersion: number) {
   useEffect(() => {
     if (!model.canQuery) {
       setTotalRows(0);
+      setUnfilteredRows(0);
       return;
     }
     const gen = generationRef.current;
-    window.api.query(model.countSql)
-      .then((rows) => {
+    Promise.all([
+      window.api.query(model.countSql),
+      window.api.query(model.unfilteredCountSql),
+    ])
+      .then(([rows, unfilteredRowsResult]) => {
         if (generationRef.current !== gen) return;
         setTotalRows(toCount(rows[0]?.total));
+        setUnfilteredRows(toCount(unfilteredRowsResult[0]?.total));
       })
       .catch((err) => {
         console.error("Comparison count error:", err);
-        if (generationRef.current === gen) setTotalRows(0);
+        if (generationRef.current === gen) {
+          setTotalRows(0);
+          setUnfilteredRows(0);
+        }
       });
-  }, [model.countSql, model.canQuery, dataVersion]);
+  }, [model.countSql, model.unfilteredCountSql, model.canQuery, dataVersion]);
 
   const fetchChunk = useCallback((chunkIndex: number, gen: number) => {
     if (!model.canQuery) return;
@@ -707,7 +749,7 @@ function useComparisonCache(model: ComparisonModel, dataVersion: number) {
     return chunk[absoluteIndex % CHUNK_SIZE] ?? null;
   }, []);
 
-  return { totalRows, ensureRange, getRow };
+  return { totalRows, unfilteredRows, ensureRange, getRow };
 }
 
 export function ComparisonView({
@@ -725,6 +767,7 @@ export function ComparisonView({
   const [stats, setStats] = useState<ComparisonStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const model = useMemo(
@@ -732,7 +775,7 @@ export function ComparisonView({
     [tables, baseTableName, baseSchema, config]
   );
 
-  const { totalRows, ensureRange, getRow } = useComparisonCache(model, dataVersion);
+  const { totalRows, unfilteredRows, ensureRange, getRow } = useComparisonCache(model, dataVersion);
 
   const virtualizer = useVirtualizer({
     count: totalRows,
@@ -825,6 +868,19 @@ export function ComparisonView({
     onConfigChange({ ...config, ...patch });
   }, [config, onConfigChange]);
 
+  const comparisonFilters = config.filters ?? EMPTY_FILTERS;
+  const comparisonFilterColumnNames = useMemo(
+    () => model.filterColumns.map((column) => column.column_name),
+    [model.filterColumns]
+  );
+  const comparisonFilterViewState = useMemo(() => ({
+    visibleColumns: comparisonFilterColumnNames,
+    columnOrder: comparisonFilterColumnNames,
+    filters: comparisonFilters,
+    sortColumns: [],
+    pivotConfig: null,
+  }), [comparisonFilterColumnNames, comparisonFilters]);
+
   const updateTarget = useCallback((
     targetId: string,
     updater: (target: ComparisonTableConfig) => ComparisonTableConfig
@@ -836,6 +892,20 @@ export function ComparisonView({
       ),
     });
   }, [config, onConfigChange]);
+
+  useEffect(() => {
+    const prunedFilters = pruneFiltersToColumns(comparisonFilters, new Set(comparisonFilterColumnNames));
+    if (JSON.stringify(prunedFilters) !== JSON.stringify(comparisonFilters)) {
+      updateConfig({ filters: prunedFilters });
+    }
+  }, [comparisonFilters, comparisonFilterColumnNames, updateConfig]);
+
+  const handleComparisonFiltersChange = useCallback((filters: FilterGroup) => {
+    updateConfig({ filters });
+  }, [updateConfig]);
+
+  const noopAsync = useCallback(async () => undefined, []);
+  const noop = useCallback(() => undefined, []);
 
   const handleAddTarget = useCallback(() => {
     const table = availableTargets.find((candidate) => candidate.tableName === targetToAdd) ?? availableTargets[0];
@@ -935,6 +1005,8 @@ export function ComparisonView({
   }, [exporting, model.canQuery, model.exportSql]);
 
   const virtualRows = virtualizer.getVirtualItems();
+  const activeFilterCount = countConditions(comparisonFilters);
+  const filtersActive = hasActiveFilters(comparisonFilters);
   const diffRows = stats?.pairs.reduce((sum, pair) => sum + pair.diffCount, 0) ?? 0;
   const statRows = stats?.pairs.reduce((sum, pair) => sum + pair.totalRows, 0) ?? 0;
   const overallDiff = percent(diffRows, statRows);
@@ -1009,12 +1081,57 @@ export function ComparisonView({
           />
         </ButtonGroup>
         <div className="comparison-subtoolbar-spacer" />
+        <Button
+          icon="filter"
+          text={activeFilterCount > 0 ? `Filters (${activeFilterCount})` : "Filters"}
+          active={filterPanelOpen}
+          disabled={!model.canQuery || model.filterColumns.length === 0}
+          onClick={() => setFilterPanelOpen((open) => !open)}
+          small
+        />
         <span className="comparison-row-summary">
-          {config.viewMode === "differences"
-            ? `${totalRows.toLocaleString()} rows with differences`
-            : `${totalRows.toLocaleString()} rows shown`}
+          {filtersActive
+            ? `${totalRows.toLocaleString()} of ${unfilteredRows.toLocaleString()} rows shown`
+            : config.viewMode === "differences"
+              ? `${totalRows.toLocaleString()} rows with differences`
+              : `${totalRows.toLocaleString()} rows shown`}
         </span>
       </div>
+
+      {filterPanelOpen && (
+        <FilterPanel
+          columns={model.filterColumns}
+          activeFilters={comparisonFilters}
+          activeTable={null}
+          onApplyFilters={handleComparisonFiltersChange}
+          colOpsSteps={[]}
+          undoStrategy="per-step"
+          onColOpApply={noopAsync}
+          onColOpUndo={noopAsync}
+          onColOpRevertAll={noopAsync}
+          onColOpClearAll={noopAsync}
+          rowOpsSteps={[]}
+          rowOpsUndoStrategy="per-step"
+          onRowOpApply={noopAsync}
+          onRowOpUndo={noopAsync}
+          onRowOpRevertAll={noopAsync}
+          onRowOpClearAll={noopAsync}
+          totalRows={totalRows}
+          unfilteredRows={filtersActive ? unfilteredRows : null}
+          savedViews={[]}
+          currentViewState={comparisonFilterViewState}
+          onSaveView={noop}
+          onApplyView={noop}
+          onUpdateView={noop}
+          onDeleteView={noop}
+          onRenameView={noop}
+          onClose={() => setFilterPanelOpen(false)}
+          filtersOnly
+          savedViewsEnabled={false}
+          emptyTitle="Narrow this comparison"
+          emptyText="Add a filter to show only matching comparison rows."
+        />
+      )}
 
       <div className="comparison-body">
         <div className="comparison-grid" tabIndex={-1}>
@@ -1022,7 +1139,7 @@ export function ComparisonView({
             <div className="comparison-empty">
               <Icon icon="data-lineage" size={24} />
               <strong>Choose keys and comparison pairs</strong>
-              <span>Select at least one compare table, one superkey pair, and one column pair.</span>
+              <span>Select a base key, a compare key, and at least one column pair.</span>
             </div>
           ) : (
             <div className="comparison-grid-scroll" ref={scrollRef}>
@@ -1235,7 +1352,6 @@ export function ComparisonView({
                       placeholder="Base key"
                       leftIcon="key"
                       showType
-                      fill
                       className="comparison-col-select"
                     />
                     <span className="comparison-map-arrow">=</span>
@@ -1246,7 +1362,6 @@ export function ComparisonView({
                       placeholder="Compare key"
                       leftIcon="key"
                       showType
-                      fill
                       className="comparison-col-select"
                     />
                     <Button
@@ -1302,7 +1417,6 @@ export function ComparisonView({
                       columns={baseSchema}
                       placeholder="Base column"
                       showType
-                      fill
                       className="comparison-col-select"
                     />
                     <span className="comparison-map-arrow">=</span>
@@ -1312,7 +1426,6 @@ export function ComparisonView({
                       columns={selectedTargetTable.schema}
                       placeholder="Compare column"
                       showType
-                      fill
                       className="comparison-col-select"
                     />
                     <Button

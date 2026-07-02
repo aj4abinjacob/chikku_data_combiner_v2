@@ -46,6 +46,10 @@ function buildFilterClause(filter: FilterCondition): string {
   if (filter.operator === "IS NOT NULL") return `${col} IS NOT NULL`;
   if (filter.operator === "IS TRUE") return `${col} IS TRUE`;
   if (filter.operator === "IS FALSE") return `${col} IS FALSE`;
+  if (filter.operator === "IS SAME") return `${col} = 'same'`;
+  if (filter.operator === "IS DIFFERENT") return `${col} = 'different'`;
+  if (filter.operator === "IS MISSING") return `${col} = 'missing'`;
+  if (filter.operator === "IS PRESENT") return `${col} != 'missing'`;
 
   if (filter.operator === "EQUALS COLUMN" || filter.operator === "DOES NOT EQUAL COLUMN") {
     const otherCol = escapeIdent(filter.value);

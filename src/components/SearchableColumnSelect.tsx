@@ -18,6 +18,10 @@ interface SearchableColumnSelectProps {
   disabled?: boolean;
 }
 
+function getColumnLabel(column: ColumnInfo): string {
+  return column.display_name ?? column.column_name;
+}
+
 export function SearchableColumnSelect({
   value,
   onChange,
@@ -61,11 +65,14 @@ export function SearchableColumnSelect({
   // Filter and sort columns (always alphabetical, case-insensitive)
   const filteredColumns = React.useMemo(() => {
     let cols = [...columns].sort((a, b) =>
-      a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base" })
+      getColumnLabel(a).localeCompare(getColumnLabel(b), undefined, { sensitivity: "base" })
     );
     if (search) {
       const lower = search.toLowerCase();
-      cols = cols.filter((c) => c.column_name.toLowerCase().includes(lower));
+      cols = cols.filter((c) =>
+        c.column_name.toLowerCase().includes(lower) ||
+        getColumnLabel(c).toLowerCase().includes(lower)
+      );
     }
     return cols;
   }, [columns, search]);
@@ -79,7 +86,7 @@ export function SearchableColumnSelect({
     for (const col of filteredColumns) {
       list.push({
         value: col.column_name,
-        label: col.column_name,
+        label: getColumnLabel(col),
         type: showType ? col.column_type : undefined,
       });
     }
@@ -139,7 +146,7 @@ export function SearchableColumnSelect({
   const selectedCol = columns.find((c) => c.column_name === value);
   const displayText = value
     ? selectedCol
-      ? selectedCol.column_name
+      ? getColumnLabel(selectedCol)
       : value
     : "";
 

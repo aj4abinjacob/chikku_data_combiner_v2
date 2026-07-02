@@ -59,6 +59,7 @@ export type UpdateDownloadEvent =
 export interface ColumnInfo {
   column_name: string;
   column_type: string;
+  display_name?: string;
   null: string;
   key: string | null;
   default: string | null;
@@ -106,6 +107,7 @@ export interface LoadedTable {
   schema: ColumnInfo[];
   rowCount: number;
   importOptions?: ImportOptions;
+  reloadVersion?: number;
 }
 
 export interface ColumnOperation {
@@ -139,7 +141,11 @@ export type FilterOperator =
   | "EQUALS COLUMN"
   | "DOES NOT EQUAL COLUMN"
   | "EQUALS IGNORE CASE"
-  | "DOES NOT EQUAL IGNORE CASE";
+  | "DOES NOT EQUAL IGNORE CASE"
+  | "IS SAME"
+  | "IS DIFFERENT"
+  | "IS MISSING"
+  | "IS PRESENT";
 
 export interface FilterCondition {
   column: string;
@@ -262,14 +268,10 @@ export interface ComparisonViewConfig {
   baseTable: string;
   compareTables: ComparisonTableConfig[];
   viewMode: ComparisonViewMode;
+  filters: FilterGroup;
   freezeKeys: boolean;
   saveNameMode: ComparisonSaveNameMode;
   saveAffix: string;
-}
-
-export interface ComparisonTableRole {
-  color: string;
-  label: string;
 }
 
 export type FileFormat = "csv" | "tsv" | "json" | "parquet" | "xlsx" | "xls";

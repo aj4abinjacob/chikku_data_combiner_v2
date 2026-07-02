@@ -39,7 +39,7 @@ import {
   showNumberInputExpectation,
 } from "../utils/numberInputWheel";
 
-type ColumnKind = "text" | "number" | "date" | "boolean" | "unknown";
+type ColumnKind = "text" | "number" | "date" | "boolean" | "comparison_status" | "unknown";
 type OperatorOption = { value: FilterOperator; label: string };
 type OperatorGroupOption = { label: string; options: OperatorOption[] };
 type OperatorSectionConfig = { label: string; operators: FilterOperator[] };
@@ -53,6 +53,10 @@ const OPERATOR_LABELS: Record<FilterOperator, string> = {
   "DOES NOT EQUAL IGNORE CASE": "does not equal, ignoring case",
   "EQUALS COLUMN": "equals another column",
   "DOES NOT EQUAL COLUMN": "does not equal another column",
+  "IS SAME": "is same",
+  "IS DIFFERENT": "is different",
+  "IS MISSING": "is missing in compare",
+  "IS PRESENT": "is present in compare",
   IN: "is in list",
   "NOT IN": "is not in list",
   "IS NULL": "is empty",
@@ -96,6 +100,10 @@ const OPERATOR_SECTIONS_BY_KIND: Record<ColumnKind, OperatorSectionConfig[]> = {
     { label: "Compare columns", operators: ["EQUALS COLUMN", "DOES NOT EQUAL COLUMN"] },
     { label: "Empty values", operators: ["IS NULL", "IS NOT NULL"] },
   ],
+  comparison_status: [
+    { label: "Comparison status", operators: ["IS DIFFERENT", "IS SAME", "IS MISSING", "IS PRESENT"] },
+    { label: "Equals", operators: ["=", "!="] },
+  ],
   unknown: [
     { label: "Text contains", operators: ["CONTAINS", "DOES NOT CONTAIN"] },
     { label: "Text starts or ends", operators: ["STARTS WITH", "NOT STARTS WITH", "ENDS WITH", "NOT ENDS WITH"] },
@@ -106,7 +114,16 @@ const OPERATOR_SECTIONS_BY_KIND: Record<ColumnKind, OperatorSectionConfig[]> = {
   ],
 };
 
-const NO_VALUE_OPS = new Set<FilterOperator>(["IS NULL", "IS NOT NULL", "IS TRUE", "IS FALSE"]);
+const NO_VALUE_OPS = new Set<FilterOperator>([
+  "IS NULL",
+  "IS NOT NULL",
+  "IS TRUE",
+  "IS FALSE",
+  "IS SAME",
+  "IS DIFFERENT",
+  "IS MISSING",
+  "IS PRESENT",
+]);
 
 const MIN_PANEL_HEIGHT = 80;
 const MAX_PANEL_HEIGHT = 500;
@@ -143,6 +160,7 @@ function getColumnKind(columnName: string, columns: ColumnInfo[]): ColumnKind {
     .find((col) => col.column_name === columnName)
     ?.column_type.toLowerCase() ?? "";
 
+  if (type === "comparison_status") return "comparison_status";
   if (/(bool|boolean)/.test(type)) return "boolean";
   if (/(date|time|timestamp|interval)/.test(type)) return "date";
   if (/(int|decimal|numeric|double|float|real|hugeint|bigint|smallint|tinyint|ubigint|uinteger|usmallint|utinyint)/.test(type)) {
@@ -733,6 +751,8 @@ interface FilterGroupRendererProps {
   activeTable: string | null;
   depth: number;
   isRoot: boolean;
+  emptyTitle: string;
+  emptyText: string;
   onUpdateRoot: (updater: (root: DraftFilterGroup) => DraftFilterGroup) => void;
   onApply: () => void;
   scrollContainerRef?: React.RefObject<HTMLDivElement>;
@@ -744,6 +764,8 @@ function FilterGroupRenderer({
   activeTable,
   depth,
   isRoot,
+  emptyTitle,
+  emptyText,
   onUpdateRoot,
   onApply,
   scrollContainerRef,
@@ -831,8 +853,8 @@ function FilterGroupRenderer({
         </div>
         <div className="filter-empty-main">
           <div className="filter-empty-copy">
-            <span className="filter-empty-title">Narrow this table</span>
-            <span className="filter-empty-text">Add a filter to show only matching rows.</span>
+            <span className="filter-empty-title">{emptyTitle}</span>
+            <span className="filter-empty-text">{emptyText}</span>
           </div>
           <div className="filter-empty-actions">
             <Button
@@ -946,6 +968,8 @@ function FilterGroupRenderer({
                   activeTable={activeTable}
                   depth={depth + 1}
                   isRoot={false}
+                  emptyTitle={emptyTitle}
+                  emptyText={emptyText}
                   onUpdateRoot={onUpdateRoot}
                   onApply={onApply}
                   scrollContainerRef={scrollContainerRef}
@@ -1002,6 +1026,10 @@ interface FilterPanelProps {
   onRenameView: (viewId: string, newName: string) => void;
   onClose: () => void;
   motionState?: "open" | "closing";
+  filtersOnly?: boolean;
+  savedViewsEnabled?: boolean;
+  emptyTitle?: string;
+  emptyText?: string;
 }
 
 export function FilterPanel({
@@ -1032,6 +1060,10 @@ export function FilterPanel({
   onRenameView,
   onClose,
   motionState = "open",
+  filtersOnly = false,
+  savedViewsEnabled = true,
+  emptyTitle = "Narrow this table",
+  emptyText = "Add a filter to show only matching rows.",
 }: FilterPanelProps): React.ReactElement {
   const [draftRoot, setDraftRoot] = useState<DraftFilterGroup>(() =>
     convertToDraft(activeFilters)
@@ -1190,9 +1222,9 @@ export function FilterPanel({
     lastSavedViewSnapshot.current === JSON.stringify(currentViewState);
   const canApply = isDirty && (draftCount > 0 || hasActiveFilters(activeFilters));
   const canClear = draftHasContent || hasActiveFilters(activeFilters);
-  const canSaveView = hasActiveFilters(activeFilters) && !viewStateMatchesLastSave;
-  const showSaveViewAction = showSaveInput || canSaveView;
-  const showViewsPane = viewsPaneOpen && savedViews.length > 0;
+  const canSaveView = savedViewsEnabled && hasActiveFilters(activeFilters) && !viewStateMatchesLastSave;
+  const showSaveViewAction = savedViewsEnabled && (showSaveInput || canSaveView);
+  const showViewsPane = savedViewsEnabled && viewsPaneOpen && savedViews.length > 0;
   const statusText = isDirty
     ? "Draft"
     : hasActiveFilters(activeFilters)
@@ -1240,31 +1272,35 @@ export function FilterPanel({
                 {activeCount}
               </Tag>
             )}
-            <Button
-              className="filter-panel-tab"
-              small
-              minimal
-              active={activeTab === "colops"}
-              onClick={() => setActiveTab("colops")}
-              text="Column Ops"
-            />
-            {colOpsSteps.length > 0 && activeTab !== "colops" && (
-              <Tag minimal round intent={Intent.SUCCESS} className="filter-panel-tab-badge">
-                {colOpsSteps.length}
-              </Tag>
-            )}
-            <Button
-              className="filter-panel-tab"
-              small
-              minimal
-              active={activeTab === "rowops"}
-              onClick={() => setActiveTab("rowops")}
-              text="Row Ops"
-            />
-            {rowOpsSteps.length > 0 && activeTab !== "rowops" && (
-              <Tag minimal round intent={Intent.WARNING} className="filter-panel-tab-badge">
-                {rowOpsSteps.length}
-              </Tag>
+            {!filtersOnly && (
+              <>
+                <Button
+                  className="filter-panel-tab"
+                  small
+                  minimal
+                  active={activeTab === "colops"}
+                  onClick={() => setActiveTab("colops")}
+                  text="Column Ops"
+                />
+                {colOpsSteps.length > 0 && activeTab !== "colops" && (
+                  <Tag minimal round intent={Intent.SUCCESS} className="filter-panel-tab-badge">
+                    {colOpsSteps.length}
+                  </Tag>
+                )}
+                <Button
+                  className="filter-panel-tab"
+                  small
+                  minimal
+                  active={activeTab === "rowops"}
+                  onClick={() => setActiveTab("rowops")}
+                  text="Row Ops"
+                />
+                {rowOpsSteps.length > 0 && activeTab !== "rowops" && (
+                  <Tag minimal round intent={Intent.WARNING} className="filter-panel-tab-badge">
+                    {rowOpsSteps.length}
+                  </Tag>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -1305,7 +1341,7 @@ export function FilterPanel({
               </div>
             </div>
             <div className="filter-toolbar-actions">
-              {savedViews.length > 0 && (
+              {savedViewsEnabled && savedViews.length > 0 && (
                 <Button
                   icon="bookmark"
                   small
@@ -1383,6 +1419,8 @@ export function FilterPanel({
               activeTable={activeTable}
               depth={0}
               isRoot={true}
+              emptyTitle={emptyTitle}
+              emptyText={emptyText}
               onUpdateRoot={handleUpdateRoot}
               onApply={applyFilters}
               scrollContainerRef={filterScrollRef}
@@ -1407,34 +1445,38 @@ export function FilterPanel({
           </>
         )}
       </div>
-      <ColumnOpsPanel
-        columns={columns}
-        activeTable={activeTable}
-        activeFilters={activeFilters}
-        colOpsSteps={colOpsSteps}
-        undoStrategy={undoStrategy}
-        onApply={onColOpApply}
-        onUndo={onColOpUndo}
-        onRevertAll={onColOpRevertAll}
-        onClearAll={onColOpClearAll}
-        totalRows={totalRows}
-        unfilteredRows={unfilteredRows}
-        visible={activeTab === "colops"}
-      />
-      <RowOpsPanel
-        columns={columns}
-        activeTable={activeTable}
-        activeFilters={activeFilters}
-        rowOpsSteps={rowOpsSteps}
-        undoStrategy={rowOpsUndoStrategy}
-        onApply={onRowOpApply}
-        onUndo={onRowOpUndo}
-        onRevertAll={onRowOpRevertAll}
-        onClearAll={onRowOpClearAll}
-        totalRows={totalRows}
-        unfilteredRows={unfilteredRows}
-        visible={activeTab === "rowops"}
-      />
+      {!filtersOnly && (
+        <>
+          <ColumnOpsPanel
+            columns={columns}
+            activeTable={activeTable}
+            activeFilters={activeFilters}
+            colOpsSteps={colOpsSteps}
+            undoStrategy={undoStrategy}
+            onApply={onColOpApply}
+            onUndo={onColOpUndo}
+            onRevertAll={onColOpRevertAll}
+            onClearAll={onColOpClearAll}
+            totalRows={totalRows}
+            unfilteredRows={unfilteredRows}
+            visible={activeTab === "colops"}
+          />
+          <RowOpsPanel
+            columns={columns}
+            activeTable={activeTable}
+            activeFilters={activeFilters}
+            rowOpsSteps={rowOpsSteps}
+            undoStrategy={rowOpsUndoStrategy}
+            onApply={onRowOpApply}
+            onUndo={onRowOpUndo}
+            onRevertAll={onRowOpRevertAll}
+            onClearAll={onRowOpClearAll}
+            totalRows={totalRows}
+            unfilteredRows={unfilteredRows}
+            visible={activeTab === "rowops"}
+          />
+        </>
+      )}
     </div>
   );
 }

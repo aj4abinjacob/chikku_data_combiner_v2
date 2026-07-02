@@ -185,6 +185,48 @@ html, body, #root {
   flex-direction: column;
   height: 100vh;
   width: 100vw;
+  position: relative;
+}
+
+.file-drop-overlay {
+  position: fixed;
+  inset: var(--titlebar-height) 0 var(--statusbar-height) 0;
+  z-index: 1200;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(245, 248, 250, 0.55);
+  box-shadow: inset 0 0 0 2px rgba(19, 124, 189, 0.42);
+}
+
+.file-drop-target {
+  min-width: 220px;
+  min-height: 92px;
+  padding: 18px 24px;
+  border-radius: 8px;
+  border: 1px solid rgba(19, 124, 189, 0.36);
+  background: rgba(255, 255, 255, 0.96);
+  color: #106ba3;
+  box-shadow: 0 14px 34px rgba(16, 22, 26, 0.16);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.file-drag-unsupported {
+  .file-drop-overlay {
+    box-shadow: inset 0 0 0 2px rgba(217, 130, 43, 0.5);
+  }
+
+  .file-drop-target {
+    color: #a66321;
+    border-color: rgba(217, 130, 43, 0.44);
+  }
 }
 
 .window-titlebar {
@@ -545,15 +587,6 @@ html, body, #root {
       border-color: rgba(19, 124, 189, 0.25);
     }
 
-    &.comparison-role {
-      border-color: rgba(19, 124, 189, 0.3);
-      box-shadow: inset 3px 0 0 var(--table-accent, #137cbd);
-
-      &.active {
-        box-shadow: inset 3px 0 0 var(--table-accent, #137cbd);
-      }
-    }
-
     &:hover {
       border-color: #bfccd6;
       background: #fbfdff;
@@ -615,25 +648,6 @@ html, body, #root {
       color: #5c7080;
       font-size: 11px;
       line-height: 1.2;
-    }
-
-    .table-comparison-role {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      color: #5c7080;
-      font-size: 10px;
-      font-weight: 700;
-      line-height: 1.2;
-      text-transform: uppercase;
-    }
-
-    .table-comparison-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--table-accent, #137cbd);
-      box-shadow: 0 0 0 2px rgba(19, 124, 189, 0.12);
     }
 
     .table-delete-btn {
@@ -3170,6 +3184,7 @@ button.dg-stats-metric {
   .bp4-html-select select,
   .comparison-col-select.col-select-trigger {
     width: 100%;
+    max-width: 100%;
     min-width: 0;
   }
 }
@@ -9355,6 +9370,29 @@ html.dark-theme #root {
     color: @dark-text-1;
   }
 
+  .file-drop-overlay {
+    background: rgba(16, 20, 24, 0.58);
+    box-shadow: inset 0 0 0 2px @dark-accent-border;
+  }
+
+  .file-drop-target {
+    background: fade(@dark-bg-3, 96%);
+    border-color: @dark-accent-border;
+    color: @dark-accent;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
+  }
+
+  &.file-drag-unsupported {
+    .file-drop-overlay {
+      box-shadow: inset 0 0 0 2px fade(@dark-warning, 52%);
+    }
+
+    .file-drop-target {
+      color: @dark-warning;
+      border-color: fade(@dark-warning, 48%);
+    }
+  }
+
   .main-layout {
     border-top-color: @dark-border-1;
   }
@@ -9486,9 +9524,6 @@ html.dark-theme #root {
         color: @dark-text-3;
       }
 
-      .table-comparison-role {
-        color: @dark-text-3;
-      }
     }
 
     .sidebar-combine-bar {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Button, Icon, Intent } from "@blueprintjs/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions, ColumnStats, ColumnStatsUniqueValue, ComparisonViewConfig, ComparisonTableRole } from "../types";
+import { getCurrentWindow, type DragDropEvent } from "@tauri-apps/api/window";
+import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions, ColumnStats, ColumnStatsUniqueValue, ComparisonViewConfig } from "../types";
 import { Sidebar } from "./Sidebar";
 import { DataGrid } from "./DataGrid";
 import { ComparisonView, createDefaultComparisonConfig } from "./ComparisonView";
@@ -26,7 +26,7 @@ const FILTER_PANEL_EXIT_MS = 180;
 const DEFAULT_DISPLAY_DECIMAL_PLACES = 4;
 const MIN_DISPLAY_DECIMAL_PLACES = 0;
 const MAX_DISPLAY_DECIMAL_PLACES = 10;
-const COMPARISON_TABLE_COLORS = ["#137cbd", "#0f766e", "#d9822b", "#8f398f", "#6f3cc3"];
+const SUPPORTED_DATA_EXTENSIONS = new Set(["csv", "tsv", "json", "jsonl", "ndjson", "parquet", "xlsx", "xls"]);
 
 function makeTableName(filePath: string): string {
   const name = filePath.split(/[/\\]/).pop() || "table";
@@ -60,9 +60,32 @@ function getFileExtension(filePath: string): string {
   return filePath.split(".").pop()?.toLowerCase() || "";
 }
 
+function isSupportedDataFilePath(filePath: string): boolean {
+  return SUPPORTED_DATA_EXTENSIONS.has(getFileExtension(filePath));
+}
+
 function isJsonFilePath(filePath: string): boolean {
   const ext = getFileExtension(filePath);
   return ext === "json" || ext === "jsonl" || ext === "ndjson";
+}
+
+function refreshedTable(previous: LoadedTable, next: LoadedTable): LoadedTable {
+  return {
+    ...next,
+    importOptions: next.importOptions ?? previous.importOptions,
+    reloadVersion: (previous.reloadVersion ?? 0) + 1,
+  };
+}
+
+function uniqueSupportedFilePaths(filePaths: string[]): string[] {
+  const seen = new Set<string>();
+  const supported: string[] = [];
+  for (const filePath of filePaths) {
+    if (!isSupportedDataFilePath(filePath) || seen.has(filePath)) continue;
+    seen.add(filePath);
+    supported.push(filePath);
+  }
+  return supported;
 }
 
 function clampDisplayDecimalPlaces(value: number): number {
@@ -217,6 +240,7 @@ interface PendingExcelImport {
   replace: boolean;
   otherFiles: LoadedTable[];
   remainingFiles: string[];
+  refreshExisting: boolean;
 }
 
 interface PendingRetry {
@@ -226,6 +250,8 @@ interface PendingRetry {
   replace: boolean;
   otherFiles: LoadedTable[];
   remainingFiles: string[];
+  refreshExisting: boolean;
+  refreshTableName?: string;
 }
 
 export function App(): React.ReactElement {
@@ -272,6 +298,7 @@ export function App(): React.ReactElement {
     return DEFAULT_DISPLAY_DECIMAL_PLACES;
   });
   const [filterPanelMounted, setFilterPanelMounted] = useState(false);
+  const [fileDragState, setFileDragState] = useState<"idle" | "supported" | "unsupported">("idle");
   const filterPanelExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Use refs so IPC callbacks always see latest state
@@ -309,23 +336,6 @@ export function App(): React.ReactElement {
     () => activeTable ? tables.find((t) => t.tableName === activeTable) ?? null : null,
     [activeTable, tables]
   );
-
-  const comparisonTableRoles = useMemo<Record<string, ComparisonTableRole> | undefined>(() => {
-    if (!comparisonConfig) return undefined;
-    const roles: Record<string, ComparisonTableRole> = {
-      [comparisonConfig.baseTable]: {
-        color: COMPARISON_TABLE_COLORS[0],
-        label: "BASE",
-      },
-    };
-    comparisonConfig.compareTables.forEach((target, index) => {
-      roles[target.tableName] = {
-        color: COMPARISON_TABLE_COLORS[(index + 1) % COMPARISON_TABLE_COLORS.length],
-        label: `COMPARE ${String.fromCharCode(65 + index)}`,
-      };
-    });
-    return roles;
-  }, [comparisonConfig]);
 
   const jsonWorkspaceActive = !!activeLoadedTable
     && !activeLoadedTable.filePath.startsWith("(")
@@ -501,7 +511,12 @@ export function App(): React.ReactElement {
   }, []);
 
   const finalizeLoadedTables = useCallback(
-    async (newTables: LoadedTable[], replace: boolean, nextActiveTable?: string) => {
+    async (
+      newTables: LoadedTable[],
+      replace: boolean,
+      nextActiveTable?: string,
+      invalidateData = false
+    ) => {
       if (replace) {
         await cleanupReplacedTables(newTables);
       }
@@ -534,6 +549,11 @@ export function App(): React.ReactElement {
         }));
         setResetKey((k) => k + 1);
         setFilterPanelOpen(false);
+      }
+
+      if (invalidateData) {
+        setSchemaVersion((v) => v + 1);
+        setDataVersion((v) => v + 1);
       }
     },
     [cleanupReplacedTables, makeTableHistory]
@@ -615,21 +635,68 @@ export function App(): React.ReactElement {
       filePaths: string[],
       replace: boolean,
       accumulatedTables?: LoadedTable[],
-      replaceOriginal = replace
+      replaceOriginal = replace,
+      refreshExisting = false
     ) => {
+      const supportedFilePaths = uniqueSupportedFilePaths(filePaths);
+      if (supportedFilePaths.length === 0) return;
+
       const newTables: LoadedTable[] = accumulatedTables ?? (replace ? [] : [...tablesRef.current]);
       const tableNames = new Set(newTables.map((t) => t.tableName));
+      let nextActiveTable: string | undefined;
+      let loadedAny = accumulatedTables !== undefined;
 
-      for (let i = 0; i < filePaths.length; i++) {
-        const fp = filePaths[i];
+      for (let i = 0; i < supportedFilePaths.length; i++) {
+        const fp = supportedFilePaths[i];
         const ext = getFileExtension(fp);
-        const remaining = filePaths.slice(i + 1);
+        const remaining = supportedFilePaths.slice(i + 1);
+        const existingIndexes = refreshExisting && !replace
+          ? newTables
+              .map((table, index) => table.filePath === fp ? index : -1)
+              .filter((index) => index >= 0)
+          : [];
+
+        if (existingIndexes.length > 0) {
+          for (const index of existingIndexes) {
+            const existingTable = newTables[index];
+            const result = isJsonFilePath(existingTable.filePath)
+              ? await loadJsonWorkspaceFile(existingTable.filePath, existingTable.tableName)
+              : await loadSingleFile(
+                  existingTable.filePath,
+                  existingTable.tableName,
+                  existingTable.importOptions
+                );
+
+            if (result && "error" in result && result.canRetry) {
+              setPendingRetry({
+                filePath: existingTable.filePath,
+                tableName: existingTable.tableName,
+                errorMessage: result.error,
+                replace,
+                otherFiles: newTables,
+                remainingFiles: remaining,
+                refreshExisting,
+                refreshTableName: existingTable.tableName,
+              });
+              return; // Wait for retry dialog, then continue with remaining
+            }
+
+            if (result && !("error" in result)) {
+              newTables[index] = refreshedTable(existingTable, result);
+              nextActiveTable = existingTable.tableName;
+              loadedAny = true;
+            }
+          }
+          continue;
+        }
 
         if (isJsonFilePath(fp)) {
           const tableName = makeUniqueTableName(makeTableName(fp), tableNames);
           const result = await loadJsonWorkspaceFile(fp, tableName);
           if (result) {
             newTables.push(result);
+            nextActiveTable = result.tableName;
+            loadedAny = true;
           }
         } else if (ext === "xlsx" || ext === "xls") {
           // Excel: check for multiple sheets
@@ -644,6 +711,7 @@ export function App(): React.ReactElement {
                 replace,
                 otherFiles: newTables,
                 remainingFiles: remaining,
+                refreshExisting,
               });
               return; // Wait for dialog result, then continue with remaining
             }
@@ -652,6 +720,8 @@ export function App(): React.ReactElement {
             const result = await loadSingleFile(fp, tableName, { excelSheet: sheets[0].name });
             if (result && !("error" in result)) {
               newTables.push(result);
+              nextActiveTable = result.tableName;
+              loadedAny = true;
             }
           } catch (err) {
             console.error(`Failed to load Excel ${fp}:`, err);
@@ -668,11 +738,14 @@ export function App(): React.ReactElement {
               replace,
               otherFiles: newTables,
               remainingFiles: remaining,
+              refreshExisting,
             });
             return; // Wait for retry dialog, then continue with remaining
           }
           if (result && !("error" in result)) {
             newTables.push(result);
+            nextActiveTable = result.tableName;
+            loadedAny = true;
           }
         } else {
           // Parquet and other supported tabular formats — straight load
@@ -680,11 +753,20 @@ export function App(): React.ReactElement {
           const result = await loadSingleFile(fp, tableName);
           if (result && !("error" in result)) {
             newTables.push(result);
+            nextActiveTable = result.tableName;
+            loadedAny = true;
           }
         }
       }
 
-      await finalizeLoadedTables(newTables, replaceOriginal);
+      if (refreshExisting && !loadedAny) return;
+
+      await finalizeLoadedTables(
+        newTables,
+        replaceOriginal,
+        refreshExisting ? nextActiveTable ?? activeTableRef.current ?? undefined : undefined,
+        refreshExisting
+      );
     },
     [loadSingleFile, loadJsonWorkspaceFile, finalizeLoadedTables]
   );
@@ -693,7 +775,7 @@ export function App(): React.ReactElement {
   const handleExcelSheetImport = useCallback(
     async (selectedSheets: string[]) => {
       if (!pendingExcelImport) return;
-      const { filePath, otherFiles, replace, remainingFiles } = pendingExcelImport;
+      const { filePath, otherFiles, replace, remainingFiles, refreshExisting } = pendingExcelImport;
       const newTables = [...otherFiles];
       const tableNames = new Set(newTables.map((t) => t.tableName));
       const baseName = makeTableName(filePath);
@@ -711,10 +793,10 @@ export function App(): React.ReactElement {
 
       // Continue loading remaining files, or finalize
       if (remainingFiles.length > 0) {
-        await loadFiles(remainingFiles, false, newTables, replace);
+        await loadFiles(remainingFiles, false, newTables, replace, refreshExisting);
       } else {
         const activeIndex = replace ? 0 : newTables.length - selectedSheets.length;
-        await finalizeLoadedTables(newTables, replace, newTables[activeIndex]?.tableName);
+        await finalizeLoadedTables(newTables, replace, newTables[activeIndex]?.tableName, refreshExisting);
       }
     },
     [pendingExcelImport, loadSingleFile, loadFiles, finalizeLoadedTables]
@@ -724,12 +806,29 @@ export function App(): React.ReactElement {
   const handleRetryImport = useCallback(
     async (options: { csvDelimiter?: string; csvIgnoreErrors?: boolean }) => {
       if (!pendingRetry) return;
-      const { filePath, tableName, otherFiles, replace, remainingFiles } = pendingRetry;
+      const {
+        filePath,
+        tableName,
+        otherFiles,
+        replace,
+        remainingFiles,
+        refreshExisting,
+        refreshTableName,
+      } = pendingRetry;
       const newTables = [...otherFiles];
 
       const result = await loadSingleFile(filePath, tableName, options);
       if (result && !("error" in result)) {
-        newTables.push(result);
+        if (refreshTableName) {
+          const index = newTables.findIndex((table) => table.tableName === refreshTableName);
+          if (index >= 0) {
+            newTables[index] = refreshedTable(newTables[index], result);
+          } else {
+            newTables.push(result);
+          }
+        } else {
+          newTables.push(result);
+        }
       } else if (result && "error" in result) {
         // Still failing — update the error message
         setPendingRetry((prev) => prev ? { ...prev, errorMessage: result.error } : null);
@@ -740,9 +839,14 @@ export function App(): React.ReactElement {
 
       // Continue loading remaining files, or finalize
       if (remainingFiles.length > 0) {
-        await loadFiles(remainingFiles, false, newTables, replace);
+        await loadFiles(remainingFiles, false, newTables, replace, refreshExisting);
       } else {
-        await finalizeLoadedTables(newTables, replace, newTables[newTables.length - 1]?.tableName);
+        await finalizeLoadedTables(
+          newTables,
+          replace,
+          newTables[newTables.length - 1]?.tableName,
+          refreshExisting
+        );
       }
     },
     [pendingRetry, loadSingleFile, loadFiles, finalizeLoadedTables]
@@ -820,6 +924,43 @@ export function App(): React.ReactElement {
       localStorage.setItem("theme", isDark ? "dark" : "light");
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!isTauri()) return;
+
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    const handleDragDrop = (payload: DragDropEvent) => {
+      if (payload.type === "enter") {
+        setFileDragState(uniqueSupportedFilePaths(payload.paths).length > 0 ? "supported" : "unsupported");
+      } else if (payload.type === "drop") {
+        setFileDragState("idle");
+        const paths = uniqueSupportedFilePaths(payload.paths);
+        if (paths.length > 0) {
+          void loadFiles(paths, false, undefined, false, true);
+        }
+      } else if (payload.type === "leave") {
+        setFileDragState("idle");
+      }
+    };
+
+    getCurrentWindow()
+      .onDragDropEvent((event) => handleDragDrop(event.payload))
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+        } else {
+          unlisten = cleanup;
+        }
+      })
+      .catch((err) => console.warn("Failed to register drag/drop handler", err));
+
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
+  }, [loadFiles]);
 
   // Sync dark mode class to body (for BlueprintJS dialogs rendered in portals) and menu checkbox
   useEffect(() => {
@@ -2048,6 +2189,7 @@ export function App(): React.ReactElement {
 
   const hasData = tables.length > 0;
   const activeDisplayFileName = activeLoadedTable ? getDisplayFileName(activeLoadedTable) : null;
+  const fileDragClass = fileDragState === "idle" ? "" : ` file-drag-${fileDragState}`;
 
   useEffect(() => {
     const nextTitle = activeDisplayFileName ?? "Chikku Parser";
@@ -2060,7 +2202,20 @@ export function App(): React.ReactElement {
   }, [activeDisplayFileName]);
 
   return (
-    <div className={`app-container${darkMode ? " bp4-dark dark-theme" : ""}`}>
+    <div className={`app-container${darkMode ? " bp4-dark dark-theme" : ""}${fileDragClass}`}>
+      {fileDragState !== "idle" && (
+        <div className="file-drop-overlay" aria-hidden="true">
+          <div className="file-drop-target">
+            <Icon
+              icon={fileDragState === "supported" ? "document-open" : "warning-sign"}
+              size={26}
+            />
+            <span>
+              {fileDragState === "supported" ? "Import or refresh" : "Unsupported file type"}
+            </span>
+          </div>
+        </div>
+      )}
       <div className="window-titlebar" data-tauri-drag-region="deep">
         <span className="window-titlebar-title" title={activeDisplayFileName ?? "Chikku Parser"}>
           {activeDisplayFileName ?? "Chikku Parser"}
@@ -2113,7 +2268,6 @@ export function App(): React.ReactElement {
               onOpenFiles={handleChooseFiles}
               onHide={() => setSidebarVisible(false)}
               jsonWorkspaceActive={jsonWorkspaceActive}
-              comparisonTableRoles={comparisonTableRoles}
             />
           </div>
           <div className="sidebar-shell-strip" aria-hidden={sidebarVisible}>
@@ -2331,13 +2485,13 @@ export function App(): React.ReactElement {
           fileName={pendingExcelImport.fileName}
           sheets={pendingExcelImport.sheets}
           onClose={() => {
-            const { otherFiles, replace, remainingFiles } = pendingExcelImport;
+            const { otherFiles, replace, remainingFiles, refreshExisting } = pendingExcelImport;
             setPendingExcelImport(null);
             // Skip this Excel file, continue with remaining files or finalize already-loaded tables
             if (remainingFiles.length > 0) {
-              void loadFiles(remainingFiles, false, otherFiles, replace);
+              void loadFiles(remainingFiles, false, otherFiles, replace, refreshExisting);
             } else if (otherFiles.length > 0) {
-              void finalizeLoadedTables(otherFiles, replace, otherFiles[0].tableName);
+              void finalizeLoadedTables(otherFiles, replace, otherFiles[0].tableName, refreshExisting);
             }
           }}
           onImport={handleExcelSheetImport}
@@ -2349,13 +2503,13 @@ export function App(): React.ReactElement {
           filePath={pendingRetry.filePath}
           errorMessage={pendingRetry.errorMessage}
           onClose={() => {
-            const { otherFiles, replace, remainingFiles } = pendingRetry;
+            const { otherFiles, replace, remainingFiles, refreshExisting } = pendingRetry;
             setPendingRetry(null);
             // Skip this file, continue with remaining files or finalize already-loaded tables
             if (remainingFiles.length > 0) {
-              void loadFiles(remainingFiles, false, otherFiles, replace);
+              void loadFiles(remainingFiles, false, otherFiles, replace, refreshExisting);
             } else if (otherFiles.length > 0) {
-              void finalizeLoadedTables(otherFiles, replace, otherFiles[0].tableName);
+              void finalizeLoadedTables(otherFiles, replace, otherFiles[0].tableName, refreshExisting);
             }
           }}
           onRetry={handleRetryImport}

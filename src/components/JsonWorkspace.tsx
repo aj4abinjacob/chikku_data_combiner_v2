@@ -387,7 +387,7 @@ export function JsonWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [table.filePath]);
+  }, [table.filePath, table.reloadVersion]);
 
   useLayoutEffect(() => {
     const editor = editorRef.current;
