@@ -20,11 +20,12 @@ npm run tauri:renderer:build  # Build renderer only
 npm run tauri:renderer:watch  # Run renderer dev server
 npm run tauri:dev             # Launch Tauri shell with webpack-dev-server
 npm run tauri:build           # Package Tauri app
+npm run release:check -- vX.Y.Z # Validate a release tag before creating it
 ```
 
 ## Release Process
 
-Follow `RELEASE.md` whenever the user asks to publish a new tag. Always bump all app version files before tagging, push the branch and tag, wait for the GitHub release workflow, and verify `latest.json` reports the new version and all supported platforms.
+Follow `RELEASE.md` whenever the user asks to publish a new tag. Always bump all app version files before tagging, run `npm run release:check -- vX.Y.Z` from the clean release commit, push the branch and tag, wait for the GitHub release workflow, and verify `latest.json` reports the new version, non-empty notes, and all supported platforms.
 
 ## Tauri Backend
 

@@ -1,6 +1,6 @@
 {
   "name": "chikku-parser",
-  "version": "0.3.27",
+  "version": "0.3.30",
   "description": "Desktop app for viewing, combining, and transforming CSV data",
   "scripts": {
     "clean": "rimraf dist-tauri",
@@ -11,7 +11,8 @@
     "tauri:renderer:build": "npm run tauri:assets && webpack --env tauri --mode production",
     "tauri:renderer:watch": "npm run tauri:assets && webpack serve --env tauri --mode development",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "release:check": "node scripts/validate-release-tag.mjs"
   },
   "keywords": [
     "csv",

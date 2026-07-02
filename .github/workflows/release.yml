@@ -9,7 +9,29 @@ permissions:
   contents: write
 
 jobs:
+  validate-release-tag:
+    name: Validate release tag
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify tag matches app metadata
+        run: npm run release:check -- ${{ github.ref_name }} --skip-clean --skip-remote --allow-existing-tag
+
   build:
+    needs: validate-release-tag
     strategy:
       fail-fast: false
       matrix:
@@ -109,3 +131,37 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+  publish-updater-notes:
+    name: Publish updater notes
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Copy GitHub release notes into updater feed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p /tmp/chikku-updater
+          gh release download "$TAG_NAME" --pattern latest.json --dir /tmp/chikku-updater
+
+          release_body="$(gh release view "$TAG_NAME" --json body --jq '.body')"
+          if [ -z "$release_body" ] || [ "$release_body" = "null" ]; then
+            echo "GitHub release body is empty; refusing to publish blank updater notes." >&2
+            exit 1
+          fi
+
+          tag_version="${TAG_NAME#v}"
+          manifest_version="$(jq -r '.version' /tmp/chikku-updater/latest.json)"
+          if [ "$manifest_version" != "$tag_version" ]; then
+            echo "Updater manifest version $manifest_version does not match tag $tag_version." >&2
+            exit 1
+          fi
+
+          jq --arg notes "$release_body" '.notes = $notes' \
+            /tmp/chikku-updater/latest.json > /tmp/chikku-updater/latest.with-notes.json
+          mv /tmp/chikku-updater/latest.with-notes.json /tmp/chikku-updater/latest.json
+
+          gh release upload "$TAG_NAME" /tmp/chikku-updater/latest.json --clobber
