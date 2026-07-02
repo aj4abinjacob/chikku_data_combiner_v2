@@ -76,7 +76,8 @@ pub fn spawn_window(app: &AppHandle, files: Option<Vec<String>>) -> AppResult<St
         .inner_size(1400.0, 900.0)
         .min_inner_size(800.0, 600.0)
         .position(80.0 + cascade_offset, 80.0 + cascade_offset)
-        .resizable(true);
+        .resizable(true)
+        .devtools(false);
 
     #[cfg(target_os = "macos")]
     {
