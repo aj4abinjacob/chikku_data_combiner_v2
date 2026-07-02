@@ -6,6 +6,7 @@ import {
   DialogBody,
   DialogFooter,
   Callout,
+  Icon,
 } from "@blueprintjs/core";
 import { SoftSelect } from "./SoftSelect";
 import { ColumnInfo } from "../types";
@@ -176,6 +177,40 @@ export function PivotDialog({
     setResults(null);
   }, []);
 
+  const handleAggFunctionSelect = useCallback((fn: AggFunc) => {
+    setAggFunction(fn);
+    setResults(null);
+  }, []);
+
+  const handleAggFunctionKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+      let nextIndex: number | null = null;
+
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+        nextIndex = (index + 1) % AGG_FUNCTIONS.length;
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        nextIndex = (index - 1 + AGG_FUNCTIONS.length) % AGG_FUNCTIONS.length;
+      } else if (event.key === "Home") {
+        nextIndex = 0;
+      } else if (event.key === "End") {
+        nextIndex = AGG_FUNCTIONS.length - 1;
+      }
+
+      if (nextIndex === null) return;
+
+      event.preventDefault();
+      const nextFn = AGG_FUNCTIONS[nextIndex];
+      handleAggFunctionSelect(nextFn);
+
+      const buttons =
+        event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+          ".pivot-agg-function-option"
+        );
+      buttons?.[nextIndex]?.focus();
+    },
+    [handleAggFunctionSelect]
+  );
+
   /** Build the DuckDB PIVOT SQL */
   const buildPivotSQL = useCallback((): string | null => {
     if (!activeTable || !pivotColumn || valueFields.size === 0) return null;
@@ -303,20 +338,34 @@ export function PivotDialog({
                 Aggregate Function
               </span>
             </div>
-            <SoftSelect
-              value={aggFunction}
-              onChange={(e) => {
-                setAggFunction(e.target.value as AggFunc);
-                setResults(null);
-              }}
-              fill
+            <div
+              className="pivot-agg-function-grid"
+              role="radiogroup"
+              aria-label="Aggregate function"
             >
-              {AGG_FUNCTIONS.map((fn) => (
-                <option key={fn} value={fn}>
-                  {fn}
-                </option>
-              ))}
-            </SoftSelect>
+              {AGG_FUNCTIONS.map((fn, index) => {
+                const selected = fn === aggFunction;
+
+                return (
+                  <button
+                    key={fn}
+                    type="button"
+                    className={`pivot-agg-function-option${selected ? " selected" : ""}`}
+                    role="radio"
+                    aria-checked={selected}
+                    tabIndex={selected ? 0 : -1}
+                    onClick={() => handleAggFunctionSelect(fn)}
+                    onKeyDown={(event) => handleAggFunctionKeyDown(event, index)}
+                    title={fn}
+                  >
+                    <span className="pivot-agg-function-check" aria-hidden="true">
+                      {selected && <Icon icon="tick" iconSize={12} />}
+                    </span>
+                    <span className="pivot-agg-function-label">{fn}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
           </div>
 

@@ -5366,6 +5366,75 @@ button.dg-stats-metric {
   background: #fafcfd;
 }
 
+.pivot-agg-function-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid #d8e1e8;
+  border-radius: var(--surface-radius);
+  background: #fafcfd;
+}
+
+.pivot-agg-function-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid #dce6ee;
+  border-radius: var(--control-radius);
+  background: #fff;
+  color: #25384a;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.15;
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, color 0.12s;
+
+  &:hover {
+    border-color: #cbd9e3;
+    background: #f7fafc;
+  }
+
+  &:focus-visible {
+    border-color: #137cbd;
+    box-shadow: 0 0 0 1px #137cbd, 0 0 0 3px rgba(19, 124, 189, 0.15);
+    outline: none;
+  }
+
+  &.selected {
+    border-color: rgba(19, 124, 189, 0.28);
+    background: rgba(19, 124, 189, 0.07);
+    color: #106ba3;
+    box-shadow: inset 0 0 0 1px rgba(19, 124, 189, 0.08);
+  }
+}
+
+.pivot-agg-function-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  color: #137cbd;
+  flex-shrink: 0;
+}
+
+.pivot-agg-function-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .pivot-agg-function-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .aggregate-col-grid {
   display: flex;
   flex-direction: column;
@@ -11182,6 +11251,7 @@ html.dark-theme #root {
   .case-condition-list,
   .aggregate-checkbox-list,
   .aggregate-func-row,
+  .pivot-agg-function-grid,
   .aggregate-col-grid,
   .export-format-row,
   .export-table-grid,
@@ -11218,6 +11288,33 @@ html.dark-theme #root {
   // ── Aggregate dialog ──
   .aggregate-section .aggregate-section-header {
     color: @dark-text-3;
+  }
+
+  .pivot-agg-function-option {
+    border-color: @dark-border-2;
+    background: @dark-bg-2;
+    color: @dark-text-1;
+
+    &:hover {
+      border-color: @dark-text-4;
+      background: @dark-bg-4;
+    }
+
+    &:focus-visible {
+      border-color: @dark-accent;
+      box-shadow: 0 0 0 1px @dark-accent, 0 0 0 3px rgba(93, 183, 255, 0.2);
+    }
+
+    &.selected {
+      border-color: @dark-accent-border;
+      background: @dark-accent-bg-subtle;
+      color: @dark-accent;
+      box-shadow: inset 0 0 0 1px fade(@dark-accent, 12%);
+    }
+  }
+
+  .pivot-agg-function-check {
+    color: @dark-accent;
   }
 
   .aggregate-col-item {
