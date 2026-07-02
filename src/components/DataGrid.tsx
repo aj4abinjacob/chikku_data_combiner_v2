@@ -428,6 +428,7 @@ export function DataGrid({
   // ── Header drag-reorder state ──
   const [draggingColumn, setDraggingColumn] = useState<string | null>(null);
   const headerDragCol = useRef<string | null>(null);
+  const justFinishedHeaderDrag = useRef(false);
   const [headerDropTarget, setHeaderDropTarget] = useState<{
     col: string;
     position: "left" | "right";
@@ -541,19 +542,25 @@ export function DataGrid({
   // ── Header drag-reorder handlers ──
   const handleHeaderDragStart = useCallback(
     (e: React.DragEvent, col: string) => {
-      if (isDragging.current) {
+      if (isDragging.current || !onReorderColumns) {
         e.preventDefault();
         return;
       }
+      e.stopPropagation();
       headerDragCol.current = col;
       setDraggingColumn(col);
+      setTooltip(null);
+      setCopied(false);
       e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", col);
+      document.body.style.cursor = "grabbing";
     },
-    []
+    [onReorderColumns]
   );
 
   const handleHeaderDragOver = useCallback(
     (e: React.DragEvent, col: string) => {
+      if (!onReorderColumns) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       if (!headerDragCol.current || headerDragCol.current === col) {
@@ -567,39 +574,62 @@ export function DataGrid({
         prev?.col === col && prev.position === position ? prev : { col, position }
       );
     },
-    []
+    [onReorderColumns]
   );
 
   const handleHeaderDragLeave = useCallback(() => {
     setHeaderDropTarget(null);
   }, []);
 
-  const handleHeaderDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      const fromCol = headerDragCol.current;
-      if (!fromCol || !headerDropTarget || !onReorderColumns) return;
-
-      const newOrder = [...columns];
-      const fromIndex = newOrder.indexOf(fromCol);
-      newOrder.splice(fromIndex, 1);
-      let toIndex = newOrder.indexOf(headerDropTarget.col);
-      if (headerDropTarget.position === "right") toIndex++;
-      newOrder.splice(toIndex, 0, fromCol);
-
-      onReorderColumns(newOrder);
-      headerDragCol.current = null;
-      setDraggingColumn(null);
-      setHeaderDropTarget(null);
-    },
-    [columns, headerDropTarget, onReorderColumns]
-  );
-
-  const handleHeaderDragEnd = useCallback(() => {
+  const finishHeaderDrag = useCallback((markFinished: boolean) => {
+    if (markFinished) {
+      justFinishedHeaderDrag.current = true;
+      requestAnimationFrame(() => { justFinishedHeaderDrag.current = false; });
+    }
     headerDragCol.current = null;
     setDraggingColumn(null);
     setHeaderDropTarget(null);
+    document.body.style.cursor = "";
   }, []);
+
+  const handleHeaderDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const fromCol = headerDragCol.current;
+      if (!fromCol || !headerDropTarget || !onReorderColumns) {
+        finishHeaderDrag(false);
+        return;
+      }
+
+      const newOrder = [...displayColumns];
+      const fromIndex = newOrder.indexOf(fromCol);
+      if (fromIndex < 0) {
+        finishHeaderDrag(false);
+        return;
+      }
+      newOrder.splice(fromIndex, 1);
+      let toIndex = newOrder.indexOf(headerDropTarget.col);
+      if (toIndex < 0) {
+        finishHeaderDrag(false);
+        return;
+      }
+      if (headerDropTarget.position === "right") toIndex++;
+      if (fromIndex === toIndex) {
+        finishHeaderDrag(true);
+        return;
+      }
+      newOrder.splice(toIndex, 0, fromCol);
+
+      onReorderColumns(newOrder);
+      finishHeaderDrag(true);
+    },
+    [displayColumns, finishHeaderDrag, headerDropTarget, onReorderColumns]
+  );
+
+  const handleHeaderDragEnd = useCallback(() => {
+    finishHeaderDrag(!!headerDragCol.current);
+  }, [finishHeaderDrag]);
 
   const handleResizeStart = useCallback(
     (e: React.MouseEvent, col: string) => {
@@ -1057,6 +1087,7 @@ export function DataGrid({
                   key={col}
                   className={[
                     "dg-cell dg-header-cell",
+                    onReorderColumns && !pivotMode ? "reorder-enabled" : "",
                     draggingColumn === col ? "column-dragging" : "",
                     activeStatsColumn === col ? "column-inspected" : "",
                     headerDropTarget?.col === col
@@ -1070,7 +1101,11 @@ export function DataGrid({
                   draggable={!pivotMode && !!onReorderColumns}
                   onMouseEnter={(e) => handleHeaderMouseEnter(e, col)}
                   onMouseLeave={handleHeaderMouseLeave}
-                  onClick={(e) => { if (!justFinishedResize.current) onSort(col, e.shiftKey); }}
+                  onClick={(e) => {
+                    if (!justFinishedResize.current && !justFinishedHeaderDrag.current) {
+                      onSort(col, e.shiftKey);
+                    }
+                  }}
                   onDragStart={(e) => handleHeaderDragStart(e, col)}
                   onDragOver={(e) => handleHeaderDragOver(e, col)}
                   onDragLeave={handleHeaderDragLeave}

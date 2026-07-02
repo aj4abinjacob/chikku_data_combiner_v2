@@ -999,6 +999,15 @@ html, body, #root {
     background: #ebf1f5;
   }
 
+  &.reorder-enabled {
+    cursor: grab;
+
+    &:active,
+    &.column-dragging {
+      cursor: grabbing;
+    }
+  }
+
   &.column-inspected {
     background: #e6f1f8;
     box-shadow: inset 0 -2px 0 #137cbd;
