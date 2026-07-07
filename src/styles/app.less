@@ -646,6 +646,11 @@ html, body, #root {
       margin: 0;
     }
 
+    .table-combine-checkbox-tooltip {
+      flex-shrink: 0;
+      display: inline-flex;
+    }
+
     .table-main {
       min-width: 0;
       flex: 1 1 auto;
@@ -854,6 +859,10 @@ html, body, #root {
       display: flex;
       gap: 2px;
 
+      .combine-select-action-tooltip {
+        display: inline-flex;
+      }
+
       .bp4-button {
         min-height: 22px;
         padding: 0 6px;
@@ -862,7 +871,13 @@ html, body, #root {
       }
     }
 
-    > .bp4-button {
+    .sidebar-combine-action-tooltip {
+      min-width: 0;
+      display: block;
+    }
+
+    > .bp4-button,
+    .sidebar-combine-action-tooltip .bp4-button {
       min-height: 26px;
       padding: 0 9px;
     }

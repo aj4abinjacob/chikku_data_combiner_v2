@@ -69,6 +69,10 @@ function isJsonFilePath(filePath: string): boolean {
   return ext === "json" || ext === "jsonl" || ext === "ndjson";
 }
 
+function isCombinableTable(table: LoadedTable): boolean {
+  return !isJsonFilePath(table.filePath);
+}
+
 function refreshedTable(previous: LoadedTable, next: LoadedTable): LoadedTable {
   return {
     ...next,
@@ -1121,8 +1125,12 @@ export function App(): React.ReactElement {
 
   // Open the column mapping dialog with selected tables
   const handleCombineOpen = useCallback((selectedNames: string[]) => {
-    if (selectedNames.length < 2) return;
-    setCombineTableNames(selectedNames);
+    const selectedNameSet = new Set(selectedNames);
+    const combinableNames = tablesRef.current
+      .filter((table) => selectedNameSet.has(table.tableName) && isCombinableTable(table))
+      .map((table) => table.tableName);
+    if (combinableNames.length < 2) return;
+    setCombineTableNames(combinableNames);
     setCombineDialogOpen(true);
   }, []);
 

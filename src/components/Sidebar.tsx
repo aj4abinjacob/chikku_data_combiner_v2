@@ -56,6 +56,11 @@ function getFileExtension(filePath: string): string {
   return filePath.split(".").pop()?.toLowerCase() || "";
 }
 
+function isJsonTable(table: LoadedTable): boolean {
+  const extension = getFileExtension(table.filePath);
+  return extension === "json" || extension === "jsonl" || extension === "ndjson";
+}
+
 function getFileListIcon(table: LoadedTable): FileListIcon {
   if (table.filePath.startsWith("(")) {
     return { icon: "th-derived", className: "table-icon-generated" };
@@ -121,15 +126,19 @@ export function Sidebar({
   // Drag-and-drop state
   const dragIndexRef = React.useRef<number | null>(null);
   const [dropTarget, setDropTarget] = useState<{ index: number; position: "top" | "bottom" } | null>(null);
+  const combinableTables = useMemo(() => tables.filter((table) => !isJsonTable(table)), [tables]);
+  const combinableTableNames = useMemo(
+    () => new Set(combinableTables.map((table) => table.tableName)),
+    [combinableTables]
+  );
 
-  // Clean up stale selections when tables change
+  // Clean up stale or non-combinable selections when tables change
   useEffect(() => {
-    const tableNames = new Set(tables.map((t) => t.tableName));
     setSelectedForCombine((prev) => {
-      const cleaned = new Set([...prev].filter((n) => tableNames.has(n)));
+      const cleaned = new Set([...prev].filter((n) => combinableTableNames.has(n)));
       return cleaned.size === prev.size ? prev : cleaned;
     });
-  }, [tables]);
+  }, [combinableTableNames]);
 
   // Clear search when active table changes
   useEffect(() => {
@@ -144,6 +153,9 @@ export function Sidebar({
   }, [tables, tableSearch]);
 
   const toggleCombineSelection = (tableName: string) => {
+    if (jsonWorkspaceActive) return;
+    if (!combinableTableNames.has(tableName)) return;
+
     setSelectedForCombine((prev) => {
       const next = new Set(prev);
       if (next.has(tableName)) next.delete(tableName);
@@ -153,7 +165,7 @@ export function Sidebar({
   };
 
   const selectAllTablesForCombine = () => {
-    setSelectedForCombine(new Set(tables.map((t) => t.tableName)));
+    setSelectedForCombine(new Set(combinableTables.map((t) => t.tableName)));
   };
 
   const deselectAllTablesForCombine = () => {
@@ -242,6 +254,20 @@ export function Sidebar({
   const exportCsvDisabledReason = jsonFileActions
     ? getJsonExportCsvDisabledReason(jsonFileActions)
     : null;
+  const combineSelectionDisabledReason = jsonWorkspaceActive
+    ? "Combine selection is unavailable in JSON view."
+    : null;
+  const combineDisabledReason = jsonWorkspaceActive
+    ? "Combine is unavailable in JSON view. Switch to a tabular file to combine non-JSON files."
+    : combinableTables.length < 2
+      ? "Open at least two non-JSON files to combine."
+      : selectedForCombine.size < 2
+        ? "Select at least two non-JSON files to combine."
+        : null;
+  const selectAllForCombineDisabled = !!combineSelectionDisabledReason
+    || selectedForCombine.size === combinableTables.length;
+  const deselectAllForCombineDisabled = !!combineSelectionDisabledReason
+    || selectedForCombine.size === 0;
 
   return (
     <div className={`sidebar${jsonWorkspaceActive ? " sidebar-json" : ""}`}>
@@ -289,6 +315,20 @@ export function Sidebar({
         )}
         {filteredTables.map((t) => {
           const fileIcon = getFileListIcon(t);
+          const canCombineTable = combinableTableNames.has(t.tableName);
+          const rowCombineSelectionDisabledReason = jsonWorkspaceActive
+            ? "Combine selection is unavailable in JSON view."
+            : canCombineTable
+              ? null
+              : "JSON files cannot be selected for combine.";
+          const combineCheckbox = (
+            <Checkbox
+              checked={selectedForCombine.has(t.tableName)}
+              onChange={() => toggleCombineSelection(t.tableName)}
+              className="table-combine-checkbox"
+              disabled={!!rowCombineSelectionDisabledReason}
+            />
+          );
 
           return (
             <div
@@ -296,11 +336,17 @@ export function Sidebar({
               className={`table-list-item${t.tableName === activeTable ? " active" : ""}${selectedForCombine.has(t.tableName) ? " selected" : ""}`}
             >
               {tables.length >= 2 && (
-                <Checkbox
-                  checked={selectedForCombine.has(t.tableName)}
-                  onChange={() => toggleCombineSelection(t.tableName)}
-                  className="table-combine-checkbox"
-                />
+                rowCombineSelectionDisabledReason ? (
+                  <Tooltip2
+                    content={rowCombineSelectionDisabledReason}
+                    placement="top"
+                    minimal
+                  >
+                    <span className="table-combine-checkbox-tooltip">
+                      {combineCheckbox}
+                    </span>
+                  </Tooltip2>
+                ) : combineCheckbox
               )}
               <span
                 className="table-main"
@@ -340,31 +386,59 @@ export function Sidebar({
             <span className="combine-count">{selectedForCombine.size} selected</span>
           </div>
           <div className="combine-select-actions">
-            <Button
+            <Tooltip2
+              content={combineSelectionDisabledReason ?? "Select all non-JSON files"}
+              disabled={!combineSelectionDisabledReason}
+              placement="top"
               minimal
-              small
-              text="All"
-              title="Select all files for combine"
-              disabled={selectedForCombine.size === tables.length}
-              onClick={selectAllTablesForCombine}
-            />
-            <Button
+            >
+              <span className="combine-select-action-tooltip">
+                <Button
+                  minimal
+                  small
+                  text="All"
+                  title="Select all files for combine"
+                  disabled={selectAllForCombineDisabled}
+                  onClick={selectAllTablesForCombine}
+                />
+              </span>
+            </Tooltip2>
+            <Tooltip2
+              content={combineSelectionDisabledReason ?? "Deselect all files"}
+              disabled={!combineSelectionDisabledReason}
+              placement="top"
               minimal
-              small
-              text="None"
-              title="Deselect all files"
-              disabled={selectedForCombine.size === 0}
-              onClick={deselectAllTablesForCombine}
-            />
+            >
+              <span className="combine-select-action-tooltip">
+                <Button
+                  minimal
+                  small
+                  text="None"
+                  title="Deselect all files"
+                  disabled={deselectAllForCombineDisabled}
+                  onClick={deselectAllTablesForCombine}
+                />
+              </span>
+            </Tooltip2>
           </div>
-          <Button
-            intent={Intent.PRIMARY}
-            icon="merge-columns"
-            text="Combine"
-            onClick={() => onCombine([...selectedForCombine])}
-            small
-            disabled={selectedForCombine.size < 2}
-          />
+          <Tooltip2
+            content={combineDisabledReason ?? "Combine selected files"}
+            disabled={!combineDisabledReason}
+            placement="top"
+            minimal
+          >
+            <span className="sidebar-combine-action-tooltip">
+              <Button
+                intent={Intent.PRIMARY}
+                icon="merge-columns"
+                text="Combine"
+                onClick={() => onCombine([...selectedForCombine])}
+                small
+                fill
+                disabled={!!combineDisabledReason}
+              />
+            </span>
+          </Tooltip2>
         </div>
       )}
 
