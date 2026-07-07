@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, ButtonGroup, Icon } from "@blueprintjs/core";
-import { Popover2 } from "@blueprintjs/popover2";
 import { SoftSelect } from "./SoftSelect";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy } from "../types";
@@ -75,7 +74,6 @@ interface DataGridProps {
   columnTypes?: Map<string, string>;
   onGetColumnStats?: (column: string) => Promise<ColumnStats>;
   onGetColumnUniques?: (column: string) => Promise<ColumnStatsUniqueValue[]>;
-  onInsertUniqueValuesJsonArray?: (column: string) => void;
   colOpsSteps?: ColOpStep[];
   undoStrategy?: UndoStrategy;
   onColOpApply?: (opType: ColOpType, column: string, params: Record<string, string>) => Promise<void>;
@@ -108,7 +106,6 @@ export function DataGrid({
   columnTypes,
   onGetColumnStats,
   onGetColumnUniques,
-  onInsertUniqueValuesJsonArray,
   colOpsSteps = [],
   undoStrategy = "per-step",
   onColOpApply,
@@ -141,7 +138,6 @@ export function DataGrid({
   const [tooltipFlipped, setTooltipFlipped] = useState(false);
   const [columnDisplayFormats, setColumnDisplayFormats] = useState<Record<string, ColumnDisplayFormat>>({});
   const [previewColumnFormat, setPreviewColumnFormat] = useState<{ column: string; format: ColumnDisplayFormat } | null>(null);
-  const [columnMenuOpen, setColumnMenuOpen] = useState<string | null>(null);
 
   // ── Column stats rail state ──
   const [columnStatsPanel, setColumnStatsPanel] = useState<ColumnStatsPanelState | null>(null);
@@ -336,7 +332,7 @@ export function DataGrid({
     (e: React.MouseEvent, column: string) => {
       clearDismissTimer();
       const target = e.target as HTMLElement;
-      if (target.closest(".dg-header-actions, .col-resize-handle")) return;
+      if (target.closest(".dg-header-stats-btn, .col-resize-handle")) return;
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       tooltipTimer.current = setTimeout(() => {
         setTooltip({
@@ -457,10 +453,6 @@ export function DataGrid({
   useEffect(() => {
     rangeRef.current = null;
   }, [columnsKey]);
-
-  useEffect(() => {
-    setColumnMenuOpen(null);
-  }, [columnsKey, pivotMode]);
 
   useEffect(() => {
     if (suppressNextStatsResetClose.current) {
@@ -797,14 +789,6 @@ export function DataGrid({
     requestColumnStats(columnStatsPanel.column);
   }, [columnStatsPanel, requestColumnStats, requestColumnUniques]);
 
-  const handleInsertUniqueValuesJsonArray = useCallback(
-    (column: string) => {
-      setColumnMenuOpen(null);
-      onInsertUniqueValuesJsonArray?.(column);
-    },
-    [onInsertUniqueValuesJsonArray]
-  );
-
   const handleColumnStatsCleanApply = useCallback(
     async (opType: ColOpType, column: string, params: Record<string, string>) => {
       if (!onColOpApply) return;
@@ -1106,7 +1090,6 @@ export function DataGrid({
                     onReorderColumns && !pivotMode ? "reorder-enabled" : "",
                     draggingColumn === col ? "column-dragging" : "",
                     activeStatsColumn === col ? "column-inspected" : "",
-                    columnMenuOpen === col ? "column-menu-open" : "",
                     headerDropTarget?.col === col
                       ? `header-drop-${headerDropTarget.position}`
                       : "",
@@ -1142,71 +1125,22 @@ export function DataGrid({
                       />
                     </span>
                   )}
-                  {!pivotMode && (onGetColumnStats || onInsertUniqueValuesJsonArray) && (
-                    <div
-                      className="dg-header-actions"
+                  {onGetColumnStats && !pivotMode && (
+                    <button
+                      type="button"
+                      className={`dg-header-stats-btn${activeStatsColumn === col ? " active" : ""}`}
+                      title="Show column stats"
+                      aria-label={`Show stats for ${col}`}
+                      draggable={false}
                       onMouseEnter={handleHeaderMouseLeave}
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
                       }}
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => handleHeaderStatsClick(e, col)}
                     >
-                      {onGetColumnStats && (
-                        <button
-                          type="button"
-                          className={`dg-header-action-btn dg-header-stats-btn${activeStatsColumn === col ? " active" : ""}`}
-                          title="Show column stats"
-                          aria-label={`Show stats for ${col}`}
-                          draggable={false}
-                          onClick={(e) => handleHeaderStatsClick(e, col)}
-                        >
-                          <Icon icon="chart" size={12} />
-                        </button>
-                      )}
-                      {onInsertUniqueValuesJsonArray && (
-                        <Popover2
-                          content={
-                            <div className="dg-header-action-menu" role="menu" aria-label={`Actions for ${col}`}>
-                              <button
-                                type="button"
-                                className="dg-header-action-menu-item"
-                                role="menuitem"
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  handleInsertUniqueValuesJsonArray(col);
-                                }}
-                              >
-                                <Icon icon="code" size={14} />
-                                <span>Insert unique values as JSON array</span>
-                              </button>
-                            </div>
-                          }
-                          isOpen={columnMenuOpen === col}
-                          onInteraction={(nextOpen) => setColumnMenuOpen(nextOpen ? col : null)}
-                          placement="bottom-end"
-                          minimal
-                        >
-                          <button
-                            type="button"
-                            className={`dg-header-action-btn dg-header-menu-btn${columnMenuOpen === col ? " active" : ""}`}
-                            title="Column actions"
-                            aria-label={`Column actions for ${col}`}
-                            aria-haspopup="menu"
-                            aria-expanded={columnMenuOpen === col}
-                            draggable={false}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              setColumnMenuOpen((open) => open === col ? null : col);
-                            }}
-                          >
-                            <Icon icon="more" size={12} />
-                          </button>
-                        </Popover2>
-                      )}
-                    </div>
+                      <Icon icon="chart" size={12} />
+                    </button>
                   )}
                   <div
                     className="col-resize-handle"

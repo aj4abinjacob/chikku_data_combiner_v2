@@ -14,8 +14,7 @@ import { ImportRetryDialog } from "./ImportRetryDialog";
 import { ExportDialog } from "./ExportDialog";
 import { HistoryDialog } from "./HistoryDialog";
 import { UpdateNotice } from "./UpdateNotice";
-import { JsonWorkspace, type JsonWorkspaceHandle } from "./JsonWorkspace";
-import { UniqueValuesJsonDialog } from "./UniqueValuesJsonDialog";
+import { JsonWorkspace } from "./JsonWorkspace";
 import { buildColumnStatsSummaryQuery, buildColumnTopValuesQuery, buildColumnUniqueValuesQuery, buildCombineQuery } from "../utils/sqlBuilder";
 import { buildColOpUpdateSQL, buildStepDescription } from "../utils/colOpsSQL";
 import { buildRowOpSQL, buildRowOpStepDescription } from "../utils/rowOpsSQL";
@@ -262,7 +261,6 @@ export function App(): React.ReactElement {
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [combineDialogOpen, setCombineDialogOpen] = useState(false);
   const [combineTableNames, setCombineTableNames] = useState<string[]>([]);
-  const [uniqueJsonColumn, setUniqueJsonColumn] = useState<string | null>(null);
   const [schema, setSchema] = useState<ColumnInfo[]>([]);
   const [resetKey, setResetKey] = useState(0);
   const [schemaVersion, setSchemaVersion] = useState(0);
@@ -302,7 +300,6 @@ export function App(): React.ReactElement {
   const [filterPanelMounted, setFilterPanelMounted] = useState(false);
   const [fileDragState, setFileDragState] = useState<"idle" | "supported" | "unsupported">("idle");
   const filterPanelExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const jsonWorkspaceRef = useRef<JsonWorkspaceHandle>(null);
 
   // Use refs so IPC callbacks always see latest state
   const tablesRef = useRef(tables);
@@ -343,7 +340,6 @@ export function App(): React.ReactElement {
   const jsonWorkspaceActive = !!activeLoadedTable
     && !activeLoadedTable.filePath.startsWith("(")
     && isJsonFilePath(activeLoadedTable.filePath);
-  const canInsertUniqueJsonArray = jsonWorkspaceActive && !!jsonWorkspaceRef.current?.canInsertJsonArray();
 
   const handleGetColumnStats = useCallback(
     async (column: string): Promise<ColumnStats> => {
@@ -1258,17 +1254,6 @@ export function App(): React.ReactElement {
 
   const handleDisplayDecimalPlacesChange = useCallback((places: number) => {
     setDisplayDecimalPlaces(clampDisplayDecimalPlaces(places));
-  }, []);
-
-  const handleOpenUniqueValuesJsonArray = useCallback((column: string) => {
-    setUniqueJsonColumn(column);
-  }, []);
-
-  const handleInsertUniqueValuesJsonArray = useCallback(async (jsonArrayText: string) => {
-    const result = jsonWorkspaceRef.current?.insertJsonArray(jsonArrayText);
-    if (!result?.ok) {
-      throw new Error(result?.message ?? "JSON editor is not active");
-    }
   }, []);
 
   // ── Pivot View handlers ──
@@ -2320,7 +2305,6 @@ export function App(): React.ReactElement {
             <>
               {jsonWorkspaceActive && activeLoadedTable ? (
                 <JsonWorkspace
-                  ref={jsonWorkspaceRef}
                   table={activeLoadedTable}
                   jsonTables={tables.filter((loadedTable) => !loadedTable.filePath.startsWith("(") && isJsonFilePath(loadedTable.filePath))}
                   onOpenFiles={handleChooseFiles}
@@ -2374,7 +2358,6 @@ export function App(): React.ReactElement {
                     columnTypes={columnTypes}
                     onGetColumnStats={pivotActive ? undefined : handleGetColumnStats}
                     onGetColumnUniques={pivotActive ? undefined : handleGetColumnUniques}
-                    onInsertUniqueValuesJsonArray={pivotActive ? undefined : handleOpenUniqueValuesJsonArray}
                     colOpsSteps={colOpsSteps}
                     undoStrategy={undoStrategy}
                     onColOpApply={handleColOpApply}
@@ -2525,21 +2508,6 @@ export function App(): React.ReactElement {
         onRevertToEntry={handleRevertToEntry}
         onExportHistory={handleExportHistory}
         onImportHistory={handleImportHistory}
-      />
-      <UniqueValuesJsonDialog
-        isOpen={uniqueJsonColumn !== null}
-        activeTable={activeTable}
-        sourceColumn={uniqueJsonColumn}
-        filters={viewState.filters}
-        canInsertIntoJson={canInsertUniqueJsonArray}
-        targetLabel={
-          canInsertUniqueJsonArray
-            ? "JSON editor (selected path or caret)"
-            : "Copy to clipboard (JSON editor not active)"
-        }
-        dataVersion={dataVersion}
-        onClose={() => setUniqueJsonColumn(null)}
-        onInsertJsonArray={handleInsertUniqueValuesJsonArray}
       />
       {pendingExcelImport && (
         <ExcelSheetPickerDialog
