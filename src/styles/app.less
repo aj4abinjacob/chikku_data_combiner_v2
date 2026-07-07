@@ -5813,9 +5813,14 @@ button.dg-stats-metric {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(340px, 1fr) minmax(340px, 1fr);
+  grid-template-columns: minmax(240px, var(--json-split-left, 50%)) 8px minmax(280px, 1fr);
   overflow: hidden;
   border-top: 1px solid #e1e8ed;
+}
+
+.json-compare-layout.json-split-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .json-document-pane {
@@ -5829,11 +5834,42 @@ button.dg-stats-metric {
 }
 
 .json-source-document {
-  border-right: 1px solid #d8e1e8;
+  border-right: 0;
 }
 
 .json-structured-document {
   border-left: 0;
+}
+
+.json-split-divider {
+  position: relative;
+  z-index: 4;
+  min-width: 8px;
+  min-height: 0;
+  border-left: 1px solid #e1e8ed;
+  border-right: 1px solid #d8e1e8;
+  background: #f7f9fb;
+  cursor: col-resize;
+  outline: none;
+  touch-action: none;
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    transform: translateX(-50%);
+    background: #bfccd6;
+  }
+
+  &:hover::before,
+  &:focus::before,
+  .json-compare-layout.json-split-resizing &::before {
+    width: 3px;
+    background: #137cbd;
+  }
 }
 
 .json-document-titlebar {
@@ -5997,6 +6033,10 @@ button.dg-stats-metric {
   .json-compare-layout {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(260px, 1fr) minmax(260px, 1fr);
+  }
+
+  .json-split-divider {
+    display: none;
   }
 
   .json-source-document,
@@ -12142,6 +12182,7 @@ html.dark-theme #root {
   .json-document-subbar,
   .json-source-document,
   .json-structured-document,
+  .json-split-divider,
   .json-main,
   .json-tree-rail,
   .json-split-resizer,
@@ -12165,6 +12206,7 @@ html.dark-theme #root {
 
   .json-panel-header,
   .json-document-subbar,
+  .json-split-divider,
   .json-tree-rail,
   .json-split-resizer,
   .json-tree-tools,
@@ -12179,6 +12221,13 @@ html.dark-theme #root {
     background: @dark-border-1;
   }
 
+  .json-split-divider::before {
+    background: @dark-border-1;
+  }
+
+  .json-split-divider:hover::before,
+  .json-split-divider:focus::before,
+  .json-compare-layout.json-split-resizing .json-split-divider::before,
   .json-split-resizer:hover::before,
   .json-split-resizer:focus::before,
   .json-main.resizing .json-split-resizer::before {

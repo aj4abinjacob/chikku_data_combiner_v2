@@ -24,6 +24,10 @@ import {
 
 const JSON_HISTORY_LIMIT = 100;
 const JSON_TYPING_PUSH_DELAY = 700;
+const JSON_SPLIT_DIVIDER_PX = 8;
+const JSON_SPLIT_LEFT_MIN_PX = 240;
+const JSON_SPLIT_RIGHT_MIN_PX = 280;
+const JSON_SPLIT_KEY_STEP = 4;
 
 interface JsonHistoryEntry {
   text: string;
@@ -351,9 +355,13 @@ export function JsonWorkspace({
     includeArrayIndex: false,
   });
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [jsonSplitPercent, setJsonSplitPercent] = useState(50);
+  const [jsonSplitResizing, setJsonSplitResizing] = useState(false);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
   const rawTextRef = useRef(rawText);
   const pushTimerRef = useRef<number | null>(null);
+  const splitPointerIdRef = useRef<number | null>(null);
 
   const canUndo = history.index > 0;
   const canRedo = history.index < history.entries.length - 1;
@@ -688,6 +696,80 @@ export function JsonWorkspace({
     return () => window.clearTimeout(id);
   }, [statusMessage]);
 
+  useEffect(() => {
+    if (!jsonSplitResizing) return;
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    return () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [jsonSplitResizing]);
+
+  const updateJsonSplitFromPointer = useCallback((clientX: number) => {
+    const container = splitContainerRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    if (rect.width <= 0) return;
+
+    const maxLeftPx = Math.max(
+      JSON_SPLIT_LEFT_MIN_PX,
+      rect.width - JSON_SPLIT_DIVIDER_PX - JSON_SPLIT_RIGHT_MIN_PX
+    );
+    const leftPx = Math.min(maxLeftPx, Math.max(JSON_SPLIT_LEFT_MIN_PX, clientX - rect.left));
+    setJsonSplitPercent((leftPx / rect.width) * 100);
+  }, []);
+
+  const finishJsonSplitResize = useCallback((event?: React.PointerEvent<HTMLDivElement>) => {
+    if (event && splitPointerIdRef.current !== event.pointerId) return;
+    if (event?.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    splitPointerIdRef.current = null;
+    setJsonSplitResizing(false);
+  }, []);
+
+  const handleJsonSplitPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    splitPointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setJsonSplitResizing(true);
+    updateJsonSplitFromPointer(event.clientX);
+  }, [updateJsonSplitFromPointer]);
+
+  const handleJsonSplitPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (splitPointerIdRef.current !== event.pointerId) return;
+    event.preventDefault();
+    updateJsonSplitFromPointer(event.clientX);
+  }, [updateJsonSplitFromPointer]);
+
+  const handleJsonSplitKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const direction = event.key === "ArrowLeft" ? -1 : 1;
+    setJsonSplitPercent((prev) => {
+      const target = prev + direction * JSON_SPLIT_KEY_STEP;
+      const container = splitContainerRef.current;
+      if (!container) return Math.min(78, Math.max(22, target));
+
+      const rect = container.getBoundingClientRect();
+      if (rect.width <= 0) return Math.min(78, Math.max(22, target));
+
+      const minPercent = (JSON_SPLIT_LEFT_MIN_PX / rect.width) * 100;
+      const maxPercent = Math.max(
+        minPercent,
+        ((rect.width - JSON_SPLIT_DIVIDER_PX - JSON_SPLIT_RIGHT_MIN_PX) / rect.width) * 100
+      );
+      return Math.min(maxPercent, Math.max(minPercent, target));
+    });
+  }, []);
+
   const renderStructuredDocument = ({
     className,
     title,
@@ -977,6 +1059,28 @@ export function JsonWorkspace({
     </>
   ) : null;
 
+  const jsonSplitStyle = {
+    "--json-split-left": `${jsonSplitPercent}%`,
+  } as React.CSSProperties;
+
+  const jsonSplitDivider = (
+    <div
+      className="json-split-divider"
+      role="separator"
+      aria-label="Resize JSON panes"
+      aria-orientation="vertical"
+      aria-valuemin={22}
+      aria-valuemax={78}
+      aria-valuenow={Math.round(jsonSplitPercent)}
+      tabIndex={0}
+      onPointerDown={handleJsonSplitPointerDown}
+      onPointerMove={handleJsonSplitPointerMove}
+      onPointerUp={finishJsonSplitResize}
+      onPointerCancel={finishJsonSplitResize}
+      onKeyDown={handleJsonSplitKeyDown}
+    />
+  );
+
   return (
     <div className={`json-workspace${compareMode ? " compare-enabled" : ""}`}>
       {loadError && (
@@ -985,7 +1089,11 @@ export function JsonWorkspace({
         </Callout>
       )}
 
-      <div className={`json-compare-layout${compareMode ? " json-comparison-layout" : " json-single-layout"}`}>
+      <div
+        ref={splitContainerRef}
+        className={`json-compare-layout${compareMode ? " json-comparison-layout" : " json-single-layout"}${jsonSplitResizing ? " json-split-resizing" : ""}`}
+        style={jsonSplitStyle}
+      >
         {compareMode ? (
           <>
             {renderStructuredDocument({
@@ -1013,6 +1121,7 @@ export function JsonWorkspace({
               previewTruncatedValue: previewTruncated,
               titleActions: compareSourceActions,
             })}
+            {jsonSplitDivider}
             {compareTable && renderStructuredDocument({
               className: "json-document-pane json-structured-document json-compare-pane",
               title: getFileName(compareTable.filePath),
@@ -1155,6 +1264,7 @@ export function JsonWorkspace({
               </div>
             </section>
 
+            {jsonSplitDivider}
             {renderStructuredDocument({
               className: "json-document-pane json-structured-document",
               title: "Parsed view",
