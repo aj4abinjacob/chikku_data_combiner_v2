@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Button, Icon, Intent } from "@blueprintjs/core";
 import { getCurrentWindow, type DragDropEvent } from "@tauri-apps/api/window";
-import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions, ColumnStats, ColumnStatsUniqueValue, ComparisonViewConfig } from "../types";
+import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions, ColumnStats, ColumnStatsUniqueValue, ComparisonViewConfig, JsonWorkspaceFileActions } from "../types";
 import { Sidebar } from "./Sidebar";
 import { DataGrid } from "./DataGrid";
 import { ComparisonView, createDefaultComparisonConfig } from "./ComparisonView";
@@ -299,6 +299,7 @@ export function App(): React.ReactElement {
   });
   const [filterPanelMounted, setFilterPanelMounted] = useState(false);
   const [fileDragState, setFileDragState] = useState<"idle" | "supported" | "unsupported">("idle");
+  const [jsonFileActions, setJsonFileActions] = useState<JsonWorkspaceFileActions | null>(null);
   const filterPanelExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Use refs so IPC callbacks always see latest state
@@ -2286,6 +2287,7 @@ export function App(): React.ReactElement {
               onOpenFiles={handleChooseFiles}
               onHide={() => setSidebarVisible(false)}
               jsonWorkspaceActive={jsonWorkspaceActive}
+              jsonFileActions={jsonFileActions}
             />
           </div>
           <div className="sidebar-shell-strip" aria-hidden={sidebarVisible}>
@@ -2309,6 +2311,7 @@ export function App(): React.ReactElement {
                   jsonTables={tables.filter((loadedTable) => !loadedTable.filePath.startsWith("(") && isJsonFilePath(loadedTable.filePath))}
                   onOpenFiles={handleChooseFiles}
                   onReloadTable={handleReloadActiveJsonTable}
+                  onFileActionsChange={setJsonFileActions}
                 />
               ) : comparisonActive && comparisonConfig && activeTable ? (
                 <ComparisonView

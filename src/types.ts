@@ -110,6 +110,25 @@ export interface LoadedTable {
   reloadVersion?: number;
 }
 
+export interface JsonWorkspaceFileActions {
+  isDirty: boolean;
+  isValid: boolean;
+  isTableView: boolean;
+  saving: boolean;
+  exporting: boolean;
+  canExportCsv: boolean;
+  canCompare: boolean;
+  historyOpen: boolean;
+  onOpenFiles: () => void;
+  onSave: () => void | Promise<void>;
+  onSaveAs: () => void | Promise<void>;
+  onRevert: () => void;
+  onToggleHistory: () => void;
+  onExportCsv: () => void | Promise<void>;
+  onCopyPath: () => void | Promise<void>;
+  onCompare: () => void;
+}
+
 export interface ColumnOperation {
   type: "regex_extract" | "replace_regex" | "substring" | "trim" | "upper" | "lower" | "custom_sql" | "create_column" | "delete_column" | "combine_columns" | "rename_column" | "sample_table" | "remove_duplicates";
   sourceColumn: string;

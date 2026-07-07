@@ -7,7 +7,7 @@ import {
   Intent,
 } from "@blueprintjs/core";
 import { Tooltip2 } from "@blueprintjs/popover2";
-import { LoadedTable, ColumnInfo, SortColumn, PivotViewConfig } from "../types";
+import { LoadedTable, ColumnInfo, SortColumn, PivotViewConfig, JsonWorkspaceFileActions } from "../types";
 import { DataOperationsDialog } from "./DataOperationsDialog";
 import { AggregateDialog } from "./AggregateDialog";
 import { PivotDialog } from "./PivotDialog";
@@ -44,6 +44,7 @@ interface SidebarProps {
   onOpenFiles: () => void;
   onHide: () => void;
   jsonWorkspaceActive?: boolean;
+  jsonFileActions?: JsonWorkspaceFileActions | null;
 }
 
 type FileListIcon = {
@@ -66,6 +67,14 @@ function getFileListIcon(table: LoadedTable): FileListIcon {
   }
 
   return { icon: "panel-table", className: "table-icon-tabular" };
+}
+
+function getJsonExportCsvDisabledReason(actions: JsonWorkspaceFileActions): string | null {
+  if (actions.canExportCsv) return null;
+  if (actions.exporting) return "Exporting CSV...";
+  if (!actions.isValid) return "Fix the JSON before exporting CSV.";
+  if (!actions.isTableView) return "Switch Parsed view to table to export CSV.";
+  return "No flattened table data to export.";
 }
 
 export function Sidebar({
@@ -97,6 +106,7 @@ export function Sidebar({
   onOpenFiles,
   onHide,
   jsonWorkspaceActive = false,
+  jsonFileActions = null,
 }: SidebarProps): React.ReactElement {
   const [dataOpDialogOpen, setDataOpDialogOpen] = useState(false);
   const [aggregateDialogOpen, setAggregateDialogOpen] = useState(false);
@@ -229,6 +239,9 @@ export function Sidebar({
   const noneVisible = visibleColumns.length === 0;
   const visibleColumnCount = visibleColumns.length;
   const compareDisabled = tables.length < 2;
+  const exportCsvDisabledReason = jsonFileActions
+    ? getJsonExportCsvDisabledReason(jsonFileActions)
+    : null;
 
   return (
     <div className={`sidebar${jsonWorkspaceActive ? " sidebar-json" : ""}`}>
@@ -352,6 +365,93 @@ export function Sidebar({
             small
             disabled={selectedForCombine.size < 2}
           />
+        </div>
+      )}
+
+      {jsonWorkspaceActive && jsonFileActions && (
+        <div className="sidebar-section sidebar-file-actions">
+          <div className="sidebar-section-header">
+            <div className="sidebar-heading-block">
+              <h4>File Options</h4>
+              {jsonFileActions.isDirty && (
+                <span className="sidebar-dirty-dot" title="Unsaved changes" />
+              )}
+            </div>
+            <span className={`sidebar-file-state${jsonFileActions.isDirty ? " is-dirty" : ""}`}>
+              {jsonFileActions.isDirty ? "Unsaved" : "Saved"}
+            </span>
+          </div>
+          <div className="sidebar-file-action-grid">
+            <Button
+              icon="folder-open"
+              text="Open"
+              onClick={jsonFileActions.onOpenFiles}
+              small
+            />
+            <Button
+              icon="floppy-disk"
+              text="Save"
+              intent={Intent.PRIMARY}
+              onClick={jsonFileActions.onSave}
+              disabled={!jsonFileActions.isDirty || !jsonFileActions.isValid || jsonFileActions.saving}
+              loading={jsonFileActions.saving}
+              small
+            />
+            <Button
+              icon="duplicate"
+              text="Save As"
+              onClick={jsonFileActions.onSaveAs}
+              disabled={!jsonFileActions.isValid || jsonFileActions.saving}
+              small
+            />
+            <Button
+              icon="reset"
+              text="Revert"
+              onClick={jsonFileActions.onRevert}
+              disabled={!jsonFileActions.isDirty}
+              small
+            />
+            <Button
+              icon="history"
+              text="History"
+              active={jsonFileActions.historyOpen}
+              onClick={jsonFileActions.onToggleHistory}
+              small
+            />
+            <Button
+              icon="path"
+              text="Copy Path"
+              onClick={jsonFileActions.onCopyPath}
+              disabled={!jsonFileActions.isValid}
+              small
+            />
+            <Tooltip2
+              content={exportCsvDisabledReason ?? "Export flattened table as CSV"}
+              disabled={!exportCsvDisabledReason}
+              placement="top"
+              minimal
+            >
+              <span className="sidebar-file-action-tooltip">
+                <Button
+                  icon="export"
+                  text="Export CSV"
+                  onClick={jsonFileActions.onExportCsv}
+                  disabled={!jsonFileActions.canExportCsv}
+                  loading={jsonFileActions.exporting}
+                  small
+                  fill
+                />
+              </span>
+            </Tooltip2>
+            <Button
+              icon="comparison"
+              text="Compare"
+              onClick={jsonFileActions.onCompare}
+              disabled={!jsonFileActions.canCompare}
+              title={jsonFileActions.canCompare ? "Compare with another loaded JSON" : "Open another JSON file to compare"}
+              small
+            />
+          </div>
         </div>
       )}
 

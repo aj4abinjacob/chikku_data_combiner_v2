@@ -10,7 +10,7 @@ import {
   Tag,
 } from "@blueprintjs/core";
 import { SoftSelect } from "./SoftSelect";
-import { LoadedTable } from "../types";
+import { JsonWorkspaceFileActions, LoadedTable } from "../types";
 import {
   FlattenOptions,
   JsonValue,
@@ -84,6 +84,7 @@ interface JsonWorkspaceProps {
   jsonTables: LoadedTable[];
   onOpenFiles: () => void;
   onReloadTable: () => Promise<void>;
+  onFileActionsChange?: (actions: JsonWorkspaceFileActions | null) => void;
 }
 
 function getFileName(path: string): string {
@@ -332,6 +333,7 @@ export function JsonWorkspace({
   jsonTables,
   onOpenFiles,
   onReloadTable,
+  onFileActionsChange,
 }: JsonWorkspaceProps): React.ReactElement {
   const [rawText, setRawText] = useState("");
   const [originalText, setOriginalText] = useState("");
@@ -383,11 +385,17 @@ export function JsonWorkspace({
   const parsed = useMemo(() => parseJsonText(rawText, extension), [rawText, extension]);
   const isDirty = rawText !== originalText;
   const isValid = parsed.error === null && rawText.trim().length > 0;
+  const isTableView = structuredView === "table";
 
   const flattened = useMemo(() => {
     if (!isValid) return { rows: [], columns: [], recordPath: "$" };
     return flattenJson(parsed.value, flattenOptions);
   }, [isValid, parsed.value, flattenOptions]);
+  const canExportCsv = isTableView
+    && isValid
+    && flattened.rows.length > 0
+    && flattened.columns.length > 0
+    && !exporting;
 
   const previewRows = flattened.rows.slice(0, 120);
   const previewTruncated = flattened.rows.length > previewRows.length;
@@ -407,6 +415,7 @@ export function JsonWorkspace({
     () => jsonTables.filter((candidate) => candidate.tableName !== table.tableName),
     [jsonTables, table.tableName]
   );
+  const canCompare = comparisonCandidates.length > 0;
   const compareTable = useMemo(
     () => comparisonCandidates.find((candidate) => candidate.tableName === compareTableName) ?? comparisonCandidates[0] ?? null,
     [comparisonCandidates, compareTableName]
@@ -659,7 +668,7 @@ export function JsonWorkspace({
   }, [isValid, onReloadTable, rawText, table.filePath]);
 
   const handleExportCsv = useCallback(async () => {
-    if (flattened.rows.length === 0 || flattened.columns.length === 0) return;
+    if (!isTableView || flattened.rows.length === 0 || flattened.columns.length === 0) return;
     setExporting(true);
     setStatusMessage(null);
     try {
@@ -672,7 +681,7 @@ export function JsonWorkspace({
     } finally {
       setExporting(false);
     }
-  }, [flattened.columns, flattened.rows]);
+  }, [flattened.columns, flattened.rows, isTableView]);
 
   const handleSaveAs = useCallback(async () => {
     if (!isValid) {
@@ -692,6 +701,10 @@ export function JsonWorkspace({
       setSaving(false);
     }
   }, [isValid, extension, rawText]);
+
+  useEffect(() => () => {
+    onFileActionsChange?.(null);
+  }, [onFileActionsChange]);
 
   const writeClipboard = useCallback(async (text: string, successMessage: string): Promise<boolean> => {
     try {
@@ -719,6 +732,44 @@ export function JsonWorkspace({
     setWrapEditorContent(nextWrapped);
     showCommandFeedback("wrap", nextWrapped ? "Wrapped" : "Unwrapped");
   }, [showCommandFeedback, wrapEditorContent]);
+
+  useEffect(() => {
+    onFileActionsChange?.({
+      isDirty,
+      isValid,
+      isTableView,
+      saving,
+      exporting,
+      canExportCsv,
+      canCompare,
+      historyOpen: historyPanelOpen,
+      onOpenFiles,
+      onSave: handleSave,
+      onSaveAs: handleSaveAs,
+      onRevert: handleRevert,
+      onToggleHistory: () => setHistoryPanelOpen((prev) => !prev),
+      onExportCsv: handleExportCsv,
+      onCopyPath: () => handleCopyPath(selectedPath),
+      onCompare: () => setCompareMode(true),
+    });
+  }, [
+    canCompare,
+    canExportCsv,
+    exporting,
+    handleCopyPath,
+    handleExportCsv,
+    handleRevert,
+    handleSave,
+    handleSaveAs,
+    historyPanelOpen,
+    isDirty,
+    isValid,
+    isTableView,
+    onFileActionsChange,
+    onOpenFiles,
+    saving,
+    selectedPath,
+  ]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -867,7 +918,7 @@ export function JsonWorkspace({
     flattenedData: typeof flattened;
     previewRowsData: typeof previewRows;
     previewTruncatedValue: boolean;
-    titleActions: React.ReactNode;
+    titleActions?: React.ReactNode;
   }) => {
     const searchActive = search.trim().length > 0;
     const matchesRoot = isValidDocument ? nodeMatches(parsedResult.value as JsonValue, "root", "$", search) : false;
@@ -881,7 +932,7 @@ export function JsonWorkspace({
       <section className={className}>
         <div className="json-document-titlebar">
           <span className="json-file-name" title={filePath}>{title}</span>
-          <div className="json-document-actions">{titleActions}</div>
+          {titleActions && <div className="json-document-actions">{titleActions}</div>}
         </div>
 
         <div className="json-document-subbar">
@@ -1050,32 +1101,6 @@ export function JsonWorkspace({
     );
   };
 
-  const activeStructuredActions = (
-    <>
-      <Tag minimal intent={isValid ? Intent.SUCCESS : Intent.DANGER} icon={isValid ? "tick-circle" : "error"}>
-        {isValid ? "Valid JSON" : "Invalid JSON"}
-      </Tag>
-      <Button minimal small icon="path" text="Copy Path" onClick={() => handleCopyPath(selectedPath)} disabled={!isValid} />
-      <Button
-        minimal
-        small
-        icon={exporting ? <Spinner size={14} /> : "export"}
-        text="Export CSV"
-        disabled={!isValid || flattened.rows.length === 0 || exporting}
-        onClick={handleExportCsv}
-      />
-      <Button
-        minimal
-        small
-        icon="comparison"
-        text="Compare"
-        disabled={comparisonCandidates.length === 0}
-        title={comparisonCandidates.length === 0 ? "Open another JSON file to compare" : "Compare with another loaded JSON"}
-        onClick={() => setCompareMode(true)}
-      />
-    </>
-  );
-
   const compareSourceActions = (
     <>
       <Tag minimal intent={isValid ? Intent.SUCCESS : Intent.DANGER} icon={isValid ? "tick-circle" : "error"}>
@@ -1136,7 +1161,7 @@ export function JsonWorkspace({
   );
 
   const historyPane = (
-    <section className="json-document-pane json-panel json-history-panel">
+    <section className="json-panel json-history-panel json-history-overlay">
       <div className="json-panel-header">
         <strong>History</strong>
         <button
@@ -1260,12 +1285,6 @@ export function JsonWorkspace({
                   {fileName}
                   {isDirty && <span className="json-dirty-dot" title="Unsaved changes">●</span>}
                 </span>
-                <div className="json-document-actions">
-                  <Button minimal small icon="folder-open" text="Open" onClick={onOpenFiles} />
-                  <Button minimal small icon="floppy-disk" text="Save" intent={Intent.PRIMARY} onClick={handleSave} disabled={!isDirty || !isValid || saving} loading={saving} />
-                  <Button minimal small icon="duplicate" text="Save As" onClick={handleSaveAs} disabled={!isValid || saving} />
-                  <Button minimal small icon="reset" text="Revert" onClick={handleRevert} disabled={!isDirty} />
-                </div>
               </div>
 
               <div className="json-document-subbar">
@@ -1276,7 +1295,6 @@ export function JsonWorkspace({
                 <div className="json-icon-actions">
                   <Button minimal small icon="undo" text="Undo" onClick={handleUndo} disabled={!canUndo} />
                   <Button minimal small icon="redo" text="Redo" onClick={handleRedo} disabled={!canRedo} />
-                  <Button minimal small icon="history" text="History" active={historyPanelOpen} onClick={() => setHistoryPanelOpen((prev) => !prev)} />
                   <Button
                     minimal
                     small
@@ -1343,12 +1361,12 @@ export function JsonWorkspace({
                   {parsed.error ? (
                     <>
                       <Icon icon="error" size={13} />
-                      <span>Error: {parsed.error}</span>
+                      <span>Invalid JSON: {parsed.error}</span>
                     </>
                   ) : (
                     <>
                       <Icon icon="tick-circle" size={13} />
-                      <span>{statusMessage || "Ready"}</span>
+                      <span>{statusMessage || "Valid JSON"}</span>
                     </>
                   )}
                 </div>
@@ -1357,7 +1375,7 @@ export function JsonWorkspace({
             </section>
 
             {jsonSplitDivider}
-            {historyPanelOpen ? historyPane : renderStructuredDocument({
+            {renderStructuredDocument({
               className: "json-document-pane json-structured-document",
               title: "Parsed view",
               filePath: table.filePath,
@@ -1380,8 +1398,8 @@ export function JsonWorkspace({
               flattenedData: flattened,
               previewRowsData: previewRows,
               previewTruncatedValue: previewTruncated,
-              titleActions: activeStructuredActions,
             })}
+            {historyPanelOpen && historyPane}
           </>
         )}
       </div>
