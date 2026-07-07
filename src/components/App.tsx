@@ -2239,7 +2239,7 @@ export function App(): React.ReactElement {
         </div>
       )}
       <div className="main-layout">
-        <div className={`sidebar-shell${sidebarVisible ? " sidebar-shell-open" : " sidebar-shell-collapsed"}`}>
+        <div className={`sidebar-shell${sidebarVisible ? " sidebar-shell-open" : " sidebar-shell-collapsed"}${jsonWorkspaceActive ? " sidebar-shell-json" : ""}`}>
           <div className="sidebar-shell-panel" aria-hidden={!sidebarVisible}>
             <Sidebar
               tables={tables}
@@ -2306,6 +2306,7 @@ export function App(): React.ReactElement {
               {jsonWorkspaceActive && activeLoadedTable ? (
                 <JsonWorkspace
                   table={activeLoadedTable}
+                  jsonTables={tables.filter((loadedTable) => !loadedTable.filePath.startsWith("(") && isJsonFilePath(loadedTable.filePath))}
                   onOpenFiles={handleChooseFiles}
                   onReloadTable={handleReloadActiveJsonTable}
                 />
@@ -2480,6 +2481,7 @@ export function App(): React.ReactElement {
         sidebarVisible={sidebarVisible}
         updateNotice={<UpdateNotice />}
         filterEnabled={!jsonWorkspaceActive}
+        showRowSummary={!jsonWorkspaceActive}
       />
       <CombineDialog
         isOpen={combineDialogOpen}

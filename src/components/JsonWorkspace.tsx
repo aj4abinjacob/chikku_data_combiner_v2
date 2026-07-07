@@ -22,10 +22,6 @@ import {
   toCsv,
 } from "../utils/jsonFlatten";
 
-const DEFAULT_JSON_TREE_WIDTH_PERCENT = 44;
-const JSON_TREE_MIN_WIDTH = 240;
-const JSON_EDITOR_MIN_WIDTH = 280;
-const JSON_SPLITTER_WIDTH = 8;
 const JSON_HISTORY_LIMIT = 100;
 const JSON_TYPING_PUSH_DELAY = 700;
 
@@ -73,6 +69,7 @@ function jsonHistoryReducer(state: JsonHistoryState, action: JsonHistoryAction):
 
 interface JsonWorkspaceProps {
   table: LoadedTable;
+  jsonTables: LoadedTable[];
   onOpenFiles: () => void;
   onReloadTable: () => Promise<void>;
 }
@@ -89,6 +86,25 @@ function isJsonLinesExtension(extension: string): boolean {
   return extension === "jsonl" || extension === "ndjson";
 }
 
+function stringifyJsonInline(value: JsonValue | null): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stringifyJsonInline(item)).join(", ")}]`;
+  }
+  return `{${Object.entries(value)
+    .map(([key, child]) => `${JSON.stringify(key)}: ${stringifyJsonInline(child)}`)
+    .join(", ")}}`;
+}
+
+function isStandaloneJsonDocument(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function serializeJsonForFile(
   value: JsonValue | null,
   extension: string,
@@ -96,8 +112,13 @@ function serializeJsonForFile(
   sourceText: string
 ): string {
   if (isJsonLinesExtension(extension)) {
+    if (isStandaloneJsonDocument(sourceText)) {
+      return JSON.stringify(value, null, pretty ? 2 : undefined);
+    }
     const records = Array.isArray(value) ? value : [value];
-    const text = records.map((record) => JSON.stringify(record)).join("\n");
+    const text = records
+      .map((record) => pretty ? stringifyJsonInline(record) : JSON.stringify(record))
+      .join("\n");
     return /\r?\n$/.test(sourceText) ? `${text}\n` : text;
   }
   return JSON.stringify(value, null, pretty ? 2 : undefined);
@@ -296,6 +317,7 @@ function JsonTreeRow({
 
 export function JsonWorkspace({
   table,
+  jsonTables,
   onOpenFiles,
   onReloadTable,
 }: JsonWorkspaceProps): React.ReactElement {
@@ -309,12 +331,19 @@ export function JsonWorkspace({
   const [selectedPath, setSelectedPath] = useState("$");
   const [treeSearch, setTreeSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["$"]));
-  const [treePanelCollapsed, setTreePanelCollapsed] = useState(false);
-  const [flattenCollapsed, setFlattenCollapsed] = useState(false);
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const [structuredView, setStructuredView] = useState<"tree" | "table">("tree");
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareTableName, setCompareTableName] = useState("");
+  const [compareText, setCompareText] = useState("");
+  const [compareFileSize, setCompareFileSize] = useState<number | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareLoadError, setCompareLoadError] = useState<string | null>(null);
+  const [compareView, setCompareView] = useState<"tree" | "table">("tree");
+  const [compareSearch, setCompareSearch] = useState("");
+  const [compareSelectedPath, setCompareSelectedPath] = useState("$");
+  const [compareExpanded, setCompareExpanded] = useState<Set<string>>(() => new Set(["$"]));
   const [history, dispatchHistory] = useReducer(jsonHistoryReducer, { entries: [], index: 0 });
-  const [treePanelWidthPercent, setTreePanelWidthPercent] = useState(DEFAULT_JSON_TREE_WIDTH_PERCENT);
-  const [isTreeResizing, setIsTreeResizing] = useState(false);
   const [rawScrollTop, setRawScrollTop] = useState(0);
   const [flattenOptions, setFlattenOptions] = useState<FlattenOptions>({
     arrayMode: "unwind",
@@ -322,7 +351,6 @@ export function JsonWorkspace({
     includeArrayIndex: false,
   });
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const mainRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const rawTextRef = useRef(rawText);
   const pushTimerRef = useRef<number | null>(null);
@@ -354,6 +382,26 @@ export function JsonWorkspace({
   );
   const lineCount = useMemo(() => rawText.split(/\r\n|\r|\n/).length, [rawText]);
   const lineNumbers = useMemo(() => Array.from({ length: lineCount }, (_, i) => i + 1), [lineCount]);
+  const selectedLabel = flattenPathForLabel(selectedPath) || "$";
+  const comparisonCandidates = useMemo(
+    () => jsonTables.filter((candidate) => candidate.tableName !== table.tableName),
+    [jsonTables, table.tableName]
+  );
+  const compareTable = useMemo(
+    () => comparisonCandidates.find((candidate) => candidate.tableName === compareTableName) ?? comparisonCandidates[0] ?? null,
+    [comparisonCandidates, compareTableName]
+  );
+  const compareExtension = compareTable ? getFileExtension(compareTable.filePath) : "";
+  const compareParsed = useMemo(() => parseJsonText(compareText, compareExtension), [compareText, compareExtension]);
+  const compareIsValid = compareParsed.error === null && compareText.trim().length > 0;
+  const compareFlattened = useMemo(() => {
+    if (!compareIsValid) return { rows: [], columns: [], recordPath: "$" };
+    return flattenJson(compareParsed.value, flattenOptions);
+  }, [compareIsValid, compareParsed.value, flattenOptions]);
+  const comparePreviewRows = compareFlattened.rows.slice(0, 120);
+  const comparePreviewTruncated = compareFlattened.rows.length > comparePreviewRows.length;
+  const compareLineCount = useMemo(() => compareText.split(/\r\n|\r|\n/).length, [compareText]);
+  const compareSelectedLabel = flattenPathForLabel(compareSelectedPath) || "$";
 
   useLayoutEffect(() => {
     rawTextRef.current = rawText;
@@ -388,6 +436,49 @@ export function JsonWorkspace({
       cancelled = true;
     };
   }, [table.filePath, table.reloadVersion]);
+
+  useEffect(() => {
+    if (comparisonCandidates.length === 0) {
+      setCompareMode(false);
+      setCompareTableName("");
+      return;
+    }
+
+    if (!comparisonCandidates.some((candidate) => candidate.tableName === compareTableName)) {
+      setCompareTableName(comparisonCandidates[0].tableName);
+    }
+  }, [comparisonCandidates, compareTableName]);
+
+  useEffect(() => {
+    if (!compareMode || !compareTable) return;
+
+    let cancelled = false;
+    setCompareLoading(true);
+    setCompareLoadError(null);
+    window.api.readTextFile(compareTable.filePath)
+      .then((text) => {
+        if (cancelled) return;
+        setCompareText(text);
+        setCompareFileSize(new Blob([text]).size);
+        setCompareSelectedPath("$");
+        setCompareExpanded(new Set(["$"]));
+        setCompareSearch("");
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setCompareText("");
+          setCompareFileSize(null);
+          setCompareLoadError(String(err));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCompareLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [compareMode, compareTable?.filePath, compareTable?.reloadVersion]);
 
   useLayoutEffect(() => {
     const editor = editorRef.current;
@@ -443,62 +534,43 @@ export function JsonWorkspace({
     });
   }, []);
 
-  const updateTreePanelWidth = useCallback((clientX: number) => {
-    const main = mainRef.current;
-    if (!main) return;
-    const rect = main.getBoundingClientRect();
-    const maxTreeWidth = Math.max(80, rect.width - JSON_EDITOR_MIN_WIDTH - JSON_SPLITTER_WIDTH);
-    const minTreeWidth = Math.min(JSON_TREE_MIN_WIDTH, maxTreeWidth);
-    const nextWidth = Math.min(
-      Math.max(clientX - rect.left, minTreeWidth),
-      Math.max(minTreeWidth, maxTreeWidth)
-    );
-    setTreePanelWidthPercent((nextWidth / rect.width) * 100);
+  const toggleComparePath = useCallback((path: string) => {
+    setCompareExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
   }, []);
 
-  useEffect(() => {
-    if (!isTreeResizing) return;
-
-    const handleMouseMove = (event: MouseEvent) => {
-      updateTreePanelWidth(event.clientX);
-    };
-    const handleMouseUp = () => {
-      setIsTreeResizing(false);
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [isTreeResizing, updateTreePanelWidth]);
-
-  const handleResizeMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setIsTreeResizing(true);
-    updateTreePanelWidth(event.clientX);
-  }, [updateTreePanelWidth]);
+  const applyTransformedText = useCallback((nextText: string, label: string, unchangedLabel: string) => {
+    flushPendingHistory();
+    if (nextText === rawText) {
+      setStatusMessage(unchangedLabel);
+      return;
+    }
+    setRawText(nextText);
+    dispatchHistory({ type: "push", text: nextText, label });
+    setStatusMessage(label);
+  }, [flushPendingHistory, rawText]);
 
   const handleFormat = useCallback(() => {
     if (!isValid) return;
-    flushPendingHistory();
     const formatted = serializeJsonForFile(parsed.value, extension, true, rawText);
-    setRawText(formatted);
-    const label = isJsonLinesExtension(extension) ? "Formatted JSON Lines" : "Formatted JSON";
-    dispatchHistory({ type: "push", text: formatted, label });
-    setStatusMessage(label);
-  }, [extension, isValid, parsed.value, rawText, flushPendingHistory]);
+    const formatsAsJsonDocument = isJsonLinesExtension(extension) && isStandaloneJsonDocument(rawText);
+    const label = !isJsonLinesExtension(extension) || formatsAsJsonDocument ? "Formatted JSON" : "Formatted JSON Lines";
+    const unchangedLabel = !isJsonLinesExtension(extension) || formatsAsJsonDocument ? "JSON already formatted" : "JSON Lines already formatted";
+    applyTransformedText(formatted, label, unchangedLabel);
+  }, [applyTransformedText, extension, isValid, parsed.value, rawText]);
 
   const handleMinify = useCallback(() => {
     if (!isValid) return;
-    flushPendingHistory();
     const minified = serializeJsonForFile(parsed.value, extension, false, rawText);
-    setRawText(minified);
-    const label = isJsonLinesExtension(extension) ? "Minified JSON Lines" : "Minified JSON";
-    dispatchHistory({ type: "push", text: minified, label });
-    setStatusMessage(label);
-  }, [extension, isValid, parsed.value, rawText, flushPendingHistory]);
+    const minifiesAsJsonDocument = isJsonLinesExtension(extension) && isStandaloneJsonDocument(rawText);
+    const label = !isJsonLinesExtension(extension) || minifiesAsJsonDocument ? "Minified JSON" : "Minified JSON Lines";
+    const unchangedLabel = !isJsonLinesExtension(extension) || minifiesAsJsonDocument ? "JSON already minified" : "JSON Lines already minified";
+    applyTransformedText(minified, label, unchangedLabel);
+  }, [applyTransformedText, extension, isValid, parsed.value, rawText]);
 
   const handleRawChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = event.currentTarget.value;
@@ -573,6 +645,23 @@ export function JsonWorkspace({
     }
   }, [isValid, extension, rawText]);
 
+  const writeClipboard = useCallback(async (text: string, successMessage: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatusMessage(successMessage);
+    } catch (err) {
+      setStatusMessage(`Copy failed: ${String(err)}`);
+    }
+  }, []);
+
+  const handleCopySource = useCallback(() => {
+    writeClipboard(rawText, "Copied source JSON");
+  }, [rawText, writeClipboard]);
+
+  const handleCopyPath = useCallback((path: string) => {
+    writeClipboard(path, `Copied path ${flattenPathForLabel(path) || "$"}`);
+  }, [writeClipboard]);
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const meta = event.metaKey || event.ctrlKey;
@@ -599,88 +688,113 @@ export function JsonWorkspace({
     return () => window.clearTimeout(id);
   }, [statusMessage]);
 
-  const selectedLabel = flattenPathForLabel(selectedPath) || "$";
-  const mainClassName = `json-main${treePanelCollapsed ? " tree-collapsed" : ""}${isTreeResizing ? " resizing" : ""}`;
-  const historyCol = historyPanelOpen ? " minmax(220px, 280px)" : "";
-  const treeCols = treePanelCollapsed
-    ? `38px minmax(${JSON_EDITOR_MIN_WIDTH}px, 1fr)`
-    : `minmax(${JSON_TREE_MIN_WIDTH}px, ${treePanelWidthPercent}%) ${JSON_SPLITTER_WIDTH}px minmax(${JSON_EDITOR_MIN_WIDTH}px, 1fr)`;
-  const mainStyle = { gridTemplateColumns: `${treeCols}${historyCol}` } as React.CSSProperties;
+  const renderStructuredDocument = ({
+    className,
+    title,
+    filePath,
+    extensionLabel,
+    parsedResult,
+    isValidDocument,
+    lineTotal,
+    loadingDocument,
+    loadErrorMessage,
+    fileSizeValue,
+    rowCount,
+    view,
+    onViewChange,
+    search,
+    onSearchChange,
+    selected,
+    onSelectedChange,
+    expandedPaths,
+    onTogglePath,
+    flattenedData,
+    previewRowsData,
+    previewTruncatedValue,
+    titleActions,
+  }: {
+    className: string;
+    title: string;
+    filePath: string;
+    extensionLabel: string;
+    parsedResult: typeof parsed;
+    isValidDocument: boolean;
+    lineTotal: number;
+    loadingDocument: boolean;
+    loadErrorMessage: string | null;
+    fileSizeValue: number | null;
+    rowCount: number;
+    view: "tree" | "table";
+    onViewChange: React.Dispatch<React.SetStateAction<"tree" | "table">>;
+    search: string;
+    onSearchChange: React.Dispatch<React.SetStateAction<string>>;
+    selected: string;
+    onSelectedChange: React.Dispatch<React.SetStateAction<string>>;
+    expandedPaths: Set<string>;
+    onTogglePath: (path: string) => void;
+    flattenedData: typeof flattened;
+    previewRowsData: typeof previewRows;
+    previewTruncatedValue: boolean;
+    titleActions: React.ReactNode;
+  }) => {
+    const searchActive = search.trim().length > 0;
+    const matchesRoot = isValidDocument ? nodeMatches(parsedResult.value as JsonValue, "root", "$", search) : false;
+    const matchCount = isValidDocument && searchActive
+      ? countSelfMatches(parsedResult.value as JsonValue, "root", "$", search)
+      : 0;
+    const paneSelectedLabel = flattenPathForLabel(selected) || "$";
+    const errorMessage = loadErrorMessage || parsedResult.error;
 
-  return (
-    <div className="json-workspace">
-      <div className="json-toolbar">
-        <div className="json-toolbar-actions">
-          <span className="json-file-name" title={table.filePath}>
-            {fileName}
-            {isDirty && <span className="json-dirty-dot" title="Unsaved changes">●</span>}
-          </span>
-          <span className="json-toolbar-divider" />
-          <Button icon="folder-open" text="Open JSON" onClick={onOpenFiles} />
-          <Button icon="floppy-disk" text="Save" intent={Intent.PRIMARY} onClick={handleSave} disabled={!isDirty || !isValid || saving} loading={saving} />
-          <Button icon="duplicate" text="Save As" onClick={handleSaveAs} disabled={!isValid || saving} />
-          <Button icon="reset" text="Revert" onClick={handleRevert} disabled={!isDirty} />
-          <span className="json-toolbar-divider" />
-          <Button icon="undo" aria-label="Undo (Cmd+Z)" title="Undo (Cmd+Z)" onClick={handleUndo} disabled={!canUndo} />
-          <Button icon="redo" aria-label="Redo (Cmd+Shift+Z)" title="Redo (Cmd+Shift+Z)" onClick={handleRedo} disabled={!canRedo} />
-          <span className="json-toolbar-divider" />
-          <Button icon="align-left" text="Format" onClick={handleFormat} disabled={!isValid} />
-          <Button icon="minimize" text="Minify" onClick={handleMinify} disabled={!isValid} />
+    return (
+      <section className={className}>
+        <div className="json-document-titlebar">
+          <span className="json-file-name" title={filePath}>{title}</span>
+          <div className="json-document-actions">{titleActions}</div>
         </div>
-        <div className="json-toolbar-right">
-          <Button icon="history" text="History" active={historyPanelOpen} onClick={() => setHistoryPanelOpen((prev) => !prev)} />
-          <Tag minimal intent={isValid ? Intent.SUCCESS : Intent.DANGER} icon={isValid ? "tick-circle" : "error"}>
-            {isValid ? "Valid JSON" : "Invalid JSON"}
-          </Tag>
-        </div>
-      </div>
 
-      {loadError && (
-        <Callout intent={Intent.DANGER} icon="error" className="json-load-error">
-          {loadError}
-        </Callout>
-      )}
-
-      <div className={mainClassName} ref={mainRef} style={mainStyle}>
-        {treePanelCollapsed ? (
-          <div className="json-tree-rail">
+        <div className="json-document-subbar">
+          <div className="json-mode-tabs" aria-label={`${title} view mode`}>
             <button
               type="button"
-              className="json-panel-collapse"
-              aria-label="Expand JSON tree panel"
-              title="Expand JSON tree panel"
-              onClick={() => setTreePanelCollapsed(false)}
+              className={`json-mode-tab${view === "tree" ? " active" : ""}`}
+              onClick={() => onViewChange("tree")}
             >
-              <Icon icon="chevron-right" size={12} />
+              <Icon icon="list" size={12} />
+              tree
+            </button>
+            <button
+              type="button"
+              className={`json-mode-tab${view === "table" ? " active" : ""}`}
+              onClick={() => onViewChange("table")}
+            >
+              <Icon icon="th" size={12} />
+              table
             </button>
           </div>
-        ) : (
-          <section className="json-panel json-tree-panel">
-            <div className="json-panel-header">
-              <strong>JSON Tree</strong>
-              <button
-                type="button"
-                className="json-panel-collapse"
-                aria-label="Collapse JSON tree panel"
-                title="Collapse JSON tree panel"
-                onClick={() => setTreePanelCollapsed(true)}
-              >
-                <Icon icon="chevron-left" size={12} />
-              </button>
-            </div>
+          <span className="json-editor-meta">
+            {lineTotal.toLocaleString()} lines · UTF-8 · {extensionLabel || "JSON"}
+          </span>
+        </div>
+
+        {view === "tree" ? (
+          <div className="json-structured-body">
             <div className="json-tree-tools">
               <InputGroup
                 small
                 leftIcon="search"
                 placeholder="Search tree..."
-                value={treeSearch}
-                onChange={(event) => setTreeSearch(event.currentTarget.value)}
+                value={search}
+                onChange={(event) => onSearchChange(event.currentTarget.value)}
               />
-              <span className="json-path-pill" title={selectedPath}>Path: {selectedLabel}</span>
+              <span className="json-path-pill" title={selected}>
+                <Icon icon="path" size={12} />
+                <span>Selected path:</span>
+                <strong>{paneSelectedLabel}</strong>
+              </span>
             </div>
-            {treeSearchActive && (
+            {searchActive && (
               <div className="json-tree-search-meta">
-                {searchMatchCount.toLocaleString()} match{searchMatchCount === 1 ? "" : "es"}
+                {matchCount.toLocaleString()} match{matchCount === 1 ? "" : "es"}
               </div>
             )}
             <div className="json-tree-column-header" aria-hidden="true">
@@ -690,232 +804,384 @@ export function JsonWorkspace({
               <span>Type</span>
             </div>
             <div className="json-tree-scroll">
-              {loading && <div className="json-loading"><Spinner size={18} /> Loading JSON...</div>}
-              {!loading && isValid && treeSearchActive && !rootMatches && (
+              {loadingDocument && <div className="json-loading"><Spinner size={18} /> Loading JSON...</div>}
+              {!loadingDocument && isValidDocument && searchActive && !matchesRoot && (
                 <div className="json-tree-empty">
                   <Icon icon="search" size={18} />
-                  <span>No matches for "{treeSearch.trim()}"</span>
+                  <span>No matches for "{search.trim()}"</span>
                 </div>
               )}
-              {!loading && isValid && (!treeSearchActive || rootMatches) && (
+              {!loadingDocument && isValidDocument && (!searchActive || matchesRoot) && (
                 <JsonTreeRow
                   name="root"
                   path="$"
-                  value={parsed.value}
+                  value={parsedResult.value as JsonValue}
                   depth={0}
-                  expanded={expanded}
-                  selectedPath={selectedPath}
-                  search={treeSearch}
-                  onToggle={togglePath}
-                  onSelect={setSelectedPath}
+                  expanded={expandedPaths}
+                  selectedPath={selected}
+                  search={search}
+                  onToggle={onTogglePath}
+                  onSelect={onSelectedChange}
                 />
               )}
-              {!loading && parsed.error && (
+              {!loadingDocument && errorMessage && (
                 <div className="json-tree-empty">
                   <Icon icon="warning-sign" size={18} />
-                  <span>{parsed.error}</span>
+                  <span>{errorMessage}</span>
                 </div>
               )}
             </div>
-          </section>
-        )}
-
-        {!treePanelCollapsed && (
-          <div
-            className="json-split-resizer"
-            role="separator"
-            aria-label="Resize JSON tree and raw editor panels"
-            aria-orientation="vertical"
-            title="Drag to resize. Double-click to reset."
-            onMouseDown={handleResizeMouseDown}
-            onDoubleClick={() => setTreePanelWidthPercent(DEFAULT_JSON_TREE_WIDTH_PERCENT)}
-          />
-        )}
-
-        <section className="json-panel json-editor-panel">
-          <div className="json-panel-header">
-            <strong>Raw Editor</strong>
-            <span className="json-editor-meta">
-              {lineCount.toLocaleString()} lines · UTF-8 · {extension.toUpperCase() || "JSON"}
-            </span>
           </div>
-          <div className={`json-editor${parsed.error ? " has-error" : ""}`}>
-            <div className="json-line-numbers">
-              <div className="json-line-numbers-inner" style={{ transform: `translateY(-${rawScrollTop}px)` }}>
-                {lineNumbers.map((n) => <span key={n}>{n}</span>)}
+        ) : (
+          <div className="json-structured-body json-table-body">
+            <div className="json-flatten-header">
+              <div className="json-flatten-title">
+                <div>
+                  <strong>Flatten Preview</strong>
+                  <span className="json-flatten-summary">
+                    <span>{flattenedData.rows.length.toLocaleString()} rows</span>
+                    <span>{flattenedData.columns.length.toLocaleString()} columns</span>
+                    <span title={flattenedData.recordPath}>{flattenedData.recordPath}</span>
+                    {previewTruncatedValue && ` · showing first ${previewRowsData.length}`}
+                  </span>
+                </div>
+              </div>
+              <div className="json-flatten-options">
+                <label>
+                  <span>Array mode:</span>
+                  <SoftSelect
+                    value={flattenOptions.arrayMode}
+                    onChange={(event) => {
+                      const arrayMode = event.currentTarget.value as FlattenOptions["arrayMode"];
+                      setFlattenOptions((prev) => ({ ...prev, arrayMode }));
+                    }}
+                  >
+                    <option value="unwind">Unwind rows</option>
+                    <option value="stringify">Stringify arrays</option>
+                  </SoftSelect>
+                </label>
+                <label>
+                  <span>Delimiter:</span>
+                  <InputGroup
+                    small
+                    value={flattenOptions.delimiter}
+                    onChange={(event) => {
+                      const delimiter = event.currentTarget.value || ".";
+                      setFlattenOptions((prev) => ({ ...prev, delimiter }));
+                    }}
+                  />
+                </label>
+                <Switch
+                  checked={flattenOptions.includeArrayIndex}
+                  label="Include array index"
+                  onChange={(event) => {
+                    const includeArrayIndex = (event.currentTarget as HTMLInputElement).checked;
+                    setFlattenOptions((prev) => ({ ...prev, includeArrayIndex }));
+                  }}
+                />
               </div>
             </div>
-            <textarea
-              ref={editorRef}
-              className="json-code-input"
-              value={rawText}
-              aria-label="Raw JSON editor"
-              spellCheck={false}
-              wrap="off"
-              onChange={handleRawChange}
-              onScroll={(event) => setRawScrollTop(event.currentTarget.scrollTop)}
-            />
-          </div>
-          <div className={`json-editor-status${parsed.error ? " error" : ""}`}>
-            {parsed.error ? (
-              <>
-                <Icon icon="error" size={13} />
-                <span>Error: {parsed.error}</span>
-              </>
-            ) : (
-              <>
-                <Icon icon="tick-circle" size={13} />
-                <span>{statusMessage || "Ready"}</span>
-              </>
-            )}
-          </div>
-        </section>
-
-        {historyPanelOpen && (
-          <section className="json-panel json-history-panel">
-            <div className="json-panel-header">
-              <strong>History</strong>
-              <button
-                type="button"
-                className="json-panel-collapse"
-                aria-label="Close history panel"
-                title="Close history panel"
-                onClick={() => setHistoryPanelOpen(false)}
-              >
-                <Icon icon="cross" size={12} />
-              </button>
-            </div>
-            <div className="json-history-scroll">
-              {history.entries.length === 0 ? (
-                <div className="json-tree-empty">
-                  <Icon icon="history" size={18} />
-                  <span>No history yet</span>
+            <div className="json-preview-scroll">
+              {flattenedData.columns.length === 0 ? (
+                <div className="json-preview-empty">
+                  {loadingDocument ? "Loading JSON..." : "No flattened columns"}
                 </div>
               ) : (
-                history.entries
-                  .map((entry, index) => ({ entry, index }))
-                  .reverse()
-                  .map(({ entry, index }) => {
-                  const isCurrent = index === history.index;
-                  return (
-                    <button
-                      key={index}
-                      type="button"
-                      className={`json-history-row${isCurrent ? " current" : ""}${index > history.index ? " ahead" : ""}`}
-                      onClick={() => handleJump(index)}
-                      title={`Restore: ${entry.label}`}
-                    >
-                      <span className="json-history-marker" />
-                      <span className="json-history-step">{index + 1}</span>
-                      <span className="json-history-label">{entry.label}</span>
-                      {isCurrent && <Tag minimal intent={Intent.PRIMARY}>current</Tag>}
-                    </button>
-                  );
-                })
+                <table className="json-preview-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      {flattenedData.columns.map((column) => <th key={column}>{column}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewRowsData.map((row, rowIndex) => (
+                      <tr key={rowIndex}>
+                        <td>{rowIndex + 1}</td>
+                        {flattenedData.columns.map((column) => (
+                          <td key={column}>{String(row[column] ?? "")}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
             </div>
-            <div className="json-panel-footer">
-              <span>{history.index + 1} / {history.entries.length}</span>
-              <span>{canRedo ? `${history.entries.length - 1 - history.index} ahead` : "latest"}</span>
-            </div>
-          </section>
+          </div>
         )}
-      </div>
 
-      <div className={`json-flatten-panel${flattenCollapsed ? " collapsed" : ""}`}>
-        <div className="json-flatten-header">
-          <div className="json-flatten-title">
-            <button
-              type="button"
-              className="json-panel-collapse"
-              aria-label={flattenCollapsed ? "Expand flatten preview" : "Collapse flatten preview"}
-              aria-expanded={!flattenCollapsed}
-              title={flattenCollapsed ? "Expand flatten preview" : "Collapse flatten preview"}
-              onClick={() => setFlattenCollapsed((prev) => !prev)}
-            >
-              <Icon icon={flattenCollapsed ? "chevron-up" : "chevron-down"} size={12} />
-            </button>
-            <div>
-              <strong>Flatten Preview</strong>
-              <span>
-                {flattened.rows.length.toLocaleString()} rows · {flattened.columns.length.toLocaleString()} columns · {flattened.recordPath}
-                {previewTruncated && ` · showing first ${previewRows.length}`}
-              </span>
-            </div>
-          </div>
-          <div className="json-flatten-options">
-            <label>
-              <span>Array mode:</span>
-              <SoftSelect
-                value={flattenOptions.arrayMode}
-                onChange={(event) => {
-                  const arrayMode = event.currentTarget.value as FlattenOptions["arrayMode"];
-                  setFlattenOptions((prev) => ({ ...prev, arrayMode }));
-                }}
-              >
-                <option value="unwind">Unwind rows</option>
-                <option value="stringify">Stringify arrays</option>
-              </SoftSelect>
-            </label>
-            <label>
-              <span>Delimiter:</span>
-              <InputGroup
-                small
-                value={flattenOptions.delimiter}
-                onChange={(event) => {
-                  const delimiter = event.currentTarget.value || ".";
-                  setFlattenOptions((prev) => ({ ...prev, delimiter }));
-                }}
-              />
-            </label>
-            <Switch
-              checked={flattenOptions.includeArrayIndex}
-              label="Include array index"
-              onChange={(event) => {
-                const includeArrayIndex = (event.currentTarget as HTMLInputElement).checked;
-                setFlattenOptions((prev) => ({ ...prev, includeArrayIndex }));
-              }}
-            />
-            <span className="json-toolbar-divider" />
-            <Button
-              icon={exporting ? <Spinner size={14} /> : "export"}
-              text="Export CSV"
-              intent={Intent.PRIMARY}
-              disabled={!isValid || flattened.rows.length === 0 || exporting}
-              onClick={handleExportCsv}
-            />
-          </div>
-        </div>
-        {!flattenCollapsed && (
-        <div className="json-preview-scroll">
-          {flattened.columns.length === 0 ? (
-            <div className="json-preview-empty">No flattened columns</div>
-          ) : (
-            <table className="json-preview-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  {flattened.columns.map((column) => <th key={column}>{column}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {previewRows.map((row, rowIndex) => (
-                  <tr key={rowIndex}>
-                    <td>{rowIndex + 1}</td>
-                    {flattened.columns.map((column) => (
-                      <td key={column}>{String(row[column] ?? "")}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-        )}
         <div className="json-status-strip">
-          <span>Size: {formatFileSize(fileSize)}</span>
-          <span>Rows: {table.rowCount.toLocaleString()}</span>
+          <span>Size: {formatFileSize(fileSizeValue)}</span>
+          <span>Rows: {rowCount.toLocaleString()}</span>
         </div>
+      </section>
+    );
+  };
+
+  const activeStructuredActions = (
+    <>
+      <Tag minimal intent={isValid ? Intent.SUCCESS : Intent.DANGER} icon={isValid ? "tick-circle" : "error"}>
+        {isValid ? "Valid JSON" : "Invalid JSON"}
+      </Tag>
+      <Button minimal small icon="path" text="Copy Path" onClick={() => handleCopyPath(selectedPath)} disabled={!isValid} />
+      <Button
+        minimal
+        small
+        icon={exporting ? <Spinner size={14} /> : "export"}
+        text="Export CSV"
+        disabled={!isValid || flattened.rows.length === 0 || exporting}
+        onClick={handleExportCsv}
+      />
+      <Button
+        minimal
+        small
+        icon="comparison"
+        text="Compare"
+        disabled={comparisonCandidates.length === 0}
+        title={comparisonCandidates.length === 0 ? "Open another JSON file to compare" : "Compare with another loaded JSON"}
+        onClick={() => setCompareMode(true)}
+      />
+    </>
+  );
+
+  const compareSourceActions = (
+    <>
+      <Tag minimal intent={isValid ? Intent.SUCCESS : Intent.DANGER} icon={isValid ? "tick-circle" : "error"}>
+        {isValid ? "Valid JSON" : "Invalid JSON"}
+      </Tag>
+      <Button minimal small icon="path" text="Copy Path" onClick={() => handleCopyPath(selectedPath)} disabled={!isValid} />
+      <Button minimal small icon="cross" text="Exit Compare" onClick={() => setCompareMode(false)} />
+    </>
+  );
+
+  const compareTargetActions = compareTable ? (
+    <>
+      <label className="json-compare-target-select">
+        <span>Compare with</span>
+        <SoftSelect
+          small
+          value={compareTable.tableName}
+          onChange={(event) => setCompareTableName(event.currentTarget.value)}
+        >
+          {comparisonCandidates.map((candidate) => (
+            <option key={candidate.tableName} value={candidate.tableName}>
+              {getFileName(candidate.filePath)}
+            </option>
+          ))}
+        </SoftSelect>
+      </label>
+      <Tag minimal intent={compareIsValid ? Intent.SUCCESS : Intent.DANGER} icon={compareIsValid ? "tick-circle" : "error"}>
+        {compareIsValid ? "Valid JSON" : "Invalid JSON"}
+      </Tag>
+      <Button minimal small icon="path" text="Copy Path" onClick={() => handleCopyPath(compareSelectedPath)} disabled={!compareIsValid} />
+    </>
+  ) : null;
+
+  return (
+    <div className={`json-workspace${compareMode ? " compare-enabled" : ""}`}>
+      {loadError && (
+        <Callout intent={Intent.DANGER} icon="error" className="json-load-error">
+          {loadError}
+        </Callout>
+      )}
+
+      <div className={`json-compare-layout${compareMode ? " json-comparison-layout" : " json-single-layout"}`}>
+        {compareMode ? (
+          <>
+            {renderStructuredDocument({
+              className: "json-document-pane json-source-document json-compare-pane",
+              title: fileName,
+              filePath: table.filePath,
+              extensionLabel: extension.toUpperCase() || "JSON",
+              parsedResult: parsed,
+              isValidDocument: isValid,
+              lineTotal: lineCount,
+              loadingDocument: loading,
+              loadErrorMessage: loadError,
+              fileSizeValue: fileSize,
+              rowCount: table.rowCount,
+              view: structuredView,
+              onViewChange: setStructuredView,
+              search: treeSearch,
+              onSearchChange: setTreeSearch,
+              selected: selectedPath,
+              onSelectedChange: setSelectedPath,
+              expandedPaths: expanded,
+              onTogglePath: togglePath,
+              flattenedData: flattened,
+              previewRowsData: previewRows,
+              previewTruncatedValue: previewTruncated,
+              titleActions: compareSourceActions,
+            })}
+            {compareTable && renderStructuredDocument({
+              className: "json-document-pane json-structured-document json-compare-pane",
+              title: getFileName(compareTable.filePath),
+              filePath: compareTable.filePath,
+              extensionLabel: compareExtension.toUpperCase() || "JSON",
+              parsedResult: compareParsed,
+              isValidDocument: compareIsValid,
+              lineTotal: compareLineCount,
+              loadingDocument: compareLoading,
+              loadErrorMessage: compareLoadError,
+              fileSizeValue: compareFileSize,
+              rowCount: compareTable.rowCount,
+              view: compareView,
+              onViewChange: setCompareView,
+              search: compareSearch,
+              onSearchChange: setCompareSearch,
+              selected: compareSelectedPath,
+              onSelectedChange: setCompareSelectedPath,
+              expandedPaths: compareExpanded,
+              onTogglePath: toggleComparePath,
+              flattenedData: compareFlattened,
+              previewRowsData: comparePreviewRows,
+              previewTruncatedValue: comparePreviewTruncated,
+              titleActions: compareTargetActions,
+            })}
+          </>
+        ) : (
+          <>
+            <section className="json-document-pane json-source-document">
+              <div className="json-document-titlebar">
+                <span className="json-file-name" title={table.filePath}>
+                  {fileName}
+                  {isDirty && <span className="json-dirty-dot" title="Unsaved changes">●</span>}
+                </span>
+                <div className="json-document-actions">
+                  <Button minimal small icon="folder-open" text="Open" onClick={onOpenFiles} />
+                  <Button minimal small icon="floppy-disk" text="Save" intent={Intent.PRIMARY} onClick={handleSave} disabled={!isDirty || !isValid || saving} loading={saving} />
+                  <Button minimal small icon="duplicate" text="Save As" onClick={handleSaveAs} disabled={!isValid || saving} />
+                  <Button minimal small icon="reset" text="Revert" onClick={handleRevert} disabled={!isDirty} />
+                </div>
+              </div>
+
+              <div className="json-document-subbar">
+                <span className="json-source-mode-label">
+                  <Icon icon="code" size={12} />
+                  Text editor
+                </span>
+                <div className="json-icon-actions">
+                  <Button minimal small icon="undo" text="Undo" onClick={handleUndo} disabled={!canUndo} />
+                  <Button minimal small icon="redo" text="Redo" onClick={handleRedo} disabled={!canRedo} />
+                  <Button minimal small icon="history" text="History" active={historyPanelOpen} onClick={() => setHistoryPanelOpen((prev) => !prev)} />
+                  <Button minimal small icon="clipboard" text="Copy JSON" onClick={handleCopySource} disabled={!rawText} />
+                  <Button minimal small icon="minimize" text="Minify" onClick={handleMinify} disabled={!isValid} />
+                  <Button minimal small icon="align-left" text="Format" onClick={handleFormat} disabled={!isValid} />
+                </div>
+              </div>
+
+              <div className="json-document-body">
+                <div className={`json-editor${parsed.error ? " has-error" : ""}`}>
+                  <div className="json-line-numbers">
+                    <div className="json-line-numbers-inner" style={{ transform: `translateY(-${rawScrollTop}px)` }}>
+                      {lineNumbers.map((n) => <span key={n}>{n}</span>)}
+                    </div>
+                  </div>
+                  <textarea
+                    ref={editorRef}
+                    className="json-code-input"
+                    value={rawText}
+                    aria-label="Raw JSON editor"
+                    spellCheck={false}
+                    wrap="off"
+                    onChange={handleRawChange}
+                    onScroll={(event) => setRawScrollTop(event.currentTarget.scrollTop)}
+                  />
+                </div>
+
+                <div className={`json-editor-status${parsed.error ? " error" : ""}`}>
+                  {parsed.error ? (
+                    <>
+                      <Icon icon="error" size={13} />
+                      <span>Error: {parsed.error}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Icon icon="tick-circle" size={13} />
+                      <span>{statusMessage || "Ready"}</span>
+                    </>
+                  )}
+                </div>
+
+                {historyPanelOpen && (
+                  <section className="json-panel json-history-panel json-history-drawer">
+                    <div className="json-panel-header">
+                      <strong>History</strong>
+                      <button
+                        type="button"
+                        className="json-panel-collapse"
+                        aria-label="Close history panel"
+                        title="Close history panel"
+                        onClick={() => setHistoryPanelOpen(false)}
+                      >
+                        <Icon icon="cross" size={12} />
+                      </button>
+                    </div>
+                    <div className="json-history-scroll">
+                      {history.entries.length === 0 ? (
+                        <div className="json-tree-empty">
+                          <Icon icon="history" size={18} />
+                          <span>No history yet</span>
+                        </div>
+                      ) : (
+                        history.entries
+                          .map((entry, index) => ({ entry, index }))
+                          .reverse()
+                          .map(({ entry, index }) => {
+                            const isCurrent = index === history.index;
+                            return (
+                              <button
+                                key={index}
+                                type="button"
+                                className={`json-history-row${isCurrent ? " current" : ""}${index > history.index ? " ahead" : ""}`}
+                                onClick={() => handleJump(index)}
+                                title={`Restore: ${entry.label}`}
+                              >
+                                <span className="json-history-marker" />
+                                <span className="json-history-step">{index + 1}</span>
+                                <span className="json-history-label">{entry.label}</span>
+                                {isCurrent && <Tag minimal intent={Intent.PRIMARY}>current</Tag>}
+                              </button>
+                            );
+                          })
+                      )}
+                    </div>
+                    <div className="json-panel-footer">
+                      <span>{history.index + 1} / {history.entries.length}</span>
+                      <span>{canRedo ? `${history.entries.length - 1 - history.index} ahead` : "latest"}</span>
+                    </div>
+                  </section>
+                )}
+              </div>
+            </section>
+
+            {renderStructuredDocument({
+              className: "json-document-pane json-structured-document",
+              title: "Parsed view",
+              filePath: table.filePath,
+              extensionLabel: extension.toUpperCase() || "JSON",
+              parsedResult: parsed,
+              isValidDocument: isValid,
+              lineTotal: lineCount,
+              loadingDocument: loading,
+              loadErrorMessage: loadError,
+              fileSizeValue: fileSize,
+              rowCount: table.rowCount,
+              view: structuredView,
+              onViewChange: setStructuredView,
+              search: treeSearch,
+              onSearchChange: setTreeSearch,
+              selected: selectedPath,
+              onSelectedChange: setSelectedPath,
+              expandedPaths: expanded,
+              onTogglePath: togglePath,
+              flattenedData: flattened,
+              previewRowsData: previewRows,
+              previewTruncatedValue: previewTruncated,
+              titleActions: activeStructuredActions,
+            })}
+          </>
+        )}
       </div>
     </div>
   );

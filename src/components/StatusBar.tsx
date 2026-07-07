@@ -13,6 +13,7 @@ interface StatusBarProps {
   sidebarVisible: boolean;
   updateNotice?: React.ReactNode;
   filterEnabled?: boolean;
+  showRowSummary?: boolean;
 }
 
 export function StatusBar({
@@ -27,6 +28,7 @@ export function StatusBar({
   sidebarVisible,
   updateNotice,
   filterEnabled = true,
+  showRowSummary = true,
 }: StatusBarProps): React.ReactElement {
   const isFiltered = unfilteredRows !== null && totalRows !== unfilteredRows;
   const rowsDisplay = isFiltered
@@ -43,11 +45,13 @@ export function StatusBar({
   return (
     <div className="status-bar">
       <div className="status-bar-right">
-        <span className="status-bar-rows">
-          {activeTable
-            ? `${rowsDisplay}${groupDisplay}${pivotDisplay}`
-            : "No table selected"}
-        </span>
+        {showRowSummary && (
+          <span className="status-bar-rows">
+            {activeTable
+              ? `${rowsDisplay}${groupDisplay}${pivotDisplay}`
+              : "No table selected"}
+          </span>
+        )}
         {updateNotice && <div className="status-bar-update">{updateNotice}</div>}
       </div>
       {activeTable && filterEnabled && (

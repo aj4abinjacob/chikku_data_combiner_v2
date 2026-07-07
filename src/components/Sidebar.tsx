@@ -231,7 +231,7 @@ export function Sidebar({
   const compareDisabled = tables.length < 2;
 
   return (
-    <div className="sidebar">
+    <div className={`sidebar${jsonWorkspaceActive ? " sidebar-json" : ""}`}>
       {/* Loaded files */}
       <div className="sidebar-section sidebar-section-tables">
         <div className="sidebar-section-header">
