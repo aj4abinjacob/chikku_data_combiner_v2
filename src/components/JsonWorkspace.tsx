@@ -28,6 +28,14 @@ const JSON_SPLIT_DIVIDER_PX = 8;
 const JSON_SPLIT_LEFT_MIN_PX = 240;
 const JSON_SPLIT_RIGHT_MIN_PX = 280;
 const JSON_SPLIT_KEY_STEP = 4;
+const JSON_COMMAND_FEEDBACK_MS = 1400;
+
+type JsonCommandFeedbackKey = "copy" | "minify" | "format" | "wrap";
+
+interface JsonCommandFeedback {
+  key: JsonCommandFeedbackKey;
+  label: string;
+}
 
 interface JsonHistoryEntry {
   text: string;
@@ -358,11 +366,14 @@ export function JsonWorkspace({
   const [jsonSplitPercent, setJsonSplitPercent] = useState(50);
   const [jsonSplitResizing, setJsonSplitResizing] = useState(false);
   const [wrapEditorContent, setWrapEditorContent] = useState(false);
+  const [commandFeedback, setCommandFeedback] = useState<JsonCommandFeedback | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const rawTextRef = useRef(rawText);
   const pushTimerRef = useRef<number | null>(null);
   const splitPointerIdRef = useRef<number | null>(null);
+  const commandFeedbackFrameRef = useRef<number | null>(null);
+  const commandFeedbackTimerRef = useRef<number | null>(null);
 
   const canUndo = history.index > 0;
   const canRedo = history.index < history.entries.length - 1;
@@ -417,8 +428,34 @@ export function JsonWorkspace({
   });
 
   useEffect(() => () => {
-    if (pushTimerRef.current) window.clearTimeout(pushTimerRef.current);
+    if (pushTimerRef.current !== null) window.clearTimeout(pushTimerRef.current);
+    if (commandFeedbackFrameRef.current !== null) window.cancelAnimationFrame(commandFeedbackFrameRef.current);
+    if (commandFeedbackTimerRef.current !== null) window.clearTimeout(commandFeedbackTimerRef.current);
   }, []);
+
+  const clearCommandFeedback = useCallback(() => {
+    if (commandFeedbackFrameRef.current !== null) {
+      window.cancelAnimationFrame(commandFeedbackFrameRef.current);
+      commandFeedbackFrameRef.current = null;
+    }
+    if (commandFeedbackTimerRef.current !== null) {
+      window.clearTimeout(commandFeedbackTimerRef.current);
+      commandFeedbackTimerRef.current = null;
+    }
+    setCommandFeedback(null);
+  }, []);
+
+  const showCommandFeedback = useCallback((key: JsonCommandFeedbackKey, label: string) => {
+    clearCommandFeedback();
+    commandFeedbackFrameRef.current = window.requestAnimationFrame(() => {
+      commandFeedbackFrameRef.current = null;
+      setCommandFeedback({ key, label });
+      commandFeedbackTimerRef.current = window.setTimeout(() => {
+        commandFeedbackTimerRef.current = null;
+        setCommandFeedback(null);
+      }, JSON_COMMAND_FEEDBACK_MS);
+    });
+  }, [clearCommandFeedback]);
 
   useEffect(() => {
     let cancelled = false;
@@ -570,7 +607,8 @@ export function JsonWorkspace({
     const label = !isJsonLinesExtension(extension) || formatsAsJsonDocument ? "Formatted JSON" : "Formatted JSON Lines";
     const unchangedLabel = !isJsonLinesExtension(extension) || formatsAsJsonDocument ? "JSON already formatted" : "JSON Lines already formatted";
     applyTransformedText(formatted, label, unchangedLabel);
-  }, [applyTransformedText, extension, isValid, parsed.value, rawText]);
+    showCommandFeedback("format", "Formatted");
+  }, [applyTransformedText, extension, isValid, parsed.value, rawText, showCommandFeedback]);
 
   const handleMinify = useCallback(() => {
     if (!isValid) return;
@@ -579,7 +617,8 @@ export function JsonWorkspace({
     const label = !isJsonLinesExtension(extension) || minifiesAsJsonDocument ? "Minified JSON" : "Minified JSON Lines";
     const unchangedLabel = !isJsonLinesExtension(extension) || minifiesAsJsonDocument ? "JSON already minified" : "JSON Lines already minified";
     applyTransformedText(minified, label, unchangedLabel);
-  }, [applyTransformedText, extension, isValid, parsed.value, rawText]);
+    showCommandFeedback("minify", "Minified");
+  }, [applyTransformedText, extension, isValid, parsed.value, rawText, showCommandFeedback]);
 
   const handleRawChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = event.currentTarget.value;
@@ -654,22 +693,32 @@ export function JsonWorkspace({
     }
   }, [isValid, extension, rawText]);
 
-  const writeClipboard = useCallback(async (text: string, successMessage: string) => {
+  const writeClipboard = useCallback(async (text: string, successMessage: string): Promise<boolean> => {
     try {
       await navigator.clipboard.writeText(text);
       setStatusMessage(successMessage);
+      return true;
     } catch (err) {
       setStatusMessage(`Copy failed: ${String(err)}`);
+      return false;
     }
   }, []);
 
-  const handleCopySource = useCallback(() => {
-    writeClipboard(rawText, "Copied source JSON");
-  }, [rawText, writeClipboard]);
+  const handleCopySource = useCallback(async () => {
+    const copied = await writeClipboard(rawText, "Copied source JSON");
+    if (copied) showCommandFeedback("copy", "Copied");
+    else clearCommandFeedback();
+  }, [clearCommandFeedback, rawText, showCommandFeedback, writeClipboard]);
 
   const handleCopyPath = useCallback((path: string) => {
     writeClipboard(path, `Copied path ${flattenPathForLabel(path) || "$"}`);
   }, [writeClipboard]);
+
+  const handleToggleWrap = useCallback(() => {
+    const nextWrapped = !wrapEditorContent;
+    setWrapEditorContent(nextWrapped);
+    showCommandFeedback("wrap", nextWrapped ? "Wrapped" : "Unwrapped");
+  }, [showCommandFeedback, wrapEditorContent]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1063,6 +1112,10 @@ export function JsonWorkspace({
   const jsonSplitStyle = {
     "--json-split-left": `${jsonSplitPercent}%`,
   } as React.CSSProperties;
+  const copyCommandConfirmed = commandFeedback?.key === "copy";
+  const minifyCommandConfirmed = commandFeedback?.key === "minify";
+  const formatCommandConfirmed = commandFeedback?.key === "format";
+  const wrapCommandConfirmed = commandFeedback?.key === "wrap";
 
   const jsonSplitDivider = (
     <div
@@ -1080,6 +1133,56 @@ export function JsonWorkspace({
       onPointerCancel={finishJsonSplitResize}
       onKeyDown={handleJsonSplitKeyDown}
     />
+  );
+
+  const historyPane = (
+    <section className="json-document-pane json-panel json-history-panel">
+      <div className="json-panel-header">
+        <strong>History</strong>
+        <button
+          type="button"
+          className="json-panel-collapse"
+          aria-label="Close history panel"
+          title="Close history panel"
+          onClick={() => setHistoryPanelOpen(false)}
+        >
+          <Icon icon="cross" size={12} />
+        </button>
+      </div>
+      <div className="json-history-scroll">
+        {history.entries.length === 0 ? (
+          <div className="json-tree-empty">
+            <Icon icon="history" size={18} />
+            <span>No history yet</span>
+          </div>
+        ) : (
+          history.entries
+            .map((entry, index) => ({ entry, index }))
+            .reverse()
+            .map(({ entry, index }) => {
+              const isCurrent = index === history.index;
+              return (
+                <button
+                  key={index}
+                  type="button"
+                  className={`json-history-row${isCurrent ? " current" : ""}${index > history.index ? " ahead" : ""}`}
+                  onClick={() => handleJump(index)}
+                  title={`Restore: ${entry.label}`}
+                >
+                  <span className="json-history-marker" />
+                  <span className="json-history-step">{index + 1}</span>
+                  <span className="json-history-label">{entry.label}</span>
+                  {isCurrent && <Tag minimal intent={Intent.PRIMARY}>current</Tag>}
+                </button>
+              );
+            })
+        )}
+      </div>
+      <div className="json-panel-footer">
+        <span>{history.index + 1} / {history.entries.length}</span>
+        <span>{canRedo ? `${history.entries.length - 1 - history.index} ahead` : "latest"}</span>
+      </div>
+    </section>
   );
 
   return (
@@ -1174,10 +1277,46 @@ export function JsonWorkspace({
                   <Button minimal small icon="undo" text="Undo" onClick={handleUndo} disabled={!canUndo} />
                   <Button minimal small icon="redo" text="Redo" onClick={handleRedo} disabled={!canRedo} />
                   <Button minimal small icon="history" text="History" active={historyPanelOpen} onClick={() => setHistoryPanelOpen((prev) => !prev)} />
-                  <Button minimal small icon="clipboard" text="Copy JSON" onClick={handleCopySource} disabled={!rawText} />
-                  <Button minimal small icon="minimize" text="Minify" onClick={handleMinify} disabled={!isValid} />
-                  <Button minimal small icon="align-left" text="Format" onClick={handleFormat} disabled={!isValid} />
-                  <Button minimal small icon="align-justify" text="Wrap" active={wrapEditorContent} onClick={() => setWrapEditorContent((prev) => !prev)} />
+                  <Button
+                    minimal
+                    small
+                    className={`json-command-feedback-button${copyCommandConfirmed ? " is-confirmed" : ""}`}
+                    icon={copyCommandConfirmed ? "tick" : "clipboard"}
+                    intent={copyCommandConfirmed ? Intent.SUCCESS : undefined}
+                    text={copyCommandConfirmed ? commandFeedback.label : "Copy JSON"}
+                    onClick={handleCopySource}
+                    disabled={!rawText}
+                  />
+                  <Button
+                    minimal
+                    small
+                    className={`json-command-feedback-button${minifyCommandConfirmed ? " is-confirmed" : ""}`}
+                    icon={minifyCommandConfirmed ? "tick" : "minimize"}
+                    intent={minifyCommandConfirmed ? Intent.SUCCESS : undefined}
+                    text={minifyCommandConfirmed ? commandFeedback.label : "Minify"}
+                    onClick={handleMinify}
+                    disabled={!isValid}
+                  />
+                  <Button
+                    minimal
+                    small
+                    className={`json-command-feedback-button${formatCommandConfirmed ? " is-confirmed" : ""}`}
+                    icon={formatCommandConfirmed ? "tick" : "align-left"}
+                    intent={formatCommandConfirmed ? Intent.SUCCESS : undefined}
+                    text={formatCommandConfirmed ? commandFeedback.label : "Format"}
+                    onClick={handleFormat}
+                    disabled={!isValid}
+                  />
+                  <Button
+                    minimal
+                    small
+                    className={`json-command-feedback-button${wrapCommandConfirmed ? " is-confirmed" : ""}`}
+                    icon={wrapCommandConfirmed ? "tick" : "align-justify"}
+                    intent={wrapCommandConfirmed ? Intent.SUCCESS : undefined}
+                    text={wrapCommandConfirmed ? commandFeedback.label : "Wrap"}
+                    active={wrapEditorContent}
+                    onClick={handleToggleWrap}
+                  />
                 </div>
               </div>
 
@@ -1214,60 +1353,11 @@ export function JsonWorkspace({
                   )}
                 </div>
 
-                {historyPanelOpen && (
-                  <section className="json-panel json-history-panel json-history-drawer">
-                    <div className="json-panel-header">
-                      <strong>History</strong>
-                      <button
-                        type="button"
-                        className="json-panel-collapse"
-                        aria-label="Close history panel"
-                        title="Close history panel"
-                        onClick={() => setHistoryPanelOpen(false)}
-                      >
-                        <Icon icon="cross" size={12} />
-                      </button>
-                    </div>
-                    <div className="json-history-scroll">
-                      {history.entries.length === 0 ? (
-                        <div className="json-tree-empty">
-                          <Icon icon="history" size={18} />
-                          <span>No history yet</span>
-                        </div>
-                      ) : (
-                        history.entries
-                          .map((entry, index) => ({ entry, index }))
-                          .reverse()
-                          .map(({ entry, index }) => {
-                            const isCurrent = index === history.index;
-                            return (
-                              <button
-                                key={index}
-                                type="button"
-                                className={`json-history-row${isCurrent ? " current" : ""}${index > history.index ? " ahead" : ""}`}
-                                onClick={() => handleJump(index)}
-                                title={`Restore: ${entry.label}`}
-                              >
-                                <span className="json-history-marker" />
-                                <span className="json-history-step">{index + 1}</span>
-                                <span className="json-history-label">{entry.label}</span>
-                                {isCurrent && <Tag minimal intent={Intent.PRIMARY}>current</Tag>}
-                              </button>
-                            );
-                          })
-                      )}
-                    </div>
-                    <div className="json-panel-footer">
-                      <span>{history.index + 1} / {history.entries.length}</span>
-                      <span>{canRedo ? `${history.entries.length - 1 - history.index} ahead` : "latest"}</span>
-                    </div>
-                  </section>
-                )}
               </div>
             </section>
 
             {jsonSplitDivider}
-            {renderStructuredDocument({
+            {historyPanelOpen ? historyPane : renderStructuredDocument({
               className: "json-document-pane json-structured-document",
               title: "Parsed view",
               filePath: table.filePath,
