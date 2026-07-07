@@ -6581,6 +6581,61 @@ button.dg-stats-metric {
   }
 }
 
+.json-tree-context-menu {
+  position: fixed;
+  z-index: 80;
+  width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid #d8e1e8;
+  border-radius: var(--surface-radius);
+  background: #fff;
+  box-shadow: var(--control-popover-shadow);
+  animation: motion-popover-in var(--motion-duration-fast) var(--motion-ease-out);
+
+  button {
+    min-height: 30px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 9px;
+    border: 0;
+    border-radius: var(--control-radius);
+    background: transparent;
+    color: #394b59;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+
+    .bp4-icon {
+      flex-shrink: 0;
+      color: #5c7080;
+    }
+
+    span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    &:hover,
+    &:focus-visible {
+      outline: none;
+      background: #eef7ff;
+      color: #106ba3;
+
+      .bp4-icon {
+        color: #137cbd;
+      }
+    }
+  }
+}
+
 .json-tree-toggle,
 .json-tree-toggle-spacer {
   width: 18px;
@@ -12516,6 +12571,30 @@ html.dark-theme #root {
   .json-tree-row.selected {
     background: @dark-accent-bg-subtle;
     border-color: @dark-accent-border;
+  }
+
+  .json-tree-context-menu {
+    border-color: @dark-border-1;
+    background: @dark-bg-3;
+    box-shadow: 0 14px 32px fade(#000, 38%), 0 0 0 1px fade(#000, 24%);
+
+    button {
+      color: @dark-text-2;
+
+      .bp4-icon {
+        color: @dark-text-3;
+      }
+
+      &:hover,
+      &:focus-visible {
+        background: @dark-bg-4;
+        color: @dark-text-1;
+
+        .bp4-icon {
+          color: @dark-accent;
+        }
+      }
+    }
   }
 
   .json-history-panel {

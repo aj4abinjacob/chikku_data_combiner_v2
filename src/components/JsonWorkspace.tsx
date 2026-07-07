@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import ReactDOM from "react-dom";
 import {
   Button,
   Callout,
@@ -29,8 +30,22 @@ const JSON_SPLIT_LEFT_MIN_PX = 240;
 const JSON_SPLIT_RIGHT_MIN_PX = 280;
 const JSON_SPLIT_KEY_STEP = 4;
 const JSON_COMMAND_FEEDBACK_MS = 1400;
+const JSON_TREE_MENU_WIDTH_PX = 180;
+const JSON_TREE_MENU_HEIGHT_PX = 118;
+const JSON_TREE_MENU_MARGIN_PX = 8;
 
 type JsonCommandFeedbackKey = "copy" | "minify" | "format" | "wrap";
+
+interface JsonTreeContextItem {
+  name: string;
+  path: string;
+  value: JsonValue;
+}
+
+interface JsonTreeContextMenuState extends JsonTreeContextItem {
+  x: number;
+  y: number;
+}
 
 interface JsonCommandFeedback {
   key: JsonCommandFeedbackKey;
@@ -148,6 +163,11 @@ function flattenPathForLabel(path: string): string {
   return path.replace(/\[(\d+)\]/g, ".$1").replace(/^\$\./, "");
 }
 
+function formatJsonValueForClipboard(value: JsonValue): string {
+  if (value === null || typeof value !== "object") return formatJsonScalar(value);
+  return JSON.stringify(value, null, 2);
+}
+
 function searchablePathText(path: string): string {
   const labelPath = flattenPathForLabel(path);
   const pathWithoutIndexes = labelPath
@@ -219,6 +239,7 @@ interface JsonTreeRowProps {
   search: string;
   onToggle: (path: string) => void;
   onSelect: (path: string) => void;
+  onContextMenu: (event: React.MouseEvent<HTMLDivElement>, item: JsonTreeContextItem) => void;
 }
 
 function JsonTreeRow({
@@ -231,6 +252,7 @@ function JsonTreeRow({
   search,
   onToggle,
   onSelect,
+  onContextMenu,
 }: JsonTreeRowProps): React.ReactElement | null {
   if (!nodeMatches(value, name, path, search)) return null;
 
@@ -256,6 +278,7 @@ function JsonTreeRow({
           search={search}
           onToggle={onToggle}
           onSelect={onSelect}
+          onContextMenu={onContextMenu}
         />
       ));
     } else {
@@ -273,6 +296,7 @@ function JsonTreeRow({
             search={search}
             onToggle={onToggle}
             onSelect={onSelect}
+            onContextMenu={onContextMenu}
           />
         );
       });
@@ -289,6 +313,7 @@ function JsonTreeRow({
         aria-expanded={expandable ? isVisuallyExpanded : undefined}
         aria-selected={isSelected}
         onClick={() => onSelect(path)}
+        onContextMenu={(event) => onContextMenu(event, { name, path, value })}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
@@ -369,8 +394,10 @@ export function JsonWorkspace({
   const [jsonSplitResizing, setJsonSplitResizing] = useState(false);
   const [wrapEditorContent, setWrapEditorContent] = useState(false);
   const [commandFeedback, setCommandFeedback] = useState<JsonCommandFeedback | null>(null);
+  const [treeContextMenu, setTreeContextMenu] = useState<JsonTreeContextMenuState | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const splitContainerRef = useRef<HTMLDivElement>(null);
+  const treeContextMenuRef = useRef<HTMLDivElement>(null);
   const rawTextRef = useRef(rawText);
   const pushTimerRef = useRef<number | null>(null);
   const splitPointerIdRef = useRef<number | null>(null);
@@ -465,6 +492,30 @@ export function JsonWorkspace({
       }, JSON_COMMAND_FEEDBACK_MS);
     });
   }, [clearCommandFeedback]);
+
+  useEffect(() => {
+    if (!treeContextMenu) return;
+
+    const closeIfOutside = (event: MouseEvent) => {
+      if (treeContextMenuRef.current?.contains(event.target as Node)) return;
+      setTreeContextMenu(null);
+    };
+    const closeMenu = () => setTreeContextMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMenu();
+    };
+
+    document.addEventListener("mousedown", closeIfOutside);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      document.removeEventListener("mousedown", closeIfOutside);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [treeContextMenu]);
 
   useEffect(() => {
     let cancelled = false;
@@ -726,6 +777,47 @@ export function JsonWorkspace({
   const handleCopyPath = useCallback((path: string) => {
     writeClipboard(path, `Copied path ${flattenPathForLabel(path) || "$"}`);
   }, [writeClipboard]);
+
+  const openTreeContextMenu = useCallback((
+    event: React.MouseEvent<HTMLDivElement>,
+    item: JsonTreeContextItem,
+    onSelectedChange: React.Dispatch<React.SetStateAction<string>>
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectedChange(item.path);
+
+    const maxLeft = Math.max(
+      JSON_TREE_MENU_MARGIN_PX,
+      window.innerWidth - JSON_TREE_MENU_WIDTH_PX - JSON_TREE_MENU_MARGIN_PX
+    );
+    const maxTop = Math.max(
+      JSON_TREE_MENU_MARGIN_PX,
+      window.innerHeight - JSON_TREE_MENU_HEIGHT_PX - JSON_TREE_MENU_MARGIN_PX
+    );
+    const x = Math.min(
+      Math.max(JSON_TREE_MENU_MARGIN_PX, event.clientX),
+      maxLeft
+    );
+    const y = Math.min(
+      Math.max(JSON_TREE_MENU_MARGIN_PX, event.clientY),
+      maxTop
+    );
+    setTreeContextMenu({ ...item, x, y });
+  }, []);
+
+  const copyTreeContextValue = useCallback(async (kind: "key" | "value" | "path") => {
+    if (!treeContextMenu) return;
+
+    const text = kind === "key"
+      ? treeContextMenu.name
+      : kind === "value"
+        ? formatJsonValueForClipboard(treeContextMenu.value)
+        : treeContextMenu.path;
+    const labelPath = flattenPathForLabel(treeContextMenu.path) || "$";
+    await writeClipboard(text, `Copied ${kind} ${labelPath}`);
+    setTreeContextMenu(null);
+  }, [treeContextMenu, writeClipboard]);
 
   const handleToggleWrap = useCallback(() => {
     const nextWrapped = !wrapEditorContent;
@@ -1005,6 +1097,7 @@ export function JsonWorkspace({
                   search={search}
                   onToggle={onTogglePath}
                   onSelect={onSelectedChange}
+                  onContextMenu={(event, item) => openTreeContextMenu(event, item, onSelectedChange)}
                 />
               )}
               {!loadingDocument && errorMessage && (
@@ -1210,8 +1303,35 @@ export function JsonWorkspace({
     </section>
   );
 
+  const treeContextMenuElement = treeContextMenu
+    ? ReactDOM.createPortal(
+        <div
+          ref={treeContextMenuRef}
+          className="json-tree-context-menu"
+          role="menu"
+          style={{ left: treeContextMenu.x, top: treeContextMenu.y }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button type="button" role="menuitem" onClick={() => copyTreeContextValue("key")}>
+            <Icon icon="key" size={13} />
+            <span>Copy key</span>
+          </button>
+          <button type="button" role="menuitem" onClick={() => copyTreeContextValue("value")}>
+            <Icon icon="variable" size={13} />
+            <span>Copy value</span>
+          </button>
+          <button type="button" role="menuitem" onClick={() => copyTreeContextValue("path")}>
+            <Icon icon="path" size={13} />
+            <span>Copy path</span>
+          </button>
+        </div>,
+        document.body
+      )
+    : null;
+
   return (
     <div className={`json-workspace${compareMode ? " compare-enabled" : ""}`}>
+      {treeContextMenuElement}
       {loadError && (
         <Callout intent={Intent.DANGER} icon="error" className="json-load-error">
           {loadError}
