@@ -398,7 +398,7 @@ export function Sidebar({
               small
             />
             <Button
-              icon="duplicate"
+              icon="download"
               text="Save As"
               onClick={jsonFileActions.onSaveAs}
               disabled={!jsonFileActions.isValid || jsonFileActions.saving}
@@ -644,7 +644,7 @@ export function Sidebar({
             >
               <span className="sidebar-action-tooltip">
                 <Button
-                  icon="data-lineage"
+                  icon="comparison"
                   text="Compare"
                   title={compareDisabled ? undefined : "Compare current table with another table"}
                   onClick={onCompareTables}
