@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import React, { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   Button,
   Callout,
@@ -74,6 +74,19 @@ interface JsonWorkspaceProps {
   onReloadTable: () => Promise<void>;
 }
 
+export interface JsonWorkspaceInsertResult {
+  ok: boolean;
+  target: "cursor" | "path" | "none";
+  message: string;
+}
+
+export interface JsonWorkspaceHandle {
+  canInsertJsonArray: () => boolean;
+  insertJsonArray: (jsonArrayText: string) => JsonWorkspaceInsertResult;
+}
+
+type JsonPathSegment = string | number;
+
 function getFileName(path: string): string {
   return path.split(/[/\\]/).pop() || path;
 }
@@ -133,6 +146,67 @@ function formatFileSize(bytes: number | null): string {
 
 function flattenPathForLabel(path: string): string {
   return path.replace(/\[(\d+)\]/g, ".$1").replace(/^\$\./, "");
+}
+
+function parseSimpleJsonPath(path: string): JsonPathSegment[] | null {
+  if (path === "$") return [];
+  if (!path.startsWith("$")) return null;
+
+  const segments: JsonPathSegment[] = [];
+  let i = 1;
+  while (i < path.length) {
+    if (path[i] === ".") {
+      i += 1;
+      const start = i;
+      while (i < path.length && path[i] !== "." && path[i] !== "[") i += 1;
+      const key = path.slice(start, i);
+      if (!key) return null;
+      segments.push(key);
+      continue;
+    }
+
+    if (path[i] === "[") {
+      const end = path.indexOf("]", i);
+      if (end < 0) return null;
+      const rawIndex = path.slice(i + 1, end);
+      if (!/^\d+$/.test(rawIndex)) return null;
+      segments.push(Number(rawIndex));
+      i = end + 1;
+      continue;
+    }
+
+    return null;
+  }
+
+  return segments;
+}
+
+function replaceJsonPathValue(
+  value: JsonValue,
+  segments: JsonPathSegment[],
+  replacement: JsonValue
+): JsonValue | undefined {
+  if (segments.length === 0) return replacement;
+  const [head, ...tail] = segments;
+
+  if (Array.isArray(value)) {
+    if (typeof head !== "number" || head < 0 || head >= value.length) return undefined;
+    const nextChild = replaceJsonPathValue(value[head], tail, replacement);
+    if (nextChild === undefined) return undefined;
+    const next = [...value];
+    next[head] = nextChild;
+    return next;
+  }
+
+  if (value && typeof value === "object") {
+    if (typeof head !== "string" || !Object.prototype.hasOwnProperty.call(value, head)) return undefined;
+    const objectValue = value as { [key: string]: JsonValue };
+    const nextChild = replaceJsonPathValue(objectValue[head], tail, replacement);
+    if (nextChild === undefined) return undefined;
+    return { ...objectValue, [head]: nextChild };
+  }
+
+  return undefined;
 }
 
 function searchablePathText(path: string): string {
@@ -315,12 +389,12 @@ function JsonTreeRow({
   );
 }
 
-export function JsonWorkspace({
+export const JsonWorkspace = React.forwardRef<JsonWorkspaceHandle, JsonWorkspaceProps>(function JsonWorkspace({
   table,
   jsonTables,
   onOpenFiles,
   onReloadTable,
-}: JsonWorkspaceProps): React.ReactElement {
+}: JsonWorkspaceProps, ref): React.ReactElement {
   const [rawText, setRawText] = useState("");
   const [originalText, setOriginalText] = useState("");
   const [fileSize, setFileSize] = useState<number | null>(null);
@@ -661,6 +735,83 @@ export function JsonWorkspace({
   const handleCopyPath = useCallback((path: string) => {
     writeClipboard(path, `Copied path ${flattenPathForLabel(path) || "$"}`);
   }, [writeClipboard]);
+
+  const insertJsonTextAtCursor = useCallback((jsonArrayText: string): JsonWorkspaceInsertResult => {
+    if (compareMode || !editorRef.current) {
+      return { ok: false, target: "none", message: "JSON editor is not active" };
+    }
+
+    const editor = editorRef.current;
+    const sourceText = rawTextRef.current;
+    const start = editor.selectionStart ?? sourceText.length;
+    const end = editor.selectionEnd ?? start;
+    const nextText = `${sourceText.slice(0, start)}${jsonArrayText}${sourceText.slice(end)}`;
+    const nextCaret = start + jsonArrayText.length;
+
+    flushPendingHistory();
+    setRawText(nextText);
+    dispatchHistory({ type: "push", text: nextText, label: "Inserted JSON array" });
+    setStatusMessage("Inserted JSON array");
+
+    window.requestAnimationFrame(() => {
+      const nextEditor = editorRef.current;
+      if (!nextEditor) return;
+      nextEditor.focus();
+      nextEditor.setSelectionRange(nextCaret, nextCaret);
+    });
+
+    return { ok: true, target: "cursor", message: "Inserted JSON array" };
+  }, [compareMode, flushPendingHistory]);
+
+  const insertJsonArray = useCallback((jsonArrayText: string): JsonWorkspaceInsertResult => {
+    if (compareMode || !editorRef.current) {
+      return { ok: false, target: "none", message: "JSON editor is not active" };
+    }
+
+    let replacement: JsonValue;
+    try {
+      const parsedArray = JSON.parse(jsonArrayText);
+      if (!Array.isArray(parsedArray)) {
+        return { ok: false, target: "none", message: "Insert payload is not a JSON array" };
+      }
+      replacement = parsedArray as JsonValue;
+    } catch (err) {
+      return {
+        ok: false,
+        target: "none",
+        message: err instanceof Error ? err.message : "Insert payload is not valid JSON",
+      };
+    }
+
+    if (isValid && selectedPath !== "$" && parsed.value !== null) {
+      const pathSegments = parseSimpleJsonPath(selectedPath);
+      if (pathSegments && pathSegments.length > 0) {
+        const nextValue = replaceJsonPathValue(parsed.value, pathSegments, replacement);
+        if (nextValue !== undefined) {
+          const sourceText = rawTextRef.current;
+          const nextText = serializeJsonForFile(nextValue, extension, true, sourceText);
+          const pathLabel = flattenPathForLabel(selectedPath) || selectedPath;
+          flushPendingHistory();
+          setRawText(nextText);
+          dispatchHistory({ type: "push", text: nextText, label: `Inserted JSON array at ${pathLabel}` });
+          setStatusMessage(`Inserted JSON array at ${pathLabel}`);
+
+          window.requestAnimationFrame(() => {
+            editorRef.current?.focus();
+          });
+
+          return { ok: true, target: "path", message: `Inserted JSON array at ${pathLabel}` };
+        }
+      }
+    }
+
+    return insertJsonTextAtCursor(jsonArrayText);
+  }, [compareMode, extension, flushPendingHistory, insertJsonTextAtCursor, isValid, parsed.value, selectedPath]);
+
+  useImperativeHandle(ref, () => ({
+    canInsertJsonArray: () => !compareMode && !!editorRef.current,
+    insertJsonArray,
+  }), [compareMode, insertJsonArray]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1185,4 +1336,4 @@ export function JsonWorkspace({
       </div>
     </div>
   );
-}
+});

@@ -350,6 +350,36 @@ export function buildColumnUniqueValuesQuery(
   return sql;
 }
 
+export function buildColumnDistinctValuesQuery(
+  tableName: string,
+  column: string,
+  filters: FilterGroup,
+  includeNulls: boolean,
+  sortAz: boolean,
+  limit: number | null
+): string {
+  const col = escapeIdent(column);
+  const whereParts: string[] = [];
+  const filterClause = buildFilterGroupClause(filters);
+  if (filterClause) whereParts.push(filterClause);
+  if (!includeNulls) whereParts.push(`${col} IS NOT NULL`);
+
+  let sql = `SELECT ${col} AS value, COUNT(*) AS count, MIN(rowid) AS __first_row FROM ${escapeIdent(tableName)}`;
+  if (whereParts.length > 0) {
+    sql += ` WHERE ${whereParts.join(" AND ")}`;
+  }
+  sql += ` GROUP BY ${col}`;
+  sql += sortAz
+    ? ` ORDER BY ${col} IS NULL ASC, LOWER(CAST(${col} AS VARCHAR)) ASC, CAST(${col} AS VARCHAR) ASC`
+    : ` ORDER BY __first_row ASC`;
+
+  if (limit !== null) {
+    sql += ` LIMIT ${Math.max(1, Math.floor(limit))}`;
+  }
+
+  return sql;
+}
+
 /**
  * Build a WHERE clause fragment for parent path constraints in pivot queries.
  * Generates: "col1" = 'val1' AND "col2" IS NULL ...
