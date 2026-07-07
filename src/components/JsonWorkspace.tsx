@@ -357,6 +357,7 @@ export function JsonWorkspace({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [jsonSplitPercent, setJsonSplitPercent] = useState(50);
   const [jsonSplitResizing, setJsonSplitResizing] = useState(false);
+  const [wrapEditorContent, setWrapEditorContent] = useState(false);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const rawTextRef = useRef(rawText);
@@ -1176,11 +1177,12 @@ export function JsonWorkspace({
                   <Button minimal small icon="clipboard" text="Copy JSON" onClick={handleCopySource} disabled={!rawText} />
                   <Button minimal small icon="minimize" text="Minify" onClick={handleMinify} disabled={!isValid} />
                   <Button minimal small icon="align-left" text="Format" onClick={handleFormat} disabled={!isValid} />
+                  <Button minimal small icon="align-justify" text="Wrap" active={wrapEditorContent} onClick={() => setWrapEditorContent((prev) => !prev)} />
                 </div>
               </div>
 
               <div className="json-document-body">
-                <div className={`json-editor${parsed.error ? " has-error" : ""}`}>
+                <div className={`json-editor${parsed.error ? " has-error" : ""}${wrapEditorContent ? " is-wrapped" : ""}`}>
                   <div className="json-line-numbers">
                     <div className="json-line-numbers-inner" style={{ transform: `translateY(-${rawScrollTop}px)` }}>
                       {lineNumbers.map((n) => <span key={n}>{n}</span>)}
@@ -1192,7 +1194,7 @@ export function JsonWorkspace({
                     value={rawText}
                     aria-label="Raw JSON editor"
                     spellCheck={false}
-                    wrap="off"
+                    wrap={wrapEditorContent ? "soft" : "off"}
                     onChange={handleRawChange}
                     onScroll={(event) => setRawScrollTop(event.currentTarget.scrollTop)}
                   />
