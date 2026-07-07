@@ -55,6 +55,7 @@ interface JsonCommandFeedback {
 interface JsonHistoryEntry {
   text: string;
   label: string;
+  wrapEditorContent: boolean;
 }
 
 interface JsonHistoryState {
@@ -63,8 +64,8 @@ interface JsonHistoryState {
 }
 
 type JsonHistoryAction =
-  | { type: "reset"; text: string; label: string }
-  | { type: "push"; text: string; label: string }
+  | { type: "reset"; text: string; label: string; wrapEditorContent: boolean }
+  | { type: "push"; text: string; label: string; wrapEditorContent: boolean }
   | { type: "undo" }
   | { type: "redo" }
   | { type: "jump"; index: number };
@@ -72,12 +73,29 @@ type JsonHistoryAction =
 function jsonHistoryReducer(state: JsonHistoryState, action: JsonHistoryAction): JsonHistoryState {
   switch (action.type) {
     case "reset":
-      return { entries: [{ text: action.text, label: action.label }], index: 0 };
+      return {
+        entries: [{
+          text: action.text,
+          label: action.label,
+          wrapEditorContent: action.wrapEditorContent,
+        }],
+        index: 0,
+      };
     case "push": {
       const current = state.entries[state.index];
-      if (current && current.text === action.text) return state;
+      if (
+        current
+        && current.text === action.text
+        && current.wrapEditorContent === action.wrapEditorContent
+      ) {
+        return state;
+      }
       const kept = state.entries.slice(0, state.index + 1);
-      const next = [...kept, { text: action.text, label: action.label }];
+      const next = [...kept, {
+        text: action.text,
+        label: action.label,
+        wrapEditorContent: action.wrapEditorContent,
+      }];
       const overflow = Math.max(0, next.length - JSON_HISTORY_LIMIT);
       const trimmed = overflow ? next.slice(overflow) : next;
       return { entries: trimmed, index: trimmed.length - 1 };
@@ -399,6 +417,7 @@ export function JsonWorkspace({
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const treeContextMenuRef = useRef<HTMLDivElement>(null);
   const rawTextRef = useRef(rawText);
+  const wrapEditorContentRef = useRef(wrapEditorContent);
   const pushTimerRef = useRef<number | null>(null);
   const splitPointerIdRef = useRef<number | null>(null);
   const commandFeedbackFrameRef = useRef<number | null>(null);
@@ -461,6 +480,7 @@ export function JsonWorkspace({
 
   useLayoutEffect(() => {
     rawTextRef.current = rawText;
+    wrapEditorContentRef.current = wrapEditorContent;
   });
 
   useEffect(() => () => {
@@ -530,7 +550,12 @@ export function JsonWorkspace({
         setFileSize(new Blob([text]).size);
         setSelectedPath("$");
         setExpanded(new Set(["$"]));
-        dispatchHistory({ type: "reset", text, label: "Opened" });
+        dispatchHistory({
+          type: "reset",
+          text,
+          label: "Opened",
+          wrapEditorContent: wrapEditorContentRef.current,
+        });
       })
       .catch((err) => {
         if (!cancelled) setLoadError(String(err));
@@ -600,20 +625,28 @@ export function JsonWorkspace({
     if (pushTimerRef.current) {
       window.clearTimeout(pushTimerRef.current);
       pushTimerRef.current = null;
-      dispatchHistory({ type: "push", text: rawTextRef.current, label: "Edited" });
+      dispatchHistory({
+        type: "push",
+        text: rawTextRef.current,
+        label: "Edited",
+        wrapEditorContent: wrapEditorContentRef.current,
+      });
     }
   }, []);
 
-  // Apply text when the user navigates history (undo / redo / jump). Pushes are
-  // no-ops here because the current entry text already equals rawText.
+  // Apply editor state when the user navigates history (undo / redo / jump).
   useEffect(() => {
     const entry = history.entries[history.index];
-    if (entry && entry.text !== rawTextRef.current) {
+    if (!entry) return;
+    if (entry.text !== rawTextRef.current) {
       if (pushTimerRef.current) {
         window.clearTimeout(pushTimerRef.current);
         pushTimerRef.current = null;
       }
       setRawText(entry.text);
+    }
+    if (entry.wrapEditorContent !== wrapEditorContentRef.current) {
+      setWrapEditorContent(entry.wrapEditorContent);
     }
   }, [history.index, history.entries]);
 
@@ -656,7 +689,12 @@ export function JsonWorkspace({
       return;
     }
     setRawText(nextText);
-    dispatchHistory({ type: "push", text: nextText, label });
+    dispatchHistory({
+      type: "push",
+      text: nextText,
+      label,
+      wrapEditorContent: wrapEditorContentRef.current,
+    });
     setStatusMessage(label);
   }, [flushPendingHistory, rawText]);
 
@@ -686,7 +724,12 @@ export function JsonWorkspace({
     if (pushTimerRef.current) window.clearTimeout(pushTimerRef.current);
     pushTimerRef.current = window.setTimeout(() => {
       pushTimerRef.current = null;
-      dispatchHistory({ type: "push", text: rawTextRef.current, label: "Edited" });
+      dispatchHistory({
+        type: "push",
+        text: rawTextRef.current,
+        label: "Edited",
+        wrapEditorContent: wrapEditorContentRef.current,
+      });
     }, JSON_TYPING_PUSH_DELAY);
   }, []);
 
@@ -694,7 +737,12 @@ export function JsonWorkspace({
     if (rawText === originalText) return;
     flushPendingHistory();
     setRawText(originalText);
-    dispatchHistory({ type: "push", text: originalText, label: "Reverted to saved" });
+    dispatchHistory({
+      type: "push",
+      text: originalText,
+      label: "Reverted to saved",
+      wrapEditorContent: wrapEditorContentRef.current,
+    });
     setStatusMessage("Reverted to saved");
   }, [rawText, originalText, flushPendingHistory]);
 
@@ -821,9 +869,16 @@ export function JsonWorkspace({
 
   const handleToggleWrap = useCallback(() => {
     const nextWrapped = !wrapEditorContent;
+    flushPendingHistory();
     setWrapEditorContent(nextWrapped);
+    dispatchHistory({
+      type: "push",
+      text: rawTextRef.current,
+      label: nextWrapped ? "Wrapped" : "Unwrapped",
+      wrapEditorContent: nextWrapped,
+    });
     showCommandFeedback("wrap", nextWrapped ? "Wrapped" : "Unwrapped");
-  }, [showCommandFeedback, wrapEditorContent]);
+  }, [flushPendingHistory, showCommandFeedback, wrapEditorContent]);
 
   useEffect(() => {
     onFileActionsChange?.({
