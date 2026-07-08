@@ -1,6 +1,7 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Callout, Icon, Intent } from "@blueprintjs/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import html2pdf from "html2pdf.js";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -71,85 +72,87 @@ const MARKDOWN_CODE_FONT_SIZE_PX = 12;
 const MARKDOWN_TABLE_FONT_SIZE_PX = 13;
 const MARKDOWN_WHEEL_ZOOM_THROTTLE_MS = 80;
 const MARKDOWN_SCROLL_SYNC_RELEASE_MS = 120;
-const MARKDOWN_PRINT_ASSET_TIMEOUT_MS = 3000;
-const MARKDOWN_PRINT_ROOT_ID = "markdown-pdf-print-root";
-const MARKDOWN_PRINT_STYLE_ID = "markdown-pdf-print-style";
-const MARKDOWN_PRINT_MODE_CLASS = "markdown-pdf-printing";
+const MARKDOWN_PDF_ASSET_TIMEOUT_MS = 3000;
+const MARKDOWN_PDF_EXPORT_ROOT_ID = "markdown-pdf-export-root";
 const MARKDOWN_SEARCH_MARK_CLASS = "markdown-search-mark";
 const MARKDOWN_SEARCH_SKIP_TAGS = new Set(["script", "style"]);
-const MARKDOWN_PRINT_STYLES = `
-  @page {
-    margin: 0.65in;
-  }
-
-  html,
-  body {
-    margin: 0;
+const MARKDOWN_PDF_EXPORT_STYLES = `
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} {
+    position: fixed;
+    left: -10000px;
+    top: 0;
+    z-index: -1;
+    width: 816px;
+    min-height: 1056px;
+    padding: 0;
+    overflow: visible;
     background: #ffffff;
     color: #25384a;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    font-size: 11pt;
-    line-height: 1.55;
+    pointer-events: none;
   }
 
-  .markdown-rendered {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} .markdown-rendered {
     width: 100%;
-    max-width: 7.25in;
+    max-width: 760px;
     margin: 0 auto;
     padding: 0;
     color: #25384a;
+    background: #ffffff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.55;
     overflow-wrap: anywhere;
   }
 
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} h1,
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} h2,
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} h3,
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} h4,
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} h5,
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} h6 {
     color: #10161a;
     letter-spacing: 0;
     page-break-after: avoid;
   }
 
-  h1 {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} h1 {
     margin: 0 0 14px;
-    font-size: 24pt;
+    font-size: 28px;
     line-height: 1.15;
   }
 
-  h2 {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} h2 {
     margin: 22px 0 9px;
     padding-top: 14px;
     border-top: 1px solid #d8e1e8;
-    font-size: 16pt;
+    font-size: 18px;
     line-height: 1.25;
   }
 
-  h3 {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} h3 {
     margin: 18px 0 7px;
     color: #25384a;
-    font-size: 13pt;
+    font-size: 15px;
   }
 
-  h4,
-  h5,
-  h6 {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} h4,
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} h5,
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} h6 {
     margin: 14px 0 6px;
     color: #394b59;
-    font-size: 11pt;
+    font-size: 13px;
   }
 
-  p {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} p {
     margin: 0 0 10px;
   }
 
-  a {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} a {
     color: #106ba3;
     text-decoration: none;
   }
 
-  img {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} img {
     display: block;
     max-width: 100%;
     height: auto;
@@ -157,17 +160,17 @@ const MARKDOWN_PRINT_STYLES = `
     page-break-inside: avoid;
   }
 
-  ul,
-  ol {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} ul,
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} ol {
     margin: 8px 0 12px;
     padding-left: 22px;
   }
 
-  li + li {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} li + li {
     margin-top: 4px;
   }
 
-  blockquote {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} blockquote {
     margin: 14px 0;
     padding: 9px 12px;
     border-left: 3px solid #137cbd;
@@ -176,23 +179,23 @@ const MARKDOWN_PRINT_STYLES = `
     page-break-inside: avoid;
   }
 
-  blockquote p:last-child {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} blockquote p:last-child {
     margin-bottom: 0;
   }
 
-  code {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} code {
     padding: 1px 4px;
     border: 1px solid #f1cdd2;
     border-radius: 4px;
     background: #fff4f6;
     color: #9f2b2b;
     font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
-    font-size: 9.5pt;
+    font-size: 12px;
     overflow-wrap: anywhere;
     word-break: break-word;
   }
 
-  pre {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} pre {
     margin: 12px 0 16px;
     padding: 12px 14px;
     border: 1px solid #c5d0da;
@@ -204,16 +207,16 @@ const MARKDOWN_PRINT_STYLES = `
     page-break-inside: avoid;
   }
 
-  pre code {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} pre code {
     padding: 0;
     border: 0;
     background: transparent;
     color: inherit;
-    font-size: 9pt;
+    font-size: 12px;
     line-height: 1.55;
   }
 
-  .markdown-table-scroll {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} .markdown-table-scroll {
     max-width: 100%;
     margin: 12px 0 16px;
     overflow: visible;
@@ -222,16 +225,16 @@ const MARKDOWN_PRINT_STYLES = `
     page-break-inside: avoid;
   }
 
-  table {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} table {
     width: 100%;
     margin: 0;
     border: 0;
     border-collapse: collapse;
-    font-size: 9.5pt;
+    font-size: 13px;
   }
 
-  th,
-  td {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} th,
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} td {
     padding: 6px 8px;
     border-right: 1px solid #d8e1e8;
     border-bottom: 1px solid #d8e1e8;
@@ -240,63 +243,30 @@ const MARKDOWN_PRINT_STYLES = `
     word-break: break-word;
   }
 
-  th {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} th {
     background: #f5f8fa;
     color: #30404d;
     font-weight: 700;
   }
 
-  tr:last-child td {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} tr:last-child td {
     border-bottom: 0;
   }
 
-  th:last-child,
-  td:last-child {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} th:last-child,
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} td:last-child {
     border-right: 0;
   }
 
-  hr {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} hr {
     height: 1px;
     margin: 22px 0;
     border: 0;
     background: #d8e1e8;
   }
 
-  .bp4-icon,
-  svg {
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} .bp4-icon {
     display: none;
-  }
-`;
-const MARKDOWN_PRINT_HOST_STYLES = `
-  #${MARKDOWN_PRINT_ROOT_ID} {
-    position: fixed;
-    left: -10000px;
-    top: 0;
-    width: 800px;
-    max-height: 1000px;
-    overflow: hidden;
-    visibility: hidden;
-    pointer-events: none;
-    background: #ffffff;
-  }
-
-  @media print {
-    body.${MARKDOWN_PRINT_MODE_CLASS} > *:not(#${MARKDOWN_PRINT_ROOT_ID}) {
-      display: none !important;
-    }
-
-    body.${MARKDOWN_PRINT_MODE_CLASS} #${MARKDOWN_PRINT_ROOT_ID} {
-      position: static !important;
-      left: auto !important;
-      top: auto !important;
-      width: auto !important;
-      max-height: none !important;
-      overflow: visible !important;
-      visibility: visible !important;
-      pointer-events: auto !important;
-    }
-
-    ${MARKDOWN_PRINT_STYLES}
   }
 `;
 
@@ -641,32 +611,35 @@ function formatMarkdownZoom(zoom: number): string {
   return `${Math.round(zoom * 100)}%`;
 }
 
-function ensureMarkdownPrintStyle(): void {
-  let style = document.getElementById(MARKDOWN_PRINT_STYLE_ID) as HTMLStyleElement | null;
-  if (!style) {
-    style = document.createElement("style");
-    style.id = MARKDOWN_PRINT_STYLE_ID;
-    document.head.appendChild(style);
-  }
-  style.textContent = MARKDOWN_PRINT_HOST_STYLES;
+function ensurePdfExtension(filePath: string): string {
+  return /\.pdf$/i.test(filePath) ? filePath : `${filePath}.pdf`;
 }
 
-function getMarkdownPrintRoot(): HTMLElement {
-  let root = document.getElementById(MARKDOWN_PRINT_ROOT_ID);
-  if (!root) {
-    root = document.createElement("div");
-    root.id = MARKDOWN_PRINT_ROOT_ID;
-    document.body.appendChild(root);
-  }
-  return root;
+function getPdfFileName(filePath: string): string {
+  return ensurePdfExtension(getFileName(filePath).replace(/\.[^.\\/]+$/, "") || "markdown");
 }
 
-function buildMarkdownPrintMarkup(contentHtml: string): string {
-  return `<article class="markdown-rendered">${contentHtml}</article>`;
+function createMarkdownPdfExportRoot(contentHtml: string): { root: HTMLElement; article: HTMLElement } {
+  document.getElementById(MARKDOWN_PDF_EXPORT_ROOT_ID)?.remove();
+
+  const root = document.createElement("div");
+  root.id = MARKDOWN_PDF_EXPORT_ROOT_ID;
+
+  const style = document.createElement("style");
+  style.textContent = MARKDOWN_PDF_EXPORT_STYLES;
+
+  const article = document.createElement("article");
+  article.className = "markdown-rendered";
+  article.innerHTML = contentHtml;
+
+  root.append(style, article);
+  document.body.appendChild(root);
+  return { root, article };
 }
 
-async function waitForPrintableAssets(container: ParentNode): Promise<void> {
+async function waitForPdfAssets(container: ParentNode): Promise<void> {
   const pendingImages = Array.from(container.querySelectorAll("img")).filter((image) => !image.complete);
+  await document.fonts?.ready.catch(() => undefined);
   if (pendingImages.length === 0) return;
 
   await Promise.race([
@@ -674,7 +647,7 @@ async function waitForPrintableAssets(container: ParentNode): Promise<void> {
       image.onload = () => resolve();
       image.onerror = () => resolve();
     }))),
-    new Promise<void>((resolve) => window.setTimeout(resolve, MARKDOWN_PRINT_ASSET_TIMEOUT_MS)),
+    new Promise<void>((resolve) => window.setTimeout(resolve, MARKDOWN_PDF_ASSET_TIMEOUT_MS)),
   ]);
 }
 
@@ -1356,34 +1329,53 @@ export function MarkdownWorkspace({
     const article = renderedArticleRef.current;
     if (!article) return;
 
-    let printRoot: HTMLElement | null = null;
-    const previousTitle = document.title;
+    let exportRoot: HTMLElement | null = null;
     setExportingPdf(true);
 
     try {
-      ensureMarkdownPrintStyle();
-      printRoot = getMarkdownPrintRoot();
-      printRoot.innerHTML = buildMarkdownPrintMarkup(article.innerHTML);
-      for (const image of Array.from(printRoot.querySelectorAll("img"))) {
+      const path = await window.api.saveFileDialog("pdf");
+      if (!path) return;
+
+      const exportDom = createMarkdownPdfExportRoot(article.innerHTML);
+      exportRoot = exportDom.root;
+      for (const image of Array.from(exportRoot.querySelectorAll("img"))) {
         image.loading = "eager";
       }
 
-      document.title = getFileName(table.filePath);
-      document.body.classList.add(MARKDOWN_PRINT_MODE_CLASS);
-      await waitForPrintableAssets(printRoot);
-      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      await waitForPdfAssets(exportRoot);
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 
-      window.focus();
-      window.print();
-      pushHistory("Prepared PDF", rawText);
+      const worker = html2pdf()
+        .set({
+          margin: [0.55, 0.55, 0.55, 0.55],
+          filename: getPdfFileName(table.filePath),
+          image: { type: "jpeg", quality: 0.98 },
+          enableLinks: true,
+          html2canvas: {
+            backgroundColor: "#ffffff",
+            logging: false,
+            scale: Math.min(2, Math.max(1.5, window.devicePixelRatio || 1)),
+            scrollX: 0,
+            scrollY: 0,
+            useCORS: true,
+            windowWidth: exportRoot.scrollWidth,
+          },
+          jsPDF: { unit: "in", format: "letter", orientation: "portrait" },
+          pagebreak: {
+            mode: ["css", "legacy"],
+            avoid: ["blockquote", "img", "pre", "tr"],
+          },
+        } as any)
+        .from(exportDom.article)
+        .toPdf();
+
+      const pdf = await worker.get("pdf");
+      const bytes = new Uint8Array(pdf.output("arraybuffer"));
+      await window.api.writeBinaryFile(ensurePdfExtension(path), bytes);
+      pushHistory("Exported PDF", rawText);
     } finally {
-      document.body.classList.remove(MARKDOWN_PRINT_MODE_CLASS);
-      document.title = previousTitle;
       setExportingPdf(false);
-      if (printRoot) {
-        window.setTimeout(() => printRoot?.remove(), 1000);
-      }
+      exportRoot?.remove();
     }
   }, [pushHistory, rawText, table.filePath]);
 

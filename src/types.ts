@@ -29,6 +29,7 @@ export interface DbApi {
   readJsonFile: () => Promise<any | null>;
   readTextFile: (filePath: string) => Promise<string>;
   writeTextFile: (filePath: string, contents: string) => Promise<boolean>;
+  writeBinaryFile: (filePath: string, contents: Uint8Array) => Promise<boolean>;
   fileExists: (filePath: string) => Promise<boolean>;
   onOpenFiles: (callback: (filePaths: string[]) => void) => void;
   onAddFiles: (callback: (filePaths: string[]) => void) => void;

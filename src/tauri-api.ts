@@ -32,6 +32,7 @@ const filterMap: Record<string, { name: string; extensions: string[] }[]> = {
   json: [{ name: "JSON Files", extensions: ["json"] }],
   md: [{ name: "Markdown Files", extensions: ["md", "markdown"] }],
   markdown: [{ name: "Markdown Files", extensions: ["md", "markdown"] }],
+  pdf: [{ name: "PDF Files", extensions: ["pdf"] }],
   parquet: [{ name: "Parquet Files", extensions: ["parquet"] }],
   xlsx: [{ name: "Excel Files", extensions: ["xlsx"] }],
   xls: [{ name: "Excel Files", extensions: ["xls"] }],
@@ -158,6 +159,9 @@ function installTauriApi() {
 
     writeTextFile: (filePath: string, contents: string) =>
       invoke<boolean>("write_text_file", { filePath, contents }),
+
+    writeBinaryFile: (filePath: string, contents: Uint8Array) =>
+      invoke<boolean>("write_binary_file", { filePath, bytes: Array.from(contents) }),
 
     fileExists: (filePath: string) => invoke("file_exists", { filePath }),
 

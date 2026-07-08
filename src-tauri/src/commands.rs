@@ -373,6 +373,12 @@ pub fn write_text_file(file_path: String, contents: String) -> AppResult<bool> {
 }
 
 #[tauri::command]
+pub fn write_binary_file(file_path: String, bytes: Vec<u8>) -> AppResult<bool> {
+    std::fs::write(file_path, bytes)?;
+    Ok(true)
+}
+
+#[tauri::command]
 pub fn file_exists(file_path: String) -> AppResult<bool> {
     Ok(Path::new(&file_path).exists())
 }
