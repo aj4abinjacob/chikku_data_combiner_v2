@@ -14,6 +14,9 @@ module.exports = function (_env, argv) {
     },
     resolve: {
       extensions: [".ts", ".tsx", ".js"],
+      alias: {
+        "html2canvas-pro$": path.resolve(__dirname, "node_modules/html2canvas-pro/dist/html2canvas-pro.esm.js"),
+      },
     },
     output: {
       path: path.resolve(__dirname, "dist-tauri"),

@@ -1,7 +1,7 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Callout, Icon, Intent } from "@blueprintjs/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import html2canvas from "html2canvas-pro";
+import * as html2canvasPro from "html2canvas-pro";
 import { jsPDF } from "jspdf";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -288,6 +288,37 @@ const MARKDOWN_PDF_EXPORT_STYLES = `
     display: none;
   }
 `;
+
+type Html2CanvasRenderer = (
+  element: HTMLElement,
+  options?: Record<string, unknown>,
+) => Promise<HTMLCanvasElement>;
+
+function getHtml2CanvasRenderer(): Html2CanvasRenderer {
+  const moduleValue = html2canvasPro as unknown;
+  const moduleObject = moduleValue as {
+    default?: unknown;
+    html2canvas?: unknown;
+  };
+  const defaultObject = moduleObject.default as {
+    default?: unknown;
+    html2canvas?: unknown;
+  } | undefined;
+  const candidates = [
+    moduleValue,
+    moduleObject.default,
+    moduleObject.html2canvas,
+    defaultObject?.default,
+    defaultObject?.html2canvas,
+  ];
+  const renderer = candidates.find((candidate): candidate is Html2CanvasRenderer => typeof candidate === "function");
+
+  if (!renderer) {
+    throw new Error("Markdown PDF renderer failed to load.");
+  }
+
+  return renderer;
+}
 
 function getFileExtension(filePath: string): string {
   return filePath.split(".").pop()?.toUpperCase() || "MD";
@@ -1407,7 +1438,8 @@ export function MarkdownWorkspace({
       await waitForPdfAssets(exportRoot);
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 
-      const canvas = await html2canvas(exportDom.article, {
+      const renderHtmlToCanvas = getHtml2CanvasRenderer();
+      const canvas = await renderHtmlToCanvas(exportDom.article, {
         backgroundColor: "#ffffff",
         imageTimeout: MARKDOWN_PDF_ASSET_TIMEOUT_MS,
         logging: false,
