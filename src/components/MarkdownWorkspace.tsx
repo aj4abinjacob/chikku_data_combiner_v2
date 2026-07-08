@@ -152,6 +152,22 @@ const MARKDOWN_PDF_EXPORT_STYLES = `
     margin: 0 0 10px;
   }
 
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} details,
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} .markdown-pdf-details {
+    display: block;
+    margin: 12px 0 16px;
+    padding: 0;
+  }
+
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} summary,
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} .markdown-pdf-summary {
+    display: block;
+    margin: 0 0 8px;
+    color: #25384a;
+    font-weight: 700;
+    list-style: none;
+  }
+
   #${MARKDOWN_PDF_EXPORT_ROOT_ID} a {
     color: #106ba3;
     text-decoration: none;
@@ -253,6 +269,7 @@ const MARKDOWN_PDF_EXPORT_STYLES = `
     border: 0;
     border-collapse: collapse;
     font-size: 13px;
+    table-layout: fixed;
   }
 
   #${MARKDOWN_PDF_EXPORT_ROOT_ID} th,
@@ -262,6 +279,8 @@ const MARKDOWN_PDF_EXPORT_STYLES = `
     border-bottom: 1px solid #d8e1e8;
     text-align: left;
     vertical-align: top;
+    white-space: normal;
+    overflow-wrap: break-word;
     word-break: break-word;
   }
 
@@ -668,6 +687,47 @@ function ensurePdfExtension(filePath: string): string {
   return /\.pdf$/i.test(filePath) ? filePath : `${filePath}.pdf`;
 }
 
+function normalizeMarkdownPdfTables(article: HTMLElement): void {
+  const tables = Array.from(article.querySelectorAll("table"));
+  for (const table of tables) {
+    if (table.parentElement?.classList.contains("markdown-table-scroll")) continue;
+    const wrapper = document.createElement("div");
+    wrapper.className = "markdown-table-scroll";
+    table.replaceWith(wrapper);
+    wrapper.appendChild(table);
+  }
+}
+
+function normalizeMarkdownPdfDetails(article: HTMLElement): void {
+  const detailsElements = Array.from(article.querySelectorAll("details"));
+  for (const details of detailsElements) {
+    const section = document.createElement("section");
+    section.className = "markdown-pdf-details";
+    const summary = Array.from(details.children).find((child) => child.tagName.toLowerCase() === "summary");
+
+    if (summary) {
+      const summaryBlock = document.createElement("div");
+      summaryBlock.className = "markdown-pdf-summary";
+      summaryBlock.innerHTML = summary.innerHTML;
+      section.appendChild(summaryBlock);
+    }
+
+    if (details.open || details.hasAttribute("open")) {
+      for (const child of Array.from(details.childNodes)) {
+        if (child === summary) continue;
+        section.appendChild(child.cloneNode(true));
+      }
+    }
+
+    details.replaceWith(section);
+  }
+}
+
+function normalizeMarkdownPdfExportArticle(article: HTMLElement): void {
+  normalizeMarkdownPdfDetails(article);
+  normalizeMarkdownPdfTables(article);
+}
+
 function createMarkdownPdfExportRoot(contentHtml: string): { root: HTMLElement; article: HTMLElement } {
   document.getElementById(MARKDOWN_PDF_EXPORT_ROOT_ID)?.remove();
 
@@ -680,6 +740,7 @@ function createMarkdownPdfExportRoot(contentHtml: string): { root: HTMLElement; 
   const article = document.createElement("article");
   article.className = "markdown-rendered";
   article.innerHTML = contentHtml;
+  normalizeMarkdownPdfExportArticle(article);
 
   root.append(style, article);
   document.body.appendChild(root);
