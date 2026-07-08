@@ -133,6 +133,7 @@ const NO_VALUE_OPS = new Set<FilterOperator>([
 const MIN_PANEL_HEIGHT = 80;
 const MAX_PANEL_HEIGHT = 500;
 const DEFAULT_PANEL_HEIGHT = 260;
+const QC_PANEL_HEIGHT = 330;
 
 // ── Draft types with IDs for React keys ──
 
@@ -1387,24 +1388,26 @@ function QcPanel({
 
           {activeMode === "boolean" ? (
             <>
-              <label className="qc-panel-field">
-                <span>Tick value</span>
-                <InputGroup
-                  value={session?.trueValue ?? trueValue}
-                  onChange={(e) => setTrueValue(e.target.value)}
-                  small
-                  disabled={!!session || !canCreate}
-                />
-              </label>
-              <label className="qc-panel-field">
-                <span>X value</span>
-                <InputGroup
-                  value={session?.falseValue ?? falseValue}
-                  onChange={(e) => setFalseValue(e.target.value)}
-                  small
-                  disabled={!!session || !canCreate}
-                />
-              </label>
+              <div className="qc-bool-values-grid">
+                <label className="qc-panel-field">
+                  <span>Tick value</span>
+                  <InputGroup
+                    value={session?.trueValue ?? trueValue}
+                    onChange={(e) => setTrueValue(e.target.value)}
+                    small
+                    disabled={!!session || !canCreate}
+                  />
+                </label>
+                <label className="qc-panel-field">
+                  <span>X value</span>
+                  <InputGroup
+                    value={session?.falseValue ?? falseValue}
+                    onChange={(e) => setFalseValue(e.target.value)}
+                    small
+                    disabled={!!session || !canCreate}
+                  />
+                </label>
+              </div>
               {!session && (
                 <Button
                   small
@@ -1760,6 +1763,7 @@ export function FilterPanel({
   );
   const [panelHeight, setPanelHeight] = useState(DEFAULT_PANEL_HEIGHT);
   const [activeTab, setActiveTab] = useState<"filters" | "qc" | "colops" | "rowops">("filters");
+  const activeMinPanelHeight = activeTab === "qc" ? QC_PANEL_HEIGHT : MIN_PANEL_HEIGHT;
   const [splitPercent, setSplitPercent] = useState(68);
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [viewsPaneOpen, setViewsPaneOpen] = useState(savedViews.length > 0);
@@ -1790,6 +1794,12 @@ export function FilterPanel({
     setViewsPaneOpen(savedViews.length > 0);
   }, [savedViews.length]);
 
+  useEffect(() => {
+    if (activeTab === "qc") {
+      setPanelHeight(QC_PANEL_HEIGHT);
+    }
+  }, [activeTab]);
+
   // ── Resize drag handlers ──
   const onMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -1810,7 +1820,7 @@ export function FilterPanel({
       const deltaY = startY.current - e.clientY;
       const newHeight = Math.min(
         MAX_PANEL_HEIGHT,
-        Math.max(MIN_PANEL_HEIGHT, startHeight.current + deltaY)
+        Math.max(activeMinPanelHeight, startHeight.current + deltaY)
       );
       setPanelHeight(newHeight);
     };
@@ -1829,7 +1839,7 @@ export function FilterPanel({
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
     };
-  }, []);
+  }, [activeMinPanelHeight]);
 
   // ── Horizontal split drag handlers ──
   const onSplitMouseDown = useCallback(
@@ -1968,19 +1978,6 @@ export function FilterPanel({
                   className="filter-panel-tab"
                   small
                   minimal
-                  active={activeTab === "qc"}
-                  onClick={() => setActiveTab("qc")}
-                  text="QC"
-                />
-                {qcSession && activeTab !== "qc" && (
-                  <Tag minimal round intent={qcSession.done ? Intent.SUCCESS : Intent.PRIMARY} className="filter-panel-tab-badge">
-                    {qcSession.done ? "done" : Object.keys(qcSession.valuesByRowId).length}
-                  </Tag>
-                )}
-                <Button
-                  className="filter-panel-tab"
-                  small
-                  minimal
                   active={activeTab === "colops"}
                   onClick={() => setActiveTab("colops")}
                   text="Column Ops"
@@ -2003,6 +2000,19 @@ export function FilterPanel({
                     {rowOpsSteps.length}
                   </Tag>
                 )}
+                <Button
+                  className="filter-panel-tab"
+                  small
+                  minimal
+                  active={activeTab === "qc"}
+                  onClick={() => setActiveTab("qc")}
+                  text="QC"
+                />
+                {qcSession && activeTab !== "qc" && (
+                  <Tag minimal round intent={qcSession.done ? Intent.SUCCESS : Intent.PRIMARY} className="filter-panel-tab-badge">
+                    {qcSession.done ? "done" : Object.keys(qcSession.valuesByRowId).length}
+                  </Tag>
+                )}
               </>
             )}
           </div>
@@ -2014,8 +2024,8 @@ export function FilterPanel({
             small
             minimal
             onClick={onClose}
-            title="Close filters, column operations, and row operations"
-            aria-label="Close filters, column operations, and row operations"
+            title="Close filters, column operations, row operations, and QC"
+            aria-label="Close filters, column operations, row operations, and QC"
           />
         </div>
       </div>
