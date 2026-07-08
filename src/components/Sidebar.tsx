@@ -475,6 +475,7 @@ export function Sidebar({
                     content={rowCombineSelectionDisabledReason}
                     placement="top"
                     minimal
+                    compact
                   >
                     <span className="table-combine-checkbox-tooltip">
                       {combineCheckbox}
@@ -525,6 +526,7 @@ export function Sidebar({
               disabled={!combineSelectionDisabledReason}
               placement="top"
               minimal
+              compact
             >
               <span className="combine-select-action-tooltip">
                 <Button
@@ -542,6 +544,7 @@ export function Sidebar({
               disabled={!combineSelectionDisabledReason}
               placement="top"
               minimal
+              compact
             >
               <span className="combine-select-action-tooltip">
                 <Button
@@ -560,6 +563,7 @@ export function Sidebar({
             disabled={!combineDisabledReason}
             placement="top"
             minimal
+            compact
           >
             <span className="sidebar-combine-action-tooltip">
               <Button
