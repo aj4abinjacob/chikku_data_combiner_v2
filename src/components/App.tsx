@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Button, Icon, Intent } from "@blueprintjs/core";
+import { Button, Icon, Intent, Tag } from "@blueprintjs/core";
 import { getCurrentWindow, type DragDropEvent } from "@tauri-apps/api/window";
-import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions, ColumnStats, ColumnStatsUniqueValue, ComparisonViewConfig, JsonWorkspaceFileActions } from "../types";
+import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions, ColumnStats, ColumnStatsUniqueValue, ComparisonViewConfig, DocumentWorkspaceFileActions, QcCreateConfig, QcOptionSortMode, QcSession, QcValueType } from "../types";
 import { Sidebar } from "./Sidebar";
 import { DataGrid } from "./DataGrid";
 import { ComparisonView, createDefaultComparisonConfig } from "./ComparisonView";
@@ -184,6 +184,98 @@ function escapeIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
+function sqlLiteral(value: string | null, valueType: QcValueType): string {
+  if (value === null) return "NULL";
+  if (valueType === "number") {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? String(numeric) : "NULL";
+  }
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function normalizeQcOptions(options: string[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const option of options) {
+    const trimmed = option.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+  return normalized;
+}
+
+function sortQcOptions(options: string[], sortMode: QcOptionSortMode): string[] {
+  const normalized = normalizeQcOptions(options);
+  if (sortMode === "entered") return normalized;
+  if (sortMode === "numeric") {
+    return [...normalized].sort((a, b) => {
+      const aNum = Number(a);
+      const bNum = Number(b);
+      const aValid = Number.isFinite(aNum);
+      const bValid = Number.isFinite(bNum);
+      if (aValid && bValid) return aNum - bNum;
+      if (aValid) return -1;
+      if (bValid) return 1;
+      return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+    });
+  }
+  return [...normalized].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+}
+
+function inferQcValueType(config: QcCreateConfig, options: string[]): QcValueType {
+  if (config.mode !== "options" || config.optionSortMode !== "numeric") return "text";
+  return options.length > 0 && options.every((option) => Number.isFinite(Number(option))) ? "number" : "text";
+}
+
+function removeColumnFilters(group: FilterGroup, column: string): FilterGroup {
+  const children: FilterNode[] = [];
+  for (const child of group.children) {
+    if (isFilterGroup(child)) {
+      const nested = removeColumnFilters(child, column);
+      if (nested.children.length > 0) children.push(nested);
+      continue;
+    }
+    if (child.column !== column) children.push(child);
+  }
+  return { ...group, children };
+}
+
+function filterReferencesColumn(group: FilterGroup, column: string): boolean {
+  return group.children.some((child) => {
+    if (isFilterGroup(child)) return filterReferencesColumn(child, column);
+    return child.column === column;
+  });
+}
+
+function addColumnFilter(group: FilterGroup, column: string, value: string | null): FilterGroup {
+  const withoutColumn = removeColumnFilters(group, column);
+  if (value === "__all__") return withoutColumn;
+  return {
+    ...withoutColumn,
+    logic: "AND",
+    children: [
+      ...withoutColumn.children,
+      value === null
+        ? { column, operator: "IS NULL", value: "" }
+        : { column, operator: "=", value },
+    ],
+  };
+}
+
+function buildQcBatchUpdateSql(tableName: string, session: QcSession): string | null {
+  const entries = Object.entries(session.valuesByRowId)
+    .map(([rowId, value]) => ({ rowId: Number(rowId), value }))
+    .filter((entry) => Number.isFinite(entry.rowId) && entry.value !== "");
+  if (entries.length === 0) return null;
+
+  const cases = entries
+    .map((entry) => `WHEN rowid = ${entry.rowId} THEN ${sqlLiteral(entry.value, session.valueType)}`)
+    .join(" ");
+  const rowIds = entries.map((entry) => String(entry.rowId)).join(", ");
+  return `UPDATE ${escapeIdent(tableName)} SET ${escapeIdent(session.columnName)} = CASE ${cases} ELSE ${escapeIdent(session.columnName)} END WHERE rowid IN (${rowIds})`;
+}
+
 function mapFilterColumns(
   group: FilterGroup,
   mapColumn: (column: string) => string | null
@@ -272,6 +364,84 @@ interface PendingRetry {
   refreshTableName?: string;
 }
 
+function QcSessionBar({
+  session,
+  totalRows,
+  onQuickFilter,
+  onResetAll,
+  onMarkDone,
+}: {
+  session: QcSession;
+  totalRows: number;
+  onQuickFilter: (value: string | null | "__all__") => void;
+  onResetAll: () => Promise<void>;
+  onMarkDone: () => Promise<void>;
+}): React.ReactElement {
+  const values = Object.values(session.valuesByRowId).filter((value) => value !== "");
+  const markedCount = values.length;
+  const progress = totalRows > 0 ? Math.round((markedCount / totalRows) * 100) : 0;
+  const valueCounts = values.reduce<Record<string, number>>((acc, value) => {
+    acc[value] = (acc[value] ?? 0) + 1;
+    return acc;
+  }, {});
+  const quickValues = session.mode === "boolean"
+    ? [session.trueValue, session.falseValue]
+    : session.options.slice(0, 6);
+
+  return (
+    <div className={`qc-session-bar${session.done ? " qc-session-done" : ""}`}>
+      <div className="qc-session-main">
+        <div className="qc-session-title">
+          <Icon icon={session.done ? "tick-circle" : "manual"} size={15} />
+          <span title={session.columnName}>{session.columnName}</span>
+          <Tag minimal intent={session.done ? Intent.SUCCESS : Intent.PRIMARY}>
+            {session.done ? "Done" : "QC"}
+          </Tag>
+        </div>
+        <div className="qc-session-progress" title={`${markedCount.toLocaleString()} of ${totalRows.toLocaleString()} rows QC'd`}>
+          <span className="qc-session-progress-track">
+            <span style={{ width: `${Math.min(100, progress)}%` }} />
+          </span>
+          <strong>{progress}%</strong>
+          <em>{markedCount.toLocaleString()} / {totalRows.toLocaleString()}</em>
+        </div>
+      </div>
+
+      <div className="qc-session-filters" aria-label="QC quick filters">
+        <Button small minimal text="All" onClick={() => onQuickFilter("__all__")} />
+        <Button small minimal text="Not QC'd" onClick={() => onQuickFilter(null)} />
+        {quickValues.map((value) => (
+          <Button
+            key={value}
+            small
+            minimal
+            text={`${value}${valueCounts[value] ? ` (${valueCounts[value]})` : ""}`}
+            onClick={() => onQuickFilter(value)}
+          />
+        ))}
+      </div>
+
+      <div className="qc-session-actions">
+        <Button
+          small
+          icon="undo"
+          text="Reset"
+          disabled={session.done || markedCount === 0}
+          onClick={() => { void onResetAll(); }}
+        />
+        <Button
+          small
+          intent={Intent.PRIMARY}
+          icon="tick"
+          text={session.done ? "Done" : "Mark QC Done"}
+          disabled={session.done}
+          onClick={() => { void onMarkDone(); }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function App(): React.ReactElement {
   const [tables, setTables] = useState<LoadedTable[]>([]);
   const [activeTable, setActiveTable] = useState<string | null>(null);
@@ -317,7 +487,8 @@ export function App(): React.ReactElement {
   });
   const [filterPanelMounted, setFilterPanelMounted] = useState(false);
   const [fileDragState, setFileDragState] = useState<"idle" | "supported" | "unsupported">("idle");
-  const [jsonFileActions, setJsonFileActions] = useState<JsonWorkspaceFileActions | null>(null);
+  const [documentFileActions, setDocumentFileActions] = useState<DocumentWorkspaceFileActions | null>(null);
+  const [qcSessions, setQcSessions] = useState<Record<string, QcSession>>({});
   const filterPanelExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Use refs so IPC callbacks always see latest state
@@ -355,7 +526,7 @@ export function App(): React.ReactElement {
     () => activeTable ? tables.find((t) => t.tableName === activeTable) ?? null : null,
     [activeTable, tables]
   );
-
+  const activeQcSession = activeTable ? qcSessions[activeTable] ?? null : null;
   const sqlBackedTables = useMemo(
     () => tables.filter((table) => table.filePath.startsWith("(") || !isTextWorkspaceFilePath(table.filePath)),
     [tables]
@@ -550,6 +721,18 @@ export function App(): React.ReactElement {
       }
 
       setTables(newTables);
+      setQcSessions((prev) => {
+        const nextTablesByName = new Map(newTables.map((table) => [table.tableName, table]));
+        if (replace) return {};
+        const next: Record<string, QcSession> = {};
+        for (const [tableName, session] of Object.entries(prev)) {
+          const table = nextTablesByName.get(tableName);
+          if (table && table.schema.some((column) => column.column_name === session.columnName)) {
+            next[tableName] = session;
+          }
+        }
+        return next;
+      });
       setTableHistories((prev) => {
         const next = replace ? new Map<string, TableHistory>() : new Map(prev);
         for (const table of newTables) {
@@ -792,7 +975,7 @@ export function App(): React.ReactElement {
       await finalizeLoadedTables(
         newTables,
         replaceOriginal,
-        refreshExisting ? nextActiveTable ?? activeTableRef.current ?? undefined : undefined,
+        nextActiveTable ?? (refreshExisting ? activeTableRef.current ?? undefined : undefined),
         refreshExisting
       );
     },
@@ -1151,6 +1334,10 @@ export function App(): React.ReactElement {
       next.delete(tableName);
       return next;
     });
+    setQcSessions((prev) => {
+      const { [tableName]: _removed, ...rest } = prev;
+      return rest;
+    });
   }, []);
 
   // Open the column mapping dialog with selected tables
@@ -1393,6 +1580,177 @@ export function App(): React.ReactElement {
     setResetKey((k) => k + 1);
   }, []);
 
+  // ── QC handlers ──
+
+  const handleQcCreate = useCallback(
+    async (config: QcCreateConfig) => {
+      if (!activeTable) throw new Error("No active table");
+      const columnName = config.columnName.trim();
+      if (!columnName) throw new Error("Enter a QC column name");
+      if (schema.some((col) => col.column_name === columnName)) {
+        throw new Error(`Column "${columnName}" already exists`);
+      }
+
+      const trueValue = config.trueValue.trim() || "Accepted";
+      const falseValue = config.falseValue.trim() || "Rejected";
+      if (config.mode === "boolean" && trueValue === falseValue) {
+        throw new Error("Tick and X values must be different");
+      }
+
+      const options = config.mode === "options"
+        ? sortQcOptions(config.options, config.optionSortMode)
+        : [];
+      if (config.mode === "options" && options.length === 0) {
+        throw new Error("Add at least one QC option");
+      }
+
+      const valueType = inferQcValueType(config, options);
+      const columnType = valueType === "number" ? "DOUBLE" : "VARCHAR";
+      const sql = `ALTER TABLE ${escapeIdent(activeTable)} ADD COLUMN ${escapeIdent(columnName)} ${columnType}`;
+
+      await window.api.exec(sql);
+
+      const session: QcSession = {
+        columnName,
+        mode: config.mode,
+        done: false,
+        createdAt: Date.now(),
+        valueType,
+        trueValue,
+        falseValue,
+        options,
+        optionSortMode: config.optionSortMode,
+        valuesByRowId: {},
+      };
+
+      setQcSessions((prev) => ({ ...prev, [activeTable]: session }));
+      recordHistoryEntry(activeTable, "data_op", `Create QC column "${columnName}"`, [sql]);
+
+      const newSchema = await window.api.describe(activeTable);
+      setSchema(newSchema);
+      setTables((prev) =>
+        prev.map((table) =>
+          table.tableName === activeTable
+            ? { ...table, schema: newSchema }
+            : table
+        )
+      );
+      setViewState((prev) => ({
+        ...prev,
+        visibleColumns: prev.visibleColumns.includes(columnName) ? prev.visibleColumns : [...prev.visibleColumns, columnName],
+        columnOrder: prev.columnOrder.includes(columnName) ? prev.columnOrder : [...prev.columnOrder, columnName],
+      }));
+      setSchemaVersion((v) => v + 1);
+      setDataVersion((v) => v + 1);
+      setResetKey((k) => k + 1);
+    },
+    [activeTable, recordHistoryEntry, schema]
+  );
+
+  const handleQcCellChange = useCallback(
+    async (rowId: number, value: string | null) => {
+      if (!activeTable || !activeQcSession || activeQcSession.done) return;
+      const nextValue = value === "" ? null : value;
+      const tableName = activeTable;
+      const sessionAtClick = activeQcSession;
+      const previousValue = sessionAtClick.valuesByRowId[String(rowId)];
+      const hadPreviousValue = previousValue !== undefined;
+      const qcFilterActive = filterReferencesColumn(viewState.filters, sessionAtClick.columnName);
+
+      setQcSessions((prev) => {
+        const session = prev[tableName];
+        if (!session || session.done) return prev;
+        const valuesByRowId = { ...session.valuesByRowId };
+        if (nextValue === null) {
+          delete valuesByRowId[String(rowId)];
+        } else {
+          valuesByRowId[String(rowId)] = nextValue;
+        }
+        return {
+          ...prev,
+          [tableName]: { ...session, valuesByRowId },
+        };
+      });
+
+      const sql = `UPDATE ${escapeIdent(tableName)} SET ${escapeIdent(sessionAtClick.columnName)} = ${sqlLiteral(nextValue, sessionAtClick.valueType)} WHERE rowid = ${rowId}`;
+      try {
+        await window.api.exec(sql);
+      } catch (err) {
+        console.error("QC cell update failed:", err);
+        setQcSessions((prev) => {
+          const session = prev[tableName];
+          if (!session || session.done) return prev;
+          const valuesByRowId = { ...session.valuesByRowId };
+          if (hadPreviousValue) {
+            valuesByRowId[String(rowId)] = previousValue;
+          } else {
+            delete valuesByRowId[String(rowId)];
+          }
+          return {
+            ...prev,
+            [tableName]: { ...session, valuesByRowId },
+          };
+        });
+        return;
+      }
+
+      if (qcFilterActive) {
+        setDataVersion((v) => v + 1);
+      }
+    },
+    [activeTable, activeQcSession, viewState.filters]
+  );
+
+  const handleQcResetAll = useCallback(
+    async () => {
+      if (!activeTable || !activeQcSession || activeQcSession.done) return;
+      const sql = `UPDATE ${escapeIdent(activeTable)} SET ${escapeIdent(activeQcSession.columnName)} = NULL`;
+      await window.api.exec(sql);
+      setQcSessions((prev) => {
+        const session = prev[activeTable];
+        if (!session || session.done) return prev;
+        return {
+          ...prev,
+          [activeTable]: { ...session, valuesByRowId: {} },
+        };
+      });
+      setDataVersion((v) => v + 1);
+    },
+    [activeTable, activeQcSession]
+  );
+
+  const handleQcMarkDone = useCallback(
+    async () => {
+      if (!activeTable || !activeQcSession || activeQcSession.done) return;
+      const batchSql = buildQcBatchUpdateSql(activeTable, activeQcSession);
+      setQcSessions((prev) => {
+        const session = prev[activeTable];
+        if (!session || session.done) return prev;
+        return {
+          ...prev,
+          [activeTable]: { ...session, done: true },
+        };
+      });
+      if (batchSql) {
+        recordHistoryEntry(activeTable, "data_op", `Complete QC for "${activeQcSession.columnName}"`, [batchSql]);
+      }
+      setDataVersion((v) => v + 1);
+    },
+    [activeTable, activeQcSession, recordHistoryEntry]
+  );
+
+  const handleQcQuickFilter = useCallback(
+    (value: string | null | "__all__") => {
+      if (!activeQcSession) return;
+      setViewState((prev) => ({
+        ...prev,
+        filters: addColumnFilter(prev.filters, activeQcSession.columnName, value),
+      }));
+      setResetKey((k) => k + 1);
+    },
+    [activeQcSession]
+  );
+
   // ── Saved Views callbacks ──
 
   const handleSaveView = useCallback((name: string) => {
@@ -1498,7 +1856,7 @@ export function App(): React.ReactElement {
         );
         const sampleTable: LoadedTable = {
           tableName: sampleName,
-          filePath: "(sample)",
+        filePath: "(sample)",
           schema: desc,
           rowCount: Number(countResult[0].count),
         };
@@ -2326,7 +2684,7 @@ export function App(): React.ReactElement {
               onHide={() => setSidebarVisible(false)}
               jsonWorkspaceActive={jsonWorkspaceActive}
               markdownWorkspaceActive={markdownWorkspaceActive}
-              jsonFileActions={jsonFileActions}
+              documentFileActions={documentFileActions}
             />
           </div>
           <div className="sidebar-shell-strip" aria-hidden={sidebarVisible}>
@@ -2347,16 +2705,18 @@ export function App(): React.ReactElement {
               {jsonWorkspaceActive && activeLoadedTable ? (
                 <JsonWorkspace
                   table={activeLoadedTable}
+                  sourceTables={tables.filter((loadedTable) => !loadedTable.filePath.startsWith("(") && !isTextWorkspaceFilePath(loadedTable.filePath))}
                   jsonTables={tables.filter((loadedTable) => !loadedTable.filePath.startsWith("(") && isJsonFilePath(loadedTable.filePath))}
                   onOpenFiles={handleChooseFiles}
                   onReloadTable={handleReloadActiveTextTable}
-                  onFileActionsChange={setJsonFileActions}
+                  onFileActionsChange={setDocumentFileActions}
                 />
               ) : markdownWorkspaceActive && activeLoadedTable ? (
                 <MarkdownWorkspace
                   table={activeLoadedTable}
                   onOpenFiles={handleChooseFiles}
                   onReloadTable={handleReloadActiveTextTable}
+                  onFileActionsChange={setDocumentFileActions}
                 />
               ) : comparisonActive && comparisonConfig && activeTable ? (
                 <ComparisonView
@@ -2385,6 +2745,15 @@ export function App(): React.ReactElement {
                       onToggleGrandTotal={handleToggleGrandTotal}
                       onDefaultAggChange={handleDefaultAggChange}
                       onExitPivot={handleClearPivotGroups}
+                    />
+                  )}
+                  {activeQcSession && !comparisonActive && !textWorkspaceActive && (
+                    <QcSessionBar
+                      session={activeQcSession}
+                      totalRows={activeLoadedTable?.rowCount ?? 0}
+                      onQuickFilter={handleQcQuickFilter}
+                      onResetAll={handleQcResetAll}
+                      onMarkDone={handleQcMarkDone}
                     />
                   )}
                   <DataGrid
@@ -2417,6 +2786,9 @@ export function App(): React.ReactElement {
                     minDisplayDecimalPlaces={MIN_DISPLAY_DECIMAL_PLACES}
                     maxDisplayDecimalPlaces={MAX_DISPLAY_DECIMAL_PLACES}
                     onDisplayDecimalPlacesChange={handleDisplayDecimalPlacesChange}
+                    qcSession={pivotActive ? null : activeQcSession}
+                    onQcCellChange={handleQcCellChange}
+                    rangeRefreshKey={dataVersion}
                   />
                   {filterPanelMounted && (
                     <FilterPanel
@@ -2451,6 +2823,11 @@ export function App(): React.ReactElement {
                       onRenameView={handleRenameView}
                       onClose={() => setFilterPanelOpen(false)}
                       motionState={filterPanelOpen ? "open" : "closing"}
+                      qcSession={activeQcSession}
+                      onQcCreate={handleQcCreate}
+                      onQcResetAll={handleQcResetAll}
+                      onQcMarkDone={handleQcMarkDone}
+                      onQcQuickFilter={handleQcQuickFilter}
                     />
                   )}
                 </>
@@ -2505,33 +2882,31 @@ export function App(): React.ReactElement {
       </div>
       {!textWorkspaceActive && (
         <StatusBar
-        totalRows={
-          comparisonActive
-            ? activeLoadedTable?.rowCount ?? 0
-            : pivotActive
-              ? (tables.find((t) => t.tableName === activeTable)?.rowCount ?? 0)
-              : totalRows
-        }
-        unfilteredRows={
-          !comparisonActive && hasActiveFilters(viewState.filters)
-            ? tables.find((t) => t.tableName === activeTable)?.rowCount ?? null
-            : null
-        }
-        activeTable={activeTable}
-        pivotConfig={comparisonActive ? null : viewState.pivotConfig}
-        groupCount={pivotActive ? pivotGroupCount : 0}
-        filterPanelOpen={filterPanelOpen}
-        onToggleFilterPanel={() => setFilterPanelOpen((v) => !v)}
-        activeFilterCount={
-          comparisonActive && comparisonConfig
-            ? countConditions(comparisonConfig.filters)
-            : countConditions(viewState.filters)
-        }
-        sidebarVisible={sidebarVisible}
-        updateNotice={<UpdateNotice />}
-        filterEnabled={!jsonWorkspaceActive}
-        showRowSummary={!jsonWorkspaceActive}
-      />
+          totalRows={
+            comparisonActive
+              ? activeLoadedTable?.rowCount ?? 0
+              : pivotActive
+                ? (tables.find((t) => t.tableName === activeTable)?.rowCount ?? 0)
+                : totalRows
+          }
+          unfilteredRows={
+            !comparisonActive && hasActiveFilters(viewState.filters)
+              ? tables.find((t) => t.tableName === activeTable)?.rowCount ?? null
+              : null
+          }
+          activeTable={activeTable}
+          pivotConfig={comparisonActive ? null : viewState.pivotConfig}
+          groupCount={pivotActive ? pivotGroupCount : 0}
+          filterPanelOpen={filterPanelOpen}
+          onToggleFilterPanel={() => setFilterPanelOpen((v) => !v)}
+          activeFilterCount={
+            comparisonActive && comparisonConfig
+              ? countConditions(comparisonConfig.filters)
+              : countConditions(viewState.filters)
+          }
+          sidebarVisible={sidebarVisible}
+          updateNotice={<UpdateNotice />}
+        />
       )}
       <CombineDialog
         isOpen={combineDialogOpen}

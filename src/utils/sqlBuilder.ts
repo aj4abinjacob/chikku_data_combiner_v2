@@ -1,4 +1,4 @@
-import { FilterCondition, FilterGroup, SortColumn, ViewState, isFilterGroup, PivotGroupColumn } from "../types";
+import { FilterCondition, FilterGroup, INTERNAL_ROW_ID_COLUMN, SortColumn, ViewState, isFilterGroup, PivotGroupColumn } from "../types";
 
 /**
  * Escape a SQL identifier by doubling any embedded double quotes.
@@ -214,12 +214,16 @@ export function buildChunkQuery(
   filters: FilterGroup,
   sortColumns: SortColumn[],
   chunkSize: number,
-  chunkIndex: number
+  chunkIndex: number,
+  includeInternalRowId = false
 ): string {
-  const columns =
+  const visibleSelects =
     visibleColumns.length > 0
       ? visibleColumns.map((c) => escapeIdent(c)).join(", ")
       : "*";
+  const columns = includeInternalRowId
+    ? `${visibleSelects}, rowid AS ${escapeIdent(INTERNAL_ROW_ID_COLUMN)}`
+    : visibleSelects;
 
   let sql = `SELECT ${columns} FROM ${escapeIdent(tableName)}`;
 

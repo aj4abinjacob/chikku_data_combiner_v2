@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Button, ButtonGroup, Icon } from "@blueprintjs/core";
 import { SoftSelect } from "./SoftSelect";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy } from "../types";
+import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy, QcSession, INTERNAL_ROW_ID_COLUMN } from "../types";
 
 const TOOLTIP_DELAY = 600; // ms before tooltip appears
 const HEADER_TOOLTIP_DELAY = 250;
@@ -85,6 +85,9 @@ interface DataGridProps {
   minDisplayDecimalPlaces?: number;
   maxDisplayDecimalPlaces?: number;
   onDisplayDecimalPlacesChange?: (places: number) => void;
+  qcSession?: QcSession | null;
+  onQcCellChange?: (rowId: number, value: string | null) => void;
+  rangeRefreshKey?: number;
 }
 
 export function DataGrid({
@@ -116,6 +119,9 @@ export function DataGrid({
   displayDecimalPlaces = 4,
   minDisplayDecimalPlaces = 0,
   maxDisplayDecimalPlaces = 10,
+  qcSession,
+  onQcCellChange,
+  rangeRefreshKey,
 }: DataGridProps): React.ReactElement {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const anchor = useRef<{ row: number; col: string } | null>(null);
@@ -453,6 +459,10 @@ export function DataGrid({
   useEffect(() => {
     rangeRef.current = null;
   }, [columnsKey]);
+
+  useEffect(() => {
+    rangeRef.current = null;
+  }, [rangeRefreshKey]);
 
   useEffect(() => {
     if (suppressNextStatsResetClose.current) {
@@ -1003,6 +1013,112 @@ export function DataGrid({
   const virtualRows = virtualizer.getVirtualItems();
   const maxGroupDepth = pivotGroupColumns ? pivotGroupColumns.length - 1 : 0;
   const activeStatsColumn = columnStatsPanel?.column ?? null;
+  const activeQcColumn = qcSession && !qcSession.done && !pivotMode ? qcSession.columnName : null;
+
+  const getQcCellValue = (row: any, rowId: number | null): string | null => {
+    if (!qcSession) return null;
+    if (rowId !== null) {
+      const stagedValue = qcSession.valuesByRowId[String(rowId)];
+      if (stagedValue !== undefined) return stagedValue;
+    }
+    return normalizeQcValue(row?.[qcSession.columnName]);
+  };
+
+  const getRowId = (row: any): number | null => {
+    const value = row?.[INTERNAL_ROW_ID_COLUMN];
+    const rowId = Number(value);
+    return Number.isFinite(rowId) ? rowId : null;
+  };
+
+  const renderQcCellContent = (row: any): React.ReactNode => {
+    if (!qcSession || !onQcCellChange) return "";
+    const rowId = getRowId(row);
+    if (rowId === null) return "";
+    const currentValue = getQcCellValue(row, rowId);
+    const setValue = (value: string | null) => onQcCellChange(rowId, value);
+    const stopControlMouse = (e: React.MouseEvent | React.ChangeEvent) => {
+      e.stopPropagation();
+    };
+
+    if (qcSession.mode === "boolean") {
+      const isTrue = currentValue === qcSession.trueValue;
+      const isFalse = currentValue === qcSession.falseValue;
+      return (
+        <div className="dg-qc-bool-controls" role="group" aria-label={`QC ${qcSession.columnName}`}>
+          <button
+            type="button"
+            className={`dg-qc-icon-btn dg-qc-accept${isTrue ? " active" : ""}`}
+            title={qcSession.trueValue}
+            aria-label={qcSession.trueValue}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              stopControlMouse(e);
+            }}
+            onClick={(e) => {
+              stopControlMouse(e);
+              setValue(isTrue ? null : qcSession.trueValue);
+            }}
+          >
+            <Icon icon="tick" size={12} />
+          </button>
+          <button
+            type="button"
+            className={`dg-qc-icon-btn dg-qc-reject${isFalse ? " active" : ""}`}
+            title={qcSession.falseValue}
+            aria-label={qcSession.falseValue}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              stopControlMouse(e);
+            }}
+            onClick={(e) => {
+              stopControlMouse(e);
+              setValue(isFalse ? null : qcSession.falseValue);
+            }}
+          >
+            <Icon icon="cross" size={12} />
+          </button>
+          <button
+            type="button"
+            className="dg-qc-icon-btn dg-qc-reset"
+            title="Reset QC"
+            aria-label="Reset QC"
+            disabled={currentValue === null}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              stopControlMouse(e);
+            }}
+            onClick={(e) => {
+              stopControlMouse(e);
+              setValue(null);
+            }}
+          >
+            <Icon icon="undo" size={12} />
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <select
+        className="dg-qc-select"
+        aria-label={`QC ${qcSession.columnName}`}
+        value={currentValue ?? ""}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          stopControlMouse(e);
+          setValue(e.target.value === "" ? null : e.target.value);
+        }}
+      >
+        <option value="">Blank</option>
+        {qcSession.options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    );
+  };
 
   // Helper: get aggregate value for a column from an aggregates record
   const getAggRawValue = (aggregates: Record<string, any> | undefined, col: string): any | undefined => {
@@ -1090,6 +1206,7 @@ export function DataGrid({
                     onReorderColumns && !pivotMode ? "reorder-enabled" : "",
                     draggingColumn === col ? "column-dragging" : "",
                     activeStatsColumn === col ? "column-inspected" : "",
+                    activeQcColumn === col ? "qc-column-active" : "",
                     headerDropTarget?.col === col
                       ? `header-drop-${headerDropTarget.position}`
                       : "",
@@ -1309,12 +1426,14 @@ export function DataGrid({
                     {virtualRow.index + 1}
                   </div>
                   {columns.map((col) => {
-                    const cellText = loaded ? formatCellForColumn(row[col], col) : "...";
+                    const isQcCell = !!activeQcColumn && col === activeQcColumn;
+                    const cellText = loaded && !isQcCell ? formatCellForColumn(row[col], col) : loaded ? "" : "...";
                     return (
                       <div
                         key={col}
                           className={[
                             "dg-cell",
+                            isQcCell ? "dg-qc-cell" : "",
                             selected.has(cellKey(virtualRow.index, col))
                               ? "cell-selected"
                               : "",
@@ -1325,12 +1444,12 @@ export function DataGrid({
                           .filter(Boolean)
                           .join(" ")}
                         style={{ width: columnWidths[col] ?? DEFAULT_COLUMN_WIDTH }}
-                        onMouseDown={(e) =>
-                          handleCellMouseDown(virtualRow.index, col, e)
-                        }
+                        onMouseDown={(e) => {
+                          if (!isQcCell) handleCellMouseDown(virtualRow.index, col, e);
+                        }}
                         onMouseEnter={(e) => {
-                          handleCellMouseEnterDrag(virtualRow.index, col, e);
-                          if (loaded && !dragSelecting.current)
+                          if (!isQcCell) handleCellMouseEnterDrag(virtualRow.index, col, e);
+                          if (loaded && !dragSelecting.current && !isQcCell)
                             handleCellMouseEnter(
                               e,
                               String(row[col] ?? "")
@@ -1338,7 +1457,7 @@ export function DataGrid({
                         }}
                         onMouseLeave={handleCellMouseLeave}
                       >
-                        {cellText}
+                        {isQcCell && loaded ? renderQcCellContent(row) : cellText}
                       </div>
                     );
                   })}
@@ -2221,6 +2340,11 @@ function StatsKeyValue({
 
 function formatStatNumber(value: number): string {
   return value.toLocaleString();
+}
+
+function normalizeQcValue(value: any): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  return String(value);
 }
 
 function formatTextLength(value: number | null | undefined): string {

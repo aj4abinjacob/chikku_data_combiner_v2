@@ -20,6 +20,7 @@ export interface SoftSelectProps {
   minimal?: boolean;
   disabled?: boolean;
   id?: string;
+  popoverClassName?: string;
   title?: string;
   style?: React.CSSProperties;
   "aria-label"?: string;
@@ -75,6 +76,7 @@ export function SoftSelect({
   small = false,
   disabled = false,
   id,
+  popoverClassName,
   title,
   style,
   "aria-label": ariaLabel,
@@ -222,6 +224,7 @@ export function SoftSelect({
     <Popover2
       content={content}
       isOpen={disabled ? false : isOpen}
+      popoverClassName={popoverClassName}
       onInteraction={(nextOpen) => {
         if (disabled) {
           setIsOpen(false);

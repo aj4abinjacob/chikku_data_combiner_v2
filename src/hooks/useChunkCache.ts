@@ -103,7 +103,8 @@ export function useChunkCache({
         vs.filters,
         vs.sortColumns,
         CHUNK_SIZE,
-        chunkIndex
+        chunkIndex,
+        true
       );
 
       try {

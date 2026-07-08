@@ -25,6 +25,10 @@ import {
   UndoStrategy,
   SavedView,
   ViewState,
+  QcCreateConfig,
+  QcColumnMode,
+  QcOptionSortMode,
+  QcSession,
 } from "../types";
 import { ColumnOpsPanel } from "./ColumnOpsPanel";
 import { RowOpsPanel } from "./RowOpsPanel";
@@ -38,6 +42,7 @@ import {
   isAllowedNumberInputValue,
   showNumberInputExpectation,
 } from "../utils/numberInputWheel";
+import { buildFilterGroupClause, escapeIdent } from "../utils/sqlBuilder";
 
 type ColumnKind = "text" | "number" | "date" | "boolean" | "comparison_status" | "unknown";
 type OperatorOption = { value: FilterOperator; label: string };
@@ -996,6 +1001,681 @@ function FilterGroupRenderer({
   );
 }
 
+// ── QC Panel ──
+
+function suggestQcColumnName(columns: ColumnInfo[]): string {
+  const existing = new Set(columns.map((column) => column.column_name));
+  if (!existing.has("qc_status")) return "qc_status";
+  let i = 2;
+  while (existing.has(`qc_status_${i}`)) i++;
+  return `qc_status_${i}`;
+}
+
+const DEFAULT_QC_OPTIONS = "Pass\nFail\nReview";
+
+function parseQcOptions(text: string): string[] {
+  const seen = new Set<string>();
+  const options: string[] = [];
+  for (const rawOption of text.split(/\r?\n|,/)) {
+    const option = rawOption.trim();
+    if (!option || seen.has(option)) continue;
+    seen.add(option);
+    options.push(option);
+  }
+  return options;
+}
+
+function sortQcOptionsForPreview(options: string[], sortMode: QcOptionSortMode): string[] {
+  if (sortMode === "entered") return options;
+  if (sortMode === "numeric") {
+    return [...options].sort((a, b) => {
+      const aNum = Number(a);
+      const bNum = Number(b);
+      const aValid = Number.isFinite(aNum);
+      const bValid = Number.isFinite(bNum);
+      if (aValid && bValid) return aNum - bNum;
+      if (aValid) return -1;
+      if (bValid) return 1;
+      return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+    });
+  }
+  return [...options].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+}
+
+function getQcOptionSortMeta(options: string[], sortMode: QcOptionSortMode): {
+  sortedOptions: string[];
+  numericCount: number;
+  textCount: number;
+  note: string;
+  tone: "neutral" | "warning";
+} {
+  const sortedOptions = sortQcOptionsForPreview(options, sortMode);
+  const numericCount = options.filter((option) => Number.isFinite(Number(option))).length;
+  const textCount = options.length - numericCount;
+
+  if (sortMode === "numeric") {
+    if (numericCount === 0 && options.length > 0) {
+      return {
+        sortedOptions,
+        numericCount,
+        textCount,
+        note: "No numeric values found; preview falls back to text order.",
+        tone: "warning",
+      };
+    }
+    if (textCount > 0) {
+      return {
+        sortedOptions,
+        numericCount,
+        textCount,
+        note: `${numericCount} numeric, ${textCount} text. Numbers sort first; text follows A-Z.`,
+        tone: "warning",
+      };
+    }
+    return {
+      sortedOptions,
+      numericCount,
+      textCount,
+      note: "All values are numeric; the QC column will be stored as number.",
+      tone: "neutral",
+    };
+  }
+
+  return {
+    sortedOptions,
+    numericCount,
+    textCount,
+    note: sortMode === "entered" ? "Uses the order entered above." : "Sorted A-Z, ignoring case.",
+    tone: "neutral",
+  };
+}
+
+function findQcFilter(group: FilterGroup, column: string): DraftFilterCondition | null {
+  for (const child of group.children) {
+    if (isFilterGroup(child)) {
+      const nested = findQcFilter(child, column);
+      if (nested) return nested;
+      continue;
+    }
+    if (child.column === column) {
+      return {
+        id: "",
+        column: child.column,
+        operator: child.operator,
+        value: child.value,
+      };
+    }
+  }
+  return null;
+}
+
+function removeQcColumnFilters(group: FilterGroup, column: string): FilterGroup {
+  const children: FilterNode[] = [];
+  for (const child of group.children) {
+    if (isFilterGroup(child)) {
+      const nested = removeQcColumnFilters(child, column);
+      if (nested.children.length > 0) children.push(nested);
+      continue;
+    }
+    if (child.column !== column) children.push(child);
+  }
+  return { ...group, children };
+}
+
+function qcSqlLiteral(value: string, valueType: QcSession["valueType"]): string {
+  if (valueType === "number") {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? String(numeric) : "NULL";
+  }
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function QcPanel({
+  columns,
+  activeTable,
+  activeFilters,
+  totalRows,
+  session,
+  onCreate,
+  onResetAll,
+  onMarkDone,
+  onQuickFilter,
+  visible,
+}: {
+  columns: ColumnInfo[];
+  activeTable: string | null;
+  activeFilters: FilterGroup;
+  totalRows: number;
+  session?: QcSession | null;
+  onCreate?: (config: QcCreateConfig) => Promise<void>;
+  onResetAll?: () => Promise<void>;
+  onMarkDone?: () => Promise<void>;
+  onQuickFilter?: (value: string | null | "__all__") => void;
+  visible: boolean;
+}): React.ReactElement | null {
+  const suggestedName = suggestQcColumnName(columns);
+  const [mode, setMode] = useState<QcColumnMode>("boolean");
+  const [columnName, setColumnName] = useState(suggestedName);
+  const [trueValue, setTrueValue] = useState("Accepted");
+  const [falseValue, setFalseValue] = useState("Rejected");
+  const [optionsText, setOptionsText] = useState(DEFAULT_QC_OPTIONS);
+  const [optionDraft, setOptionDraft] = useState("");
+  const [optionSearch, setOptionSearch] = useState("");
+  const [sortMode, setSortMode] = useState<QcOptionSortMode>("alpha");
+  const [working, setWorking] = useState<"create" | "reset" | "done" | null>(null);
+  const [message, setMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null);
+  const [progress, setProgress] = useState<{ reviewed: number; total: number; valueCounts: Record<string, number> } | null>(null);
+
+  useEffect(() => {
+    setColumnName((prev) => {
+      if (prev && !columns.some((column) => column.column_name === prev)) return prev;
+      return suggestedName;
+    });
+  }, [columns, suggestedName]);
+
+  const markedCount = session ? Object.keys(session.valuesByRowId).length : 0;
+  const parsedOptions = parseQcOptions(optionsText);
+  const optionSortMeta = getQcOptionSortMeta(parsedOptions, sortMode);
+  const previewOptions = optionSortMeta.sortedOptions;
+  const displayedOptions = optionSearch.trim()
+    ? previewOptions.filter((option) => option.toLowerCase().includes(optionSearch.trim().toLowerCase()))
+    : previewOptions;
+  const canCreate = !!activeTable && !!onCreate && !session && !working;
+  const activeMode = session?.mode ?? mode;
+  const isOptionMode = activeMode === "options";
+  const reviewedRows = progress?.reviewed ?? (session ? markedCount : 0);
+  const totalReviewRows = progress?.total ?? totalRows;
+  const notQcRows = Math.max(0, totalReviewRows - reviewedRows);
+  const progressPercent = totalReviewRows > 0 ? Math.round((reviewedRows / totalReviewRows) * 100) : 0;
+
+  useEffect(() => {
+    if (!visible || !activeTable || !session) {
+      setProgress(null);
+      return;
+    }
+
+    let cancelled = false;
+    const statsFilters = removeQcColumnFilters(activeFilters, session.columnName);
+    const whereClause = buildFilterGroupClause(statsFilters);
+    const wherePrefix = whereClause ? `WHERE ${whereClause} AND` : "WHERE";
+    const countValues = session.mode === "boolean" ? [session.trueValue, session.falseValue] : session.options;
+    const countSelects = countValues.map((value, index) =>
+      `SUM(CASE WHEN ${escapeIdent(session.columnName)} = ${qcSqlLiteral(value, session.valueType)} THEN 1 ELSE 0 END) AS ${escapeIdent(`value_${index}`)}`
+    );
+    const selectParts = [
+      `COUNT(*) AS total`,
+      `SUM(CASE WHEN ${escapeIdent(session.columnName)} IS NOT NULL THEN 1 ELSE 0 END) AS reviewed`,
+      ...countSelects,
+    ];
+    const sql = `SELECT ${selectParts.join(", ")} FROM ${escapeIdent(activeTable)} ${wherePrefix} TRUE`;
+    window.api.query(sql)
+      .then((rows) => {
+        if (cancelled) return;
+        const row = rows[0] ?? {};
+        const valueCounts = countValues.reduce<Record<string, number>>((acc, value, index) => {
+          acc[value] = Number(row[`value_${index}`] ?? 0);
+          return acc;
+        }, {});
+        setProgress({
+          total: Number(row.total ?? totalRows),
+          reviewed: Number(row.reviewed ?? 0),
+          valueCounts,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setProgress({ total: totalRows, reviewed: markedCount, valueCounts: {} });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFilters, activeTable, markedCount, session, totalRows, visible]);
+
+  if (!visible) return null;
+
+  const resetBoolDefaults = () => {
+    setTrueValue("Accepted");
+    setFalseValue("Rejected");
+    setMessage(null);
+  };
+
+  const resetOptionDefaults = () => {
+    setOptionsText(DEFAULT_QC_OPTIONS);
+    setOptionDraft("");
+    setOptionSearch("");
+    setSortMode("alpha");
+    setMessage(null);
+  };
+
+  const setDraftMode = (nextMode: QcColumnMode) => {
+    setMode(nextMode);
+    setMessage(null);
+    if (nextMode === "options") {
+      setOptionsText((prev) => parseQcOptions(prev).length > 0 ? prev : DEFAULT_QC_OPTIONS);
+    }
+  };
+
+  const addOption = () => {
+    const nextOption = optionDraft.trim();
+    if (!nextOption) return;
+    const nextOptions = parseQcOptions(`${optionsText}\n${nextOption}`);
+    setOptionsText(nextOptions.join("\n"));
+    setOptionDraft("");
+    setMessage(null);
+  };
+
+  const removeOption = (option: string) => {
+    setOptionsText(parsedOptions.filter((item) => item !== option).join("\n"));
+    setMessage(null);
+  };
+
+  const handleCreate = async () => {
+    if (!onCreate || !canCreate) return;
+    setWorking("create");
+    setMessage(null);
+    try {
+      await onCreate({
+        columnName,
+        mode,
+        trueValue,
+        falseValue,
+        options: parsedOptions,
+        optionSortMode: sortMode,
+      });
+      setMessage({ tone: "success", text: "QC column ready" });
+    } catch (err) {
+      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Unable to create QC column" });
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const handleResetAll = async () => {
+    if (!onResetAll || !session || session.done) return;
+    setWorking("reset");
+    setMessage(null);
+    try {
+      await onResetAll();
+      setMessage({ tone: "success", text: "QC values reset" });
+    } catch (err) {
+      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Unable to reset QC" });
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const handleMarkDone = async () => {
+    if (!onMarkDone || !session || session.done) return;
+    setWorking("done");
+    setMessage(null);
+    try {
+      await onMarkDone();
+      setMessage({ tone: "success", text: "QC marked done" });
+    } catch (err) {
+      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Unable to mark QC done" });
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const values = session ? Object.values(session.valuesByRowId).filter(Boolean) : [];
+  const sessionValueCounts = values.reduce<Record<string, number>>((acc, value) => {
+    acc[value] = (acc[value] ?? 0) + 1;
+    return acc;
+  }, {});
+  const valueCounts = progress?.valueCounts ?? sessionValueCounts;
+  const sessionValues = session
+    ? session.mode === "boolean"
+      ? [session.trueValue, session.falseValue]
+      : session.options
+    : [];
+  const quickFilterValues = sessionValues.slice(0, 6);
+  const activeQcFilter = session ? findQcFilter(activeFilters, session.columnName) : null;
+  const activeQcFilterLabel = activeQcFilter
+    ? activeQcFilter.operator === "IS NULL"
+      ? "Not QC'd"
+      : activeQcFilter.value
+    : "";
+
+  return (
+    <div className="qc-panel">
+      <div className="qc-workbench">
+        <div className="qc-card qc-create-card">
+          <div className="qc-card-title">
+            <strong>{session ? "QC field" : "Create QC field"}</strong>
+            {session && (
+              <Tag minimal intent={session.done ? Intent.SUCCESS : Intent.PRIMARY}>
+                {session.done ? "Done" : "Draft"}
+              </Tag>
+            )}
+          </div>
+
+          <label className="qc-panel-field">
+            <span>Column</span>
+            <InputGroup
+              value={session?.columnName ?? columnName}
+              onChange={(e) => {
+                setColumnName(e.target.value);
+                setMessage(null);
+              }}
+              small
+              disabled={!!session || !canCreate}
+            />
+          </label>
+
+          <div className="qc-panel-field">
+            <span>Field type</span>
+            <div className="qc-mode-toggle qc-mode-toggle-full" role="group" aria-label="QC type">
+              <button
+                type="button"
+                className={activeMode === "boolean" ? "active" : ""}
+                onClick={() => setDraftMode("boolean")}
+                disabled={!!session}
+              >
+                Boolean
+              </button>
+              <button
+                type="button"
+                className={activeMode === "options" ? "active" : ""}
+                onClick={() => setDraftMode("options")}
+                disabled={!!session}
+              >
+                Dropdown
+              </button>
+            </div>
+          </div>
+
+          {activeMode === "boolean" ? (
+            <>
+              <label className="qc-panel-field">
+                <span>Tick value</span>
+                <InputGroup
+                  value={session?.trueValue ?? trueValue}
+                  onChange={(e) => setTrueValue(e.target.value)}
+                  small
+                  disabled={!!session || !canCreate}
+                />
+              </label>
+              <label className="qc-panel-field">
+                <span>X value</span>
+                <InputGroup
+                  value={session?.falseValue ?? falseValue}
+                  onChange={(e) => setFalseValue(e.target.value)}
+                  small
+                  disabled={!!session || !canCreate}
+                />
+              </label>
+              {!session && (
+                <Button
+                  small
+                  icon="undo"
+                  text="Reset values"
+                  disabled={!canCreate}
+                  onClick={resetBoolDefaults}
+                />
+              )}
+            </>
+          ) : (
+            <div className="qc-create-note">
+              Dropdown options are managed in the values panel.
+            </div>
+          )}
+
+          <Checkbox
+            checked
+            disabled
+            label="Leave untouched as NULL"
+            className="qc-null-checkbox"
+          />
+
+          {!session && (
+            <Button
+              intent={Intent.PRIMARY}
+              icon="add"
+              text="Create QC Column"
+              disabled={!canCreate || (isOptionMode && parsedOptions.length === 0)}
+              loading={working === "create"}
+              onClick={handleCreate}
+            />
+          )}
+        </div>
+
+        <div className="qc-card qc-values-card">
+          <div className="qc-card-title">
+            <div>
+              <strong>{isOptionMode ? "Dropdown values" : "Boolean actions"}</strong>
+              <em>{isOptionMode ? "used when field type is Dropdown" : "what users click in the QC column"}</em>
+            </div>
+            {!session && isOptionMode && (
+              <Button
+                small
+                icon="undo"
+                text="Reset"
+                disabled={!canCreate}
+                onClick={resetOptionDefaults}
+              />
+            )}
+          </div>
+
+          {isOptionMode ? (
+            <>
+              <div className="qc-values-toolbar">
+                <InputGroup
+                  leftIcon="add"
+                  placeholder="Add value..."
+                  value={optionDraft}
+                  onChange={(e) => setOptionDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addOption();
+                    }
+                  }}
+                  small
+                  className="qc-add-option-input"
+                  disabled={!!session || !canCreate}
+                />
+                <div className="qc-option-sort-buttons" role="group" aria-label="Option sort">
+                  {[
+                    ["alpha", "A-Z caseless"],
+                    ["numeric", "Numeric-aware"],
+                    ["entered", "Entered order"],
+                  ].map(([value, label]) => (
+                    <button
+                      type="button"
+                      key={value}
+                      className={sortMode === value ? "active" : ""}
+                      onClick={() => setSortMode(value as QcOptionSortMode)}
+                      disabled={!!session || !canCreate}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <InputGroup
+                leftIcon="search"
+                placeholder="Search values..."
+                value={optionSearch}
+                onChange={(e) => setOptionSearch(e.target.value)}
+                small
+                className="qc-option-search"
+              />
+              <div className="qc-values-list">
+                {(session ? sessionValues : displayedOptions).length > 0 ? (
+                  (session ? sessionValues : displayedOptions).map((option) => (
+                    <div className="qc-value-row" key={option}>
+                      <Icon icon="drag-handle-vertical" size={13} />
+                      <span title={option}>{option}</span>
+                      {session && valueCounts[option] !== undefined && (
+                        <Tag minimal>{valueCounts[option].toLocaleString()}</Tag>
+                      )}
+                      {!session && (
+                        <Button
+                          small
+                          minimal
+                          icon="trash"
+                          title="Remove value"
+                          aria-label={`Remove ${option}`}
+                          onClick={() => removeOption(option)}
+                        />
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="qc-values-empty">No values</div>
+                )}
+              </div>
+              {!session && (
+                <div className={`qc-option-sort-note ${optionSortMeta.tone}`}>
+                  {optionSortMeta.note}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="qc-boolean-preview">
+              <div className="qc-boolean-action-row accepted">
+                <span className="qc-boolean-action-icon">
+                  <Icon icon="tick" size={13} />
+                </span>
+                <div>
+                  <strong>{session?.trueValue ?? trueValue}</strong>
+                  <span>Tick writes this value</span>
+                </div>
+              </div>
+              <div className="qc-boolean-action-row rejected">
+                <span className="qc-boolean-action-icon">
+                  <Icon icon="cross" size={13} />
+                </span>
+                <div>
+                  <strong>{session?.falseValue ?? falseValue}</strong>
+                  <span>X writes this value</span>
+                </div>
+              </div>
+              <div className="qc-boolean-action-row blank">
+                <span className="qc-boolean-action-icon">
+                  <Icon icon="reset" size={13} />
+                </span>
+                <div>
+                  <strong>Blank</strong>
+                  <span>Not QC'd rows remain NULL</span>
+                </div>
+              </div>
+              <div className="qc-option-sort-note neutral">
+                While QC is active the grid shows icons. Mark done keeps the selected values in the column.
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="qc-card qc-progress-card">
+          <div className="qc-card-title">
+            <strong>Progress</strong>
+          </div>
+          <div className="qc-progress-body">
+            <div
+              className="qc-progress-ring"
+              style={{ "--qc-progress": `${Math.min(100, progressPercent)}%` } as React.CSSProperties}
+            >
+              <span>{progressPercent}%</span>
+            </div>
+            <div className="qc-progress-counts">
+              <strong>{reviewedRows.toLocaleString()}</strong>
+              <span>reviewed</span>
+              <strong className="muted">{notQcRows.toLocaleString()}</strong>
+              <span>not QC'd</span>
+            </div>
+          </div>
+          <div className="qc-progress-total">
+            {totalReviewRows.toLocaleString()} current rows
+          </div>
+
+          <div className="qc-filter-block">
+            <div className="qc-filter-heading">
+              <strong>Filter QC</strong>
+              <Icon icon="info-sign" size={13} />
+            </div>
+            {session ? (
+              <div className="qc-filter-options">
+                <button
+                  type="button"
+                  disabled={!onQuickFilter}
+                  className={!activeQcFilter ? "active" : ""}
+                  onClick={() => onQuickFilter?.("__all__")}
+                >
+                  <span>All</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!onQuickFilter}
+                  className={activeQcFilterLabel === "Not QC'd" ? "active" : ""}
+                  onClick={() => onQuickFilter?.(null)}
+                >
+                  <span>Not QC'd</span>
+                  <strong>{notQcRows.toLocaleString()}</strong>
+                </button>
+                {quickFilterValues.map((value) => (
+                  <button
+                    type="button"
+                    key={value}
+                    disabled={!onQuickFilter}
+                    className={activeQcFilterLabel === value ? "active" : ""}
+                    onClick={() => onQuickFilter?.(value)}
+                  >
+                    <span title={value}>{value}</span>
+                    <strong>{(valueCounts[value] ?? 0).toLocaleString()}</strong>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="qc-filter-empty">
+                Create the QC column to enable quick filters.
+              </div>
+            )}
+            {session && activeQcFilterLabel && (
+              <div className="qc-applied-filter">
+                <span>{session?.columnName} = {activeQcFilterLabel}</span>
+                <button type="button" onClick={() => onQuickFilter?.("__all__")}>
+                  <Icon icon="cross" size={11} />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {session && (
+            <div className="qc-progress-actions">
+              <Button
+                small
+                icon="undo"
+                text="Reset"
+                disabled={session.done || reviewedRows === 0 || !!working}
+                loading={working === "reset"}
+                onClick={handleResetAll}
+              />
+              <Button
+                small
+                intent={Intent.PRIMARY}
+                icon="tick"
+                text={session.done ? "Done" : "Mark Done"}
+                disabled={session.done || !!working}
+                loading={working === "done"}
+                onClick={handleMarkDone}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {message && (
+        <div className={`qc-panel-message ${message.tone}`}>
+          <Icon icon={message.tone === "error" ? "error" : "tick"} size={13} />
+          <span>{message.text}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Filter Panel ──
 
 interface FilterPanelProps {
@@ -1025,6 +1705,11 @@ interface FilterPanelProps {
   onDeleteView: (viewId: string) => void;
   onRenameView: (viewId: string, newName: string) => void;
   onClose: () => void;
+  qcSession?: QcSession | null;
+  onQcCreate?: (config: QcCreateConfig) => Promise<void>;
+  onQcResetAll?: () => Promise<void>;
+  onQcMarkDone?: () => Promise<void>;
+  onQcQuickFilter?: (value: string | null | "__all__") => void;
   motionState?: "open" | "closing";
   filtersOnly?: boolean;
   savedViewsEnabled?: boolean;
@@ -1059,6 +1744,11 @@ export function FilterPanel({
   onDeleteView,
   onRenameView,
   onClose,
+  qcSession,
+  onQcCreate,
+  onQcResetAll,
+  onQcMarkDone,
+  onQcQuickFilter,
   motionState = "open",
   filtersOnly = false,
   savedViewsEnabled = true,
@@ -1069,7 +1759,7 @@ export function FilterPanel({
     convertToDraft(activeFilters)
   );
   const [panelHeight, setPanelHeight] = useState(DEFAULT_PANEL_HEIGHT);
-  const [activeTab, setActiveTab] = useState<"filters" | "colops" | "rowops">("filters");
+  const [activeTab, setActiveTab] = useState<"filters" | "qc" | "colops" | "rowops">("filters");
   const [splitPercent, setSplitPercent] = useState(68);
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [viewsPaneOpen, setViewsPaneOpen] = useState(savedViews.length > 0);
@@ -1278,6 +1968,19 @@ export function FilterPanel({
                   className="filter-panel-tab"
                   small
                   minimal
+                  active={activeTab === "qc"}
+                  onClick={() => setActiveTab("qc")}
+                  text="QC"
+                />
+                {qcSession && activeTab !== "qc" && (
+                  <Tag minimal round intent={qcSession.done ? Intent.SUCCESS : Intent.PRIMARY} className="filter-panel-tab-badge">
+                    {qcSession.done ? "done" : Object.keys(qcSession.valuesByRowId).length}
+                  </Tag>
+                )}
+                <Button
+                  className="filter-panel-tab"
+                  small
+                  minimal
                   active={activeTab === "colops"}
                   onClick={() => setActiveTab("colops")}
                   text="Column Ops"
@@ -1447,6 +2150,18 @@ export function FilterPanel({
       </div>
       {!filtersOnly && (
         <>
+          <QcPanel
+            columns={columns}
+            activeTable={activeTable}
+            activeFilters={activeFilters}
+            totalRows={totalRows}
+            session={qcSession}
+            onCreate={onQcCreate}
+            onResetAll={onQcResetAll}
+            onMarkDone={onQcMarkDone}
+            onQuickFilter={onQcQuickFilter}
+            visible={activeTab === "qc"}
+          />
           <ColumnOpsPanel
             columns={columns}
             activeTable={activeTable}

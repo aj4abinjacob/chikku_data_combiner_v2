@@ -1,15 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Callout, Icon, Intent, Tag } from "@blueprintjs/core";
+import { Button, Callout, Icon, Intent } from "@blueprintjs/core";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import { LoadedTable } from "../types";
+import { DocumentWorkspaceFileActions, LoadedTable } from "../types";
 
 interface MarkdownWorkspaceProps {
   table: LoadedTable;
   onOpenFiles: () => void;
   onReloadTable: () => void;
+  onFileActionsChange?: (actions: DocumentWorkspaceFileActions | null) => void;
 }
 
 interface MarkdownHeading {
@@ -24,10 +25,6 @@ interface MarkdownHistoryEntry {
   label: string;
   text: string;
   timestamp: number;
-}
-
-function getFileName(filePath: string): string {
-  return filePath.split(/[/\\]/).pop() || filePath;
 }
 
 function getFileExtension(filePath: string): string {
@@ -157,6 +154,7 @@ export function MarkdownWorkspace({
   table,
   onOpenFiles,
   onReloadTable,
+  onFileActionsChange,
 }: MarkdownWorkspaceProps): React.ReactElement {
   const [rawText, setRawText] = useState("");
   const [savedText, setSavedText] = useState("");
@@ -172,7 +170,6 @@ export function MarkdownWorkspace({
   const nextHistoryId = useRef(1);
   const previewScrollRef = useRef<HTMLDivElement>(null);
 
-  const fileName = getFileName(table.filePath);
   const extension = getFileExtension(table.filePath);
   const isDirty = rawText !== savedText;
   const lineCount = rawText.length === 0 ? 0 : rawText.split(/\r\n|\r|\n/).length;
@@ -306,6 +303,47 @@ export function MarkdownWorkspace({
     element.scrollIntoView({ block: "start", behavior: "smooth" });
   }, []);
 
+  useEffect(() => () => {
+    onFileActionsChange?.(null);
+  }, [onFileActionsChange]);
+
+  useEffect(() => {
+    const documentReady = !loading && !loadError;
+    onFileActionsChange?.({
+      workspaceKind: "markdown",
+      isDirty,
+      isValid: documentReady,
+      saving,
+      exporting,
+      canExport: documentReady && !exporting,
+      historyOpen,
+      onOpenFiles,
+      onSave: handleSave,
+      onRevert: handleRevert,
+      onToggleHistory: () => setHistoryOpen((open) => !open),
+      onExport: handleExport,
+      exportLabel: "Export",
+      exportTitle: "Export Markdown copy",
+      exportDisabledReason: loadError ? "Resolve the load error before exporting." : loading ? "Markdown is still loading." : null,
+      onToggleEdit: () => setIsEditing((editing) => !editing),
+      editActive: isEditing,
+      editLabel: isEditing ? "Done" : "Edit",
+    });
+  }, [
+    exporting,
+    handleExport,
+    handleRevert,
+    handleSave,
+    historyOpen,
+    isDirty,
+    isEditing,
+    loadError,
+    loading,
+    onFileActionsChange,
+    onOpenFiles,
+    saving,
+  ]);
+
   const historyPanel = historyOpen ? (
     <aside className="markdown-history-panel">
       <div className="markdown-history-header">
@@ -336,51 +374,6 @@ export function MarkdownWorkspace({
           {loadError}
         </Callout>
       )}
-
-      <div className="markdown-document-titlebar">
-        <div className="markdown-file-title" title={table.filePath}>
-          <Icon icon="document" size={14} />
-          <span>{fileName}</span>
-          {isDirty && <span className="json-dirty-dot" title="Unsaved changes">●</span>}
-          <Tag minimal intent={Intent.PRIMARY}>{extension}</Tag>
-        </div>
-        <div className="markdown-title-actions">
-          <Button icon="folder-open" text="Open" onClick={onOpenFiles} />
-          <Button
-            icon="floppy-disk"
-            text="Save"
-            onClick={handleSave}
-            loading={saving}
-            disabled={!isDirty || saving}
-          />
-          <Button icon="export" text="Export" onClick={handleExport} loading={exporting} disabled={loading || exporting} />
-          <Button
-            icon="history"
-            text="History"
-            active={historyOpen}
-            onClick={() => setHistoryOpen((open) => !open)}
-          />
-          <Button
-            icon={isEditing ? "tick" : "edit"}
-            text={isEditing ? "Done" : "Edit"}
-            intent={isEditing ? undefined : Intent.PRIMARY}
-            onClick={() => setIsEditing((editing) => !editing)}
-          />
-        </div>
-      </div>
-
-      <div className="markdown-document-subbar">
-        <div className="markdown-read-state">
-          <Icon icon={isEditing ? "edit" : "eye-open"} size={12} />
-          <Tag minimal intent={isEditing ? Intent.WARNING : Intent.SUCCESS}>
-            {isEditing ? "Editing" : "Read"}
-          </Tag>
-          <span>{isDirty ? "Unsaved" : "Saved"}</span>
-        </div>
-        <div className="markdown-subbar-actions">
-          <Button minimal small icon="reset" text="Revert" onClick={handleRevert} disabled={!isDirty} />
-        </div>
-      </div>
 
       <div className={`markdown-layout${isEditing ? " editing" : ""}`}>
         {isEditing && (

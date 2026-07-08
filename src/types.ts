@@ -101,6 +101,34 @@ export interface ColumnStats {
   topValues: ColumnStatsTopValue[];
 }
 
+export const INTERNAL_ROW_ID_COLUMN = "__chikku_internal_rowid";
+
+export type QcColumnMode = "boolean" | "options";
+export type QcOptionSortMode = "alpha" | "numeric" | "entered";
+export type QcValueType = "text" | "number";
+
+export interface QcSession {
+  columnName: string;
+  mode: QcColumnMode;
+  done: boolean;
+  createdAt: number;
+  valueType: QcValueType;
+  trueValue: string;
+  falseValue: string;
+  options: string[];
+  optionSortMode: QcOptionSortMode;
+  valuesByRowId: Record<string, string>;
+}
+
+export interface QcCreateConfig {
+  columnName: string;
+  mode: QcColumnMode;
+  trueValue: string;
+  falseValue: string;
+  options: string[];
+  optionSortMode: QcOptionSortMode;
+}
+
 export interface LoadedTable {
   tableName: string;
   filePath: string;
@@ -110,23 +138,35 @@ export interface LoadedTable {
   reloadVersion?: number;
 }
 
-export interface JsonWorkspaceFileActions {
+export type DocumentWorkspaceKind = "json" | "markdown";
+
+export interface DocumentWorkspaceFileActions {
+  workspaceKind: DocumentWorkspaceKind;
   isDirty: boolean;
   isValid: boolean;
-  isTableView: boolean;
+  isTableView?: boolean;
   saving: boolean;
-  exporting: boolean;
-  canExportCsv: boolean;
-  canCompare: boolean;
+  exporting?: boolean;
+  canExportCsv?: boolean;
+  canExport?: boolean;
+  canCompare?: boolean;
   historyOpen: boolean;
   onOpenFiles: () => void;
   onSave: () => void | Promise<void>;
-  onSaveAs: () => void | Promise<void>;
+  onSaveAs?: () => void | Promise<void>;
   onRevert: () => void;
   onToggleHistory: () => void;
-  onExportCsv: () => void | Promise<void>;
-  onCopyPath: () => void | Promise<void>;
-  onCompare: () => void;
+  onExportCsv?: () => void | Promise<void>;
+  onExport?: () => void | Promise<void>;
+  onCopyPath?: () => void | Promise<void>;
+  onCompare?: () => void;
+  exportLabel?: string;
+  exportTitle?: string;
+  exportDisabledReason?: string | null;
+  compareTitle?: string;
+  onToggleEdit?: () => void;
+  editActive?: boolean;
+  editLabel?: string;
 }
 
 export interface ColumnOperation {

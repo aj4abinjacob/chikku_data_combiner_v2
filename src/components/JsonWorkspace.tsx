@@ -11,7 +11,7 @@ import {
   Tag,
 } from "@blueprintjs/core";
 import { SoftSelect } from "./SoftSelect";
-import { JsonWorkspaceFileActions, LoadedTable } from "../types";
+import { DocumentWorkspaceFileActions, LoadedTable } from "../types";
 import {
   FlattenOptions,
   JsonValue,
@@ -22,6 +22,7 @@ import {
   parseJsonText,
   toCsv,
 } from "../utils/jsonFlatten";
+import { escapeIdent } from "../utils/sqlBuilder";
 
 const JSON_HISTORY_LIMIT = 100;
 const JSON_TYPING_PUSH_DELAY = 700;
@@ -30,11 +31,17 @@ const JSON_SPLIT_LEFT_MIN_PX = 240;
 const JSON_SPLIT_RIGHT_MIN_PX = 280;
 const JSON_SPLIT_KEY_STEP = 4;
 const JSON_COMMAND_FEEDBACK_MS = 1400;
-const JSON_TREE_MENU_WIDTH_PX = 180;
-const JSON_TREE_MENU_HEIGHT_PX = 118;
+const JSON_TREE_BASE_MENU_WIDTH_PX = 220;
+const JSON_TREE_APPEND_MENU_WIDTH_PX = 520;
+const JSON_TREE_BASE_MENU_HEIGHT_PX = 118;
+const JSON_TREE_APPEND_TRIGGER_MENU_HEIGHT_PX = 154;
+const JSON_TREE_APPEND_MENU_HEIGHT_PX = 640;
 const JSON_TREE_MENU_MARGIN_PX = 8;
+const JSON_TREE_APPEND_PREVIEW_DELAY_MS = 180;
 
 type JsonCommandFeedbackKey = "copy" | "minify" | "format" | "wrap";
+type JsonTreeContextPane = "source" | "compare";
+type JsonAppendColumnMode = "unique" | "all";
 type JsonTreeSearchMode = "tree" | "value";
 
 function isApplePlatform(): boolean {
@@ -53,6 +60,7 @@ interface JsonTreeContextItem {
   name: string;
   path: string;
   value: JsonValue;
+  pane: JsonTreeContextPane;
 }
 
 interface JsonTreeContextMenuState extends JsonTreeContextItem {
@@ -74,6 +82,20 @@ interface JsonHistoryEntry {
 interface JsonHistoryState {
   entries: JsonHistoryEntry[];
   index: number;
+}
+
+interface AppendValuesResult {
+  value: JsonValue;
+  appended: number;
+}
+
+interface JsonAppendColumnPreview {
+  tableName: string;
+  columnName: string;
+  loading: boolean;
+  uniqueCount: number | null;
+  samples: JsonValue[];
+  error: string | null;
 }
 
 type JsonHistoryAction =
@@ -127,10 +149,11 @@ function jsonHistoryReducer(state: JsonHistoryState, action: JsonHistoryAction):
 
 interface JsonWorkspaceProps {
   table: LoadedTable;
+  sourceTables: LoadedTable[];
   jsonTables: LoadedTable[];
   onOpenFiles: () => void;
   onReloadTable: () => Promise<void>;
-  onFileActionsChange?: (actions: JsonWorkspaceFileActions | null) => void;
+  onFileActionsChange?: (actions: DocumentWorkspaceFileActions | null) => void;
 }
 
 function getFileName(path: string): string {
@@ -197,6 +220,96 @@ function flattenPathForLabel(path: string): string {
 function formatJsonValueForClipboard(value: JsonValue): string {
   if (value === null || typeof value !== "object") return formatJsonScalar(value);
   return JSON.stringify(value, null, 2);
+}
+
+function formatJsonValueInline(value: JsonValue): string {
+  if (value === null || typeof value !== "object") return formatJsonScalar(value);
+  return JSON.stringify(value);
+}
+
+function formatJsonTreeCount(value: unknown): number | null {
+  const count = Number(value);
+  return Number.isFinite(count) ? count : null;
+}
+
+function appendTableSearchText(table: LoadedTable): string {
+  return `${table.tableName} ${getFileName(table.filePath)}`.toLowerCase();
+}
+
+function appendColumnSearchText(column: LoadedTable["schema"][number]): string {
+  return `${column.column_name} ${column.display_name ?? ""} ${column.column_type}`.toLowerCase();
+}
+
+function jsonValueIdentity(value: JsonValue): string {
+  return `${getJsonType(value)}:${JSON.stringify(value)}`;
+}
+
+function collectColumnValues(
+  rows: Record<string, JsonValue>[],
+  column: string,
+  mode: JsonAppendColumnMode
+): JsonValue[] {
+  const values: JsonValue[] = [];
+  const seen = new Set<string>();
+
+  rows.forEach((row) => {
+    const value = row[column];
+    if (value === null || value === undefined) return;
+    if (mode === "unique") {
+      const identity = jsonValueIdentity(value);
+      if (seen.has(identity)) return;
+      seen.add(identity);
+    }
+    values.push(value);
+  });
+
+  return values;
+}
+
+function appendValuesAtJsonPath(
+  value: JsonValue,
+  targetPath: string,
+  values: JsonValue[],
+  mode: JsonAppendColumnMode,
+  currentPath = "$"
+): AppendValuesResult {
+  if (currentPath === targetPath) {
+    if (!Array.isArray(value)) return { value, appended: 0 };
+    if (mode === "all") return { value: [...value, ...values], appended: values.length };
+
+    const seen = new Set(value.map(jsonValueIdentity));
+    const nextValues = values.filter((item) => {
+      const identity = jsonValueIdentity(item);
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    });
+    return { value: [...value, ...nextValues], appended: nextValues.length };
+  }
+
+  if (Array.isArray(value)) {
+    let appended = 0;
+    const next = value.map((child, index) => {
+      const result = appendValuesAtJsonPath(child, targetPath, values, mode, `${currentPath}[${index}]`);
+      appended += result.appended;
+      return result.value;
+    });
+    return appended > 0 ? { value: next, appended } : { value, appended: 0 };
+  }
+
+  if (value && typeof value === "object") {
+    let appended = 0;
+    const next: Record<string, JsonValue> = {};
+    Object.entries(value).forEach(([key, child]) => {
+      const childPath = currentPath === "$" ? `$.${key}` : `${currentPath}.${key}`;
+      const result = appendValuesAtJsonPath(child, targetPath, values, mode, childPath);
+      appended += result.appended;
+      next[key] = result.value;
+    });
+    return appended > 0 ? { value: next, appended } : { value, appended: 0 };
+  }
+
+  return { value, appended: 0 };
 }
 
 function searchablePathText(path: string): string {
@@ -397,6 +510,7 @@ interface JsonTreeRowProps {
   name: string;
   path: string;
   value: JsonValue;
+  pane: JsonTreeContextPane;
   depth: number;
   expanded: Set<string>;
   selectedPath: string;
@@ -411,6 +525,7 @@ function JsonTreeRow({
   name,
   path,
   value,
+  pane,
   depth,
   expanded,
   selectedPath,
@@ -444,6 +559,7 @@ function JsonTreeRow({
           name={String(index)}
           path={`${path}[${index}]`}
           value={child}
+          pane={pane}
           depth={depth + 1}
           expanded={expanded}
           selectedPath={selectedPath}
@@ -463,6 +579,7 @@ function JsonTreeRow({
             name={key}
             path={childPath}
             value={child}
+            pane={pane}
             depth={depth + 1}
             expanded={expanded}
             selectedPath={selectedPath}
@@ -487,7 +604,7 @@ function JsonTreeRow({
         aria-expanded={expandable ? isVisuallyExpanded : undefined}
         aria-selected={isSelected}
         onClick={() => onSelect(path)}
-        onContextMenu={(event) => onContextMenu(event, { name, path, value })}
+        onContextMenu={(event) => onContextMenu(event, { name, path, value, pane })}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
@@ -533,6 +650,7 @@ function JsonTreeRow({
 
 export function JsonWorkspace({
   table,
+  sourceTables,
   jsonTables,
   onOpenFiles,
   onReloadTable,
@@ -575,6 +693,15 @@ export function JsonWorkspace({
   const [wrapEditorContent, setWrapEditorContent] = useState(false);
   const [commandFeedback, setCommandFeedback] = useState<JsonCommandFeedback | null>(null);
   const [treeContextMenu, setTreeContextMenu] = useState<JsonTreeContextMenuState | null>(null);
+  const [appendPanelOpen, setAppendPanelOpen] = useState(false);
+  const [appendTableName, setAppendTableName] = useState("");
+  const [appendTableSearch, setAppendTableSearch] = useState("");
+  const [appendColumnName, setAppendColumnName] = useState("");
+  const [appendColumnSearch, setAppendColumnSearch] = useState("");
+  const [appendPreviewColumnName, setAppendPreviewColumnName] = useState("");
+  const [appendColumnMode, setAppendColumnMode] = useState<JsonAppendColumnMode>("unique");
+  const [appendLoading, setAppendLoading] = useState(false);
+  const [appendColumnPreview, setAppendColumnPreview] = useState<JsonAppendColumnPreview | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const sourceTreeSearchRef = useRef<HTMLInputElement>(null);
   const compareTreeSearchRef = useRef<HTMLInputElement>(null);
@@ -586,6 +713,7 @@ export function JsonWorkspace({
   const splitPointerIdRef = useRef<number | null>(null);
   const commandFeedbackFrameRef = useRef<number | null>(null);
   const commandFeedbackTimerRef = useRef<number | null>(null);
+  const appendPreviewCacheRef = useRef<Map<string, Omit<JsonAppendColumnPreview, "loading">>>(new Map());
 
   const canUndo = history.index > 0;
   const canRedo = history.index < history.entries.length - 1;
@@ -609,6 +737,32 @@ export function JsonWorkspace({
 
   const previewRows = flattened.rows.slice(0, 120);
   const previewTruncated = flattened.rows.length > previewRows.length;
+  const appendSourceTables = useMemo(
+    () => sourceTables.filter((candidate) => candidate.schema.length > 0),
+    [sourceTables]
+  );
+  const appendSourceTable = useMemo(
+    () => appendSourceTables.find((candidate) => candidate.tableName === appendTableName) ?? null,
+    [appendSourceTables, appendTableName]
+  );
+  const appendColumnOptions = useMemo(
+    () => appendSourceTable?.schema ?? [],
+    [appendSourceTable]
+  );
+  const filteredAppendSourceTables = useMemo(() => {
+    const query = appendTableSearch.trim().toLowerCase();
+    if (!query) return appendSourceTables;
+    return appendSourceTables.filter((candidate) => appendTableSearchText(candidate).includes(query));
+  }, [appendSourceTables, appendTableSearch]);
+  const filteredAppendColumns = useMemo(() => {
+    const query = appendColumnSearch.trim().toLowerCase();
+    const columns = appendColumnOptions
+      .slice()
+      .sort((a, b) => a.column_name.localeCompare(b.column_name, undefined, { sensitivity: "base", numeric: true }));
+    if (!query) return columns;
+    return columns.filter((column) => appendColumnSearchText(column).includes(query));
+  }, [appendColumnOptions, appendColumnSearch]);
+  const appendPreviewColumn = appendPreviewColumnName || appendColumnName;
   const treeSearchActive = treeSearch.trim().length > 0;
   const rootMatches = useMemo(
     () => (isValid ? nodeMatches(parsed.value, "root", "$", treeSearch) : false),
@@ -641,6 +795,18 @@ export function JsonWorkspace({
   const comparePreviewTruncated = compareFlattened.rows.length > comparePreviewRows.length;
   const compareLineCount = useMemo(() => compareText.split(/\r\n|\r|\n/).length, [compareText]);
   const compareSelectedLabel = flattenPathForLabel(compareSelectedPath) || "$";
+
+  useEffect(() => {
+    if (appendTableName && appendSourceTables.some((candidate) => candidate.tableName === appendTableName)) return;
+    setAppendTableName(appendSourceTables[0]?.tableName ?? "");
+  }, [appendSourceTables, appendTableName]);
+
+  useEffect(() => {
+    if (appendColumnName && appendColumnOptions.some((column) => column.column_name === appendColumnName)) return;
+    const nextColumn = appendColumnOptions[0]?.column_name ?? "";
+    setAppendColumnName(nextColumn);
+    setAppendPreviewColumnName(nextColumn);
+  }, [appendColumnName, appendColumnOptions]);
 
   useLayoutEffect(() => {
     rawTextRef.current = rawText;
@@ -680,8 +846,17 @@ export function JsonWorkspace({
   useEffect(() => {
     if (!treeContextMenu) return;
 
+    const targetIsInsideContextSurface = (target: EventTarget | null): boolean => {
+      if (!(target instanceof Element)) return false;
+      if (treeContextMenuRef.current?.contains(target)) return true;
+      return !!target.closest(".json-tree-context-select-popover");
+    };
     const closeIfOutside = (event: MouseEvent) => {
-      if (treeContextMenuRef.current?.contains(event.target as Node)) return;
+      if (targetIsInsideContextSurface(event.target)) return;
+      setTreeContextMenu(null);
+    };
+    const closeIfScrolledOutside = (event: Event) => {
+      if (targetIsInsideContextSurface(event.target)) return;
       setTreeContextMenu(null);
     };
     const closeMenu = () => setTreeContextMenu(null);
@@ -692,14 +867,84 @@ export function JsonWorkspace({
     document.addEventListener("mousedown", closeIfOutside);
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("resize", closeMenu);
-    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("scroll", closeIfScrolledOutside, true);
     return () => {
       document.removeEventListener("mousedown", closeIfOutside);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("resize", closeMenu);
-      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("scroll", closeIfScrolledOutside, true);
     };
   }, [treeContextMenu]);
+
+  useEffect(() => {
+    if (!treeContextMenu || !appendPanelOpen || !appendTableName || !appendPreviewColumn) {
+      setAppendColumnPreview(null);
+      return;
+    }
+
+    const selectedTable = appendSourceTables.find((candidate) => candidate.tableName === appendTableName);
+    const selectedColumn = selectedTable?.schema.some((column) => column.column_name === appendPreviewColumn);
+    if (!selectedTable || !selectedColumn) {
+      setAppendColumnPreview(null);
+      return;
+    }
+
+    const cacheKey = `${appendTableName}\u0000${appendPreviewColumn}`;
+    const cached = appendPreviewCacheRef.current.get(cacheKey);
+    if (cached) {
+      setAppendColumnPreview({ ...cached, loading: false });
+      return;
+    }
+
+    let cancelled = false;
+    setAppendColumnPreview({
+      tableName: appendTableName,
+      columnName: appendPreviewColumn,
+      loading: true,
+      uniqueCount: null,
+      samples: [],
+      error: null,
+    });
+
+    const timer = window.setTimeout(() => {
+      const column = escapeIdent(appendPreviewColumn);
+      const tableName = escapeIdent(appendTableName);
+      Promise.all([
+        window.api.query(`SELECT COUNT(DISTINCT ${column}) AS unique_count FROM ${tableName} WHERE ${column} IS NOT NULL`),
+        window.api.query(`SELECT DISTINCT ${column} AS value FROM ${tableName} WHERE ${column} IS NOT NULL LIMIT 5`),
+      ])
+        .then(([countRows, sampleRows]) => {
+          if (cancelled) return;
+          const preview: Omit<JsonAppendColumnPreview, "loading"> = {
+            tableName: appendTableName,
+            columnName: appendPreviewColumn,
+            uniqueCount: formatJsonTreeCount(countRows[0]?.unique_count),
+            samples: (sampleRows as Record<string, JsonValue>[])
+              .map((row) => row.value)
+              .filter((value): value is JsonValue => value !== null && value !== undefined),
+            error: null,
+          };
+          appendPreviewCacheRef.current.set(cacheKey, preview);
+          setAppendColumnPreview({ ...preview, loading: false });
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setAppendColumnPreview({
+            tableName: appendTableName,
+            columnName: appendPreviewColumn,
+            loading: false,
+            uniqueCount: null,
+            samples: [],
+            error: String(err),
+          });
+        });
+    }, JSON_TREE_APPEND_PREVIEW_DELAY_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [appendPanelOpen, appendPreviewColumn, appendSourceTables, appendTableName, treeContextMenu]);
 
   useEffect(() => {
     let cancelled = false;
@@ -999,14 +1244,34 @@ export function JsonWorkspace({
     event.preventDefault();
     event.stopPropagation();
     onSelectedChange(item.path);
+    setAppendPanelOpen(false);
+    setAppendColumnMode("unique");
+    setAppendTableSearch("");
+    setAppendColumnSearch("");
+    if (!appendTableName && appendSourceTables[0]) {
+      setAppendTableName(appendSourceTables[0].tableName);
+    }
+    if (!appendColumnName) {
+      const activeTable = appendSourceTables.find((candidate) => candidate.tableName === appendTableName) ?? appendSourceTables[0];
+      const firstColumn = activeTable?.schema[0]?.column_name;
+      if (firstColumn) {
+        setAppendColumnName(firstColumn);
+        setAppendPreviewColumnName(firstColumn);
+      }
+    } else {
+      setAppendPreviewColumnName(appendColumnName);
+    }
+    const menuHeight = item.pane === "source" && Array.isArray(item.value)
+      ? JSON_TREE_APPEND_TRIGGER_MENU_HEIGHT_PX
+      : JSON_TREE_BASE_MENU_HEIGHT_PX;
 
     const maxLeft = Math.max(
       JSON_TREE_MENU_MARGIN_PX,
-      window.innerWidth - JSON_TREE_MENU_WIDTH_PX - JSON_TREE_MENU_MARGIN_PX
+      window.innerWidth - JSON_TREE_BASE_MENU_WIDTH_PX - JSON_TREE_MENU_MARGIN_PX
     );
     const maxTop = Math.max(
       JSON_TREE_MENU_MARGIN_PX,
-      window.innerHeight - JSON_TREE_MENU_HEIGHT_PX - JSON_TREE_MENU_MARGIN_PX
+      window.innerHeight - menuHeight - JSON_TREE_MENU_MARGIN_PX
     );
     const x = Math.min(
       Math.max(JSON_TREE_MENU_MARGIN_PX, event.clientX),
@@ -1017,6 +1282,26 @@ export function JsonWorkspace({
       maxTop
     );
     setTreeContextMenu({ ...item, x, y });
+  }, [appendColumnName, appendSourceTables, appendTableName]);
+
+  const openAppendPanel = useCallback(() => {
+    setAppendPanelOpen(true);
+    setTreeContextMenu((current) => {
+      if (!current) return current;
+      const maxTop = Math.max(
+        JSON_TREE_MENU_MARGIN_PX,
+        window.innerHeight - JSON_TREE_APPEND_MENU_HEIGHT_PX - JSON_TREE_MENU_MARGIN_PX
+      );
+      const maxLeft = Math.max(
+        JSON_TREE_MENU_MARGIN_PX,
+        window.innerWidth - JSON_TREE_APPEND_MENU_WIDTH_PX - JSON_TREE_MENU_MARGIN_PX
+      );
+      return {
+        ...current,
+        x: Math.min(current.x, maxLeft),
+        y: Math.min(current.y, maxTop),
+      };
+    });
   }, []);
 
   const copyTreeContextValue = useCallback(async (kind: "key" | "value" | "path") => {
@@ -1031,6 +1316,72 @@ export function JsonWorkspace({
     await writeClipboard(text, `Copied ${kind} ${labelPath}`);
     setTreeContextMenu(null);
   }, [treeContextMenu, writeClipboard]);
+
+  const handleAppendColumnValues = useCallback(async () => {
+    if (!treeContextMenu || treeContextMenu.pane !== "source" || !Array.isArray(treeContextMenu.value)) return;
+    if (!isValid || !parsed.value || !appendTableName || !appendColumnName) return;
+
+    const selectedTable = appendSourceTables.find((candidate) => candidate.tableName === appendTableName);
+    const selectedColumn = selectedTable?.schema.some((column) => column.column_name === appendColumnName);
+    if (!selectedTable || !selectedColumn) {
+      setStatusMessage("Selected table or column is no longer available");
+      return;
+    }
+
+    const labelPath = flattenPathForLabel(treeContextMenu.path) || "$";
+    const sourceLabel = `${appendTableName}.${appendColumnName}`;
+
+    setAppendLoading(true);
+    try {
+      const column = escapeIdent(appendColumnName);
+      const selectMode = appendColumnMode === "unique" ? "SELECT DISTINCT" : "SELECT";
+      const rows = await window.api.query(
+        `${selectMode} ${column} AS value FROM ${escapeIdent(appendTableName)} WHERE ${column} IS NOT NULL`
+      );
+      const values = collectColumnValues(rows as Record<string, JsonValue>[], "value", appendColumnMode);
+      if (values.length === 0) {
+        setStatusMessage(`No non-null values in ${sourceLabel}`);
+        setTreeContextMenu(null);
+        return;
+      }
+
+      const result = appendValuesAtJsonPath(
+        parsed.value,
+        treeContextMenu.path,
+        values,
+        appendColumnMode
+      );
+      if (result.appended === 0) {
+        setStatusMessage(`No new values added to ${labelPath}`);
+        setTreeContextMenu(null);
+        return;
+      }
+
+      const nextText = serializeJsonForFile(result.value, extension, true, rawText);
+      const valueLabel = `${result.appended.toLocaleString()} ${appendColumnMode === "unique" ? "unique " : ""}value${result.appended === 1 ? "" : "s"}`;
+      applyTransformedText(
+        nextText,
+        `Added ${valueLabel} from ${sourceLabel} to ${labelPath}`,
+        `No new values added to ${labelPath}`
+      );
+      setTreeContextMenu(null);
+    } catch (err) {
+      setStatusMessage(`Could not read ${sourceLabel}: ${String(err)}`);
+    } finally {
+      setAppendLoading(false);
+    }
+  }, [
+    appendColumnMode,
+    appendColumnName,
+    appendSourceTables,
+    appendTableName,
+    applyTransformedText,
+    extension,
+    isValid,
+    parsed.value,
+    rawText,
+    treeContextMenu,
+  ]);
 
   const handleToggleWrap = useCallback(() => {
     const nextWrapped = !wrapEditorContent;
@@ -1058,6 +1409,7 @@ export function JsonWorkspace({
 
   useEffect(() => {
     onFileActionsChange?.({
+      workspaceKind: "json",
       isDirty,
       isValid,
       isTableView,
@@ -1220,6 +1572,7 @@ export function JsonWorkspace({
     className,
     title,
     filePath,
+    pane,
     extensionLabel,
     parsedResult,
     isValidDocument,
@@ -1247,6 +1600,7 @@ export function JsonWorkspace({
     className: string;
     title: string;
     filePath: string;
+    pane: JsonTreeContextPane;
     extensionLabel: string;
     parsedResult: typeof parsed;
     isValidDocument: boolean;
@@ -1373,6 +1727,7 @@ export function JsonWorkspace({
                   name="root"
                   path="$"
                   value={parsedResult.value as JsonValue}
+                  pane={pane}
                   depth={0}
                   expanded={expandedPaths}
                   selectedPath={selected}
@@ -1586,27 +1941,212 @@ export function JsonWorkspace({
     </section>
   );
 
+  const activeAppendPreview = appendColumnPreview
+    && appendColumnPreview.tableName === appendTableName
+    && appendColumnPreview.columnName === appendPreviewColumn
+    ? appendColumnPreview
+    : null;
+
   const treeContextMenuElement = treeContextMenu
     ? ReactDOM.createPortal(
         <div
           ref={treeContextMenuRef}
-          className="json-tree-context-menu"
+          className={`json-tree-context-menu${appendPanelOpen ? " append-open" : ""}`}
           role="menu"
           style={{ left: treeContextMenu.x, top: treeContextMenu.y }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          <button type="button" role="menuitem" onClick={() => copyTreeContextValue("key")}>
-            <Icon icon="key" size={13} />
-            <span>Copy key</span>
-          </button>
-          <button type="button" role="menuitem" onClick={() => copyTreeContextValue("value")}>
-            <Icon icon="variable" size={13} />
-            <span>Copy value</span>
-          </button>
-          <button type="button" role="menuitem" onClick={() => copyTreeContextValue("path")}>
-            <Icon icon="path" size={13} />
-            <span>Copy path</span>
-          </button>
+          {treeContextMenu.pane === "source" && Array.isArray(treeContextMenu.value) && (appendPanelOpen ? (
+            <div className="json-tree-context-append json-tree-context-append-top" role="group" aria-label="Add values from table column">
+              <div className="json-tree-context-label json-tree-context-label-with-back">
+                <button
+                  type="button"
+                  className="json-tree-context-back"
+                  aria-label="Back to context menu"
+                  onClick={() => setAppendPanelOpen(false)}
+                >
+                  <Icon icon="chevron-left" size={13} />
+                </button>
+                <Icon icon="th" size={13} />
+                <span>Add from table column</span>
+              </div>
+              <div className="json-tree-context-browser">
+                <div className="json-tree-context-browser-pane">
+                  <div className="json-tree-context-field-label">
+                    <span>Table</span>
+                    <small>{appendSourceTables.length.toLocaleString()}</small>
+                  </div>
+                  <InputGroup
+                    small
+                    leftIcon="search"
+                    placeholder="Search tables..."
+                    value={appendTableSearch}
+                    onChange={(event) => setAppendTableSearch(event.currentTarget.value)}
+                    disabled={appendSourceTables.length === 0 || appendLoading}
+                  />
+                  <div className="json-tree-context-option-list" role="listbox" aria-label="Source tables">
+                    {filteredAppendSourceTables.length === 0 ? (
+                      <div className="json-tree-context-empty">No tables found</div>
+                    ) : filteredAppendSourceTables.map((candidate) => {
+                      const isSelected = candidate.tableName === appendTableName;
+                      return (
+                        <button
+                          key={candidate.tableName}
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          className={`json-tree-context-option${isSelected ? " selected" : ""}`}
+                          onClick={() => {
+                            const nextColumn = candidate.schema[0]?.column_name ?? "";
+                            setAppendTableName(candidate.tableName);
+                            setAppendColumnName(nextColumn);
+                            setAppendPreviewColumnName(nextColumn);
+                            setAppendColumnSearch("");
+                          }}
+                          disabled={appendLoading}
+                          title={`${candidate.tableName} · ${getFileName(candidate.filePath)}`}
+                        >
+                          <span className="json-tree-context-option-main">{candidate.tableName}</span>
+                          <span className="json-tree-context-option-meta">
+                            {candidate.schema.length.toLocaleString()} cols
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="json-tree-context-browser-pane">
+                  <div className="json-tree-context-field-label">
+                    <span>Column</span>
+                    <small>{appendColumnOptions.length.toLocaleString()}</small>
+                  </div>
+                  <InputGroup
+                    small
+                    leftIcon="search"
+                    placeholder="Search columns..."
+                    value={appendColumnSearch}
+                    onChange={(event) => setAppendColumnSearch(event.currentTarget.value)}
+                    disabled={appendColumnOptions.length === 0 || appendLoading}
+                  />
+                  <div
+                    className="json-tree-context-option-list"
+                    role="listbox"
+                    aria-label="Source columns"
+                    onMouseLeave={() => setAppendPreviewColumnName(appendColumnName)}
+                  >
+                    {filteredAppendColumns.length === 0 ? (
+                      <div className="json-tree-context-empty">No columns found</div>
+                    ) : filteredAppendColumns.map((column) => {
+                      const isSelected = column.column_name === appendColumnName;
+                      const isPreviewed = column.column_name === appendPreviewColumn;
+                      return (
+                        <button
+                          key={column.column_name}
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          className={`json-tree-context-option${isSelected ? " selected" : ""}${isPreviewed ? " previewed" : ""}`}
+                          onMouseEnter={() => setAppendPreviewColumnName(column.column_name)}
+                          onFocus={() => setAppendPreviewColumnName(column.column_name)}
+                          onClick={() => {
+                            setAppendColumnName(column.column_name);
+                            setAppendPreviewColumnName(column.column_name);
+                          }}
+                          disabled={appendLoading}
+                          title={`${column.column_name} · ${column.column_type}`}
+                        >
+                          <span className="json-tree-context-option-main">{column.column_name}</span>
+                          <span className="json-tree-context-option-meta">{column.column_type}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="json-tree-context-preview" aria-live="polite">
+                <div className="json-tree-context-preview-head">
+                  <span title={appendPreviewColumn || undefined}>
+                    {appendPreviewColumn || "No column selected"}
+                  </span>
+                  {activeAppendPreview?.loading ? (
+                    <Spinner size={12} />
+                  ) : activeAppendPreview?.uniqueCount !== null && activeAppendPreview?.uniqueCount !== undefined ? (
+                    <strong>{activeAppendPreview.uniqueCount.toLocaleString()} unique</strong>
+                  ) : null}
+                </div>
+                <div className="json-tree-context-preview-body">
+                  {appendSourceTables.length === 0 ? (
+                    <span>Open a CSV, Excel, or Parquet table first.</span>
+                  ) : !appendPreviewColumn ? (
+                    <span>Select or hover a column to preview unique values.</span>
+                  ) : activeAppendPreview?.loading ? (
+                    <span>Loading samples...</span>
+                  ) : activeAppendPreview?.error ? (
+                    <span title={activeAppendPreview.error}>Preview unavailable</span>
+                  ) : activeAppendPreview && activeAppendPreview.samples.length > 0 ? (
+                    activeAppendPreview.samples.map((sample, index) => (
+                      <span key={`${formatJsonValueInline(sample)}:${index}`} className="json-tree-context-sample">
+                        {formatJsonValueInline(sample)}
+                      </span>
+                    ))
+                  ) : (
+                    <span>No non-null values found.</span>
+                  )}
+                </div>
+                <div className="json-tree-context-preview-foot">Count and samples ignore nulls</div>
+              </div>
+              <label>
+                <span>Mode</span>
+                <SoftSelect
+                  small
+                  value={appendColumnMode}
+                  popoverClassName="json-tree-context-select-popover"
+                  onChange={(event) => setAppendColumnMode(event.currentTarget.value as JsonAppendColumnMode)}
+                  disabled={appendLoading}
+                >
+                  <option value="unique">Unique values</option>
+                  <option value="all">All values</option>
+                </SoftSelect>
+              </label>
+              <Button
+                small
+                fill
+                icon="add"
+                text="Add values"
+                intent={Intent.PRIMARY}
+                onClick={handleAppendColumnValues}
+                loading={appendLoading}
+                disabled={!appendTableName || !appendColumnName || appendColumnOptions.length === 0}
+              />
+              <span className="json-tree-context-hint">
+                {appendSourceTables.length === 0 ? "Open a CSV, Excel, or Parquet table first" : "Nulls always skipped"}
+              </span>
+            </div>
+          ) : (
+            <button type="button" role="menuitem" className="json-tree-context-command" onClick={openAppendPanel}>
+              <Icon icon="add" size={13} />
+              <span>Add values to array...</span>
+              <Icon icon="chevron-right" size={13} />
+            </button>
+          ))}
+          {!appendPanelOpen && (
+            <>
+              <button type="button" role="menuitem" onClick={() => copyTreeContextValue("key")}>
+                <Icon icon="key" size={13} />
+                <span>Copy key</span>
+              </button>
+              <button type="button" role="menuitem" onClick={() => copyTreeContextValue("value")}>
+                <Icon icon="variable" size={13} />
+                <span>Copy value</span>
+              </button>
+              <button type="button" role="menuitem" onClick={() => copyTreeContextValue("path")}>
+                <Icon icon="path" size={13} />
+                <span>Copy path</span>
+              </button>
+            </>
+          )}
         </div>,
         document.body
       )
@@ -1632,6 +2172,7 @@ export function JsonWorkspace({
               className: "json-document-pane json-source-document json-compare-pane",
               title: fileName,
               filePath: table.filePath,
+              pane: "source",
               extensionLabel: extension.toUpperCase() || "JSON",
               parsedResult: parsed,
               isValidDocument: isValid,
@@ -1661,6 +2202,7 @@ export function JsonWorkspace({
               className: "json-document-pane json-structured-document json-compare-pane",
               title: getFileName(compareTable.filePath),
               filePath: compareTable.filePath,
+              pane: "compare",
               extensionLabel: compareExtension.toUpperCase() || "JSON",
               parsedResult: compareParsed,
               isValidDocument: compareIsValid,
@@ -1788,6 +2330,7 @@ export function JsonWorkspace({
               className: "json-document-pane json-structured-document",
               title: "Parsed view",
               filePath: table.filePath,
+              pane: "source",
               extensionLabel: extension.toUpperCase() || "JSON",
               parsedResult: parsed,
               isValidDocument: isValid,

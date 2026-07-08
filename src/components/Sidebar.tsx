@@ -7,7 +7,7 @@ import {
   Intent,
 } from "@blueprintjs/core";
 import { Tooltip2 } from "@blueprintjs/popover2";
-import { LoadedTable, ColumnInfo, SortColumn, PivotViewConfig, JsonWorkspaceFileActions } from "../types";
+import { LoadedTable, ColumnInfo, SortColumn, PivotViewConfig, DocumentWorkspaceFileActions } from "../types";
 import { DataOperationsDialog } from "./DataOperationsDialog";
 import { AggregateDialog } from "./AggregateDialog";
 import { PivotDialog } from "./PivotDialog";
@@ -45,7 +45,7 @@ interface SidebarProps {
   onHide: () => void;
   jsonWorkspaceActive?: boolean;
   markdownWorkspaceActive?: boolean;
-  jsonFileActions?: JsonWorkspaceFileActions | null;
+  documentFileActions?: DocumentWorkspaceFileActions | null;
 }
 
 type FileListIcon = {
@@ -89,9 +89,9 @@ function getFileListIcon(table: LoadedTable): FileListIcon {
 
 function getFileMetricLabel(table: LoadedTable): string {
   if (isMarkdownTable(table)) {
-    return table.rowCount.toLocaleString() + " line" + (table.rowCount === 1 ? "" : "s");
+    return `${table.rowCount.toLocaleString()} line${table.rowCount === 1 ? "" : "s"}`;
   }
-  return table.rowCount.toLocaleString() + " rows";
+  return `${table.rowCount.toLocaleString()} rows`;
 }
 
 function getFileListLabel(table: LoadedTable): string {
@@ -101,11 +101,16 @@ function getFileListLabel(table: LoadedTable): string {
   return table.tableName;
 }
 
-function getJsonExportCsvDisabledReason(actions: JsonWorkspaceFileActions): string | null {
-  if (actions.canExportCsv) return null;
-  if (actions.exporting) return "Exporting CSV...";
-  if (!actions.isValid) return "Fix the JSON before exporting CSV.";
-  if (!actions.isTableView) return "Switch Parsed view to table to export CSV.";
+function getDocumentExportDisabledReason(actions: DocumentWorkspaceFileActions): string | null {
+  if (actions.canExport ?? actions.canExportCsv) return null;
+  if (actions.exporting) return actions.exportDisabledReason ?? "Exporting...";
+  if (actions.exportDisabledReason) return actions.exportDisabledReason;
+  if (!actions.isValid) {
+    return actions.workspaceKind === "json"
+      ? "Fix the JSON before exporting CSV."
+      : "Fix the document before exporting.";
+  }
+  if (actions.isTableView === false) return "Switch Parsed view to table to export CSV.";
   return "No flattened table data to export.";
 }
 
@@ -139,7 +144,7 @@ export function Sidebar({
   onHide,
   jsonWorkspaceActive = false,
   markdownWorkspaceActive = false,
-  jsonFileActions = null,
+  documentFileActions = null,
 }: SidebarProps): React.ReactElement {
   const [dataOpDialogOpen, setDataOpDialogOpen] = useState(false);
   const [aggregateDialogOpen, setAggregateDialogOpen] = useState(false);
@@ -282,14 +287,22 @@ export function Sidebar({
   const noneVisible = visibleColumns.length === 0;
   const visibleColumnCount = visibleColumns.length;
   const compareDisabled = comparableTables.length < 2;
-  const exportCsvDisabledReason = jsonFileActions
-    ? getJsonExportCsvDisabledReason(jsonFileActions)
+  const activeWorkspaceKind = markdownWorkspaceActive ? "markdown" : jsonWorkspaceActive ? "json" : null;
+  const activeDocumentFileActions = documentFileActions?.workspaceKind === activeWorkspaceKind
+    ? documentFileActions
+    : null;
+  const documentExportAction = activeDocumentFileActions?.onExport ?? activeDocumentFileActions?.onExportCsv ?? null;
+  const documentCanExport = activeDocumentFileActions
+    ? activeDocumentFileActions.canExport ?? activeDocumentFileActions.canExportCsv ?? false
+    : false;
+  const exportDisabledReason = activeDocumentFileActions
+    ? getDocumentExportDisabledReason(activeDocumentFileActions)
     : null;
   const combineSelectionDisabledReason = documentWorkspaceActive
-    ? "Combine selection is unavailable in " + workspaceLabel + " view."
+    ? `Combine selection is unavailable in ${workspaceLabel} view.`
     : null;
   const combineDisabledReason = documentWorkspaceActive
-    ? "Combine is unavailable in " + workspaceLabel + " view. Switch to a tabular file to combine data files."
+    ? `Combine is unavailable in ${workspaceLabel} view. Switch to a tabular file to combine data files.`
     : combinableTables.length < 2
       ? "Open at least two tabular files to combine."
       : selectedForCombine.size < 2
@@ -349,7 +362,7 @@ export function Sidebar({
           const fileLabel = getFileListLabel(t);
           const canCombineTable = combinableTableNames.has(t.tableName);
           const rowCombineSelectionDisabledReason = documentWorkspaceActive
-            ? "Combine selection is unavailable in " + workspaceLabel + " view."
+            ? `Combine selection is unavailable in ${workspaceLabel} view.`
             : canCombineTable
               ? null
               : "Text workspace files cannot be selected for combine.";
@@ -367,7 +380,7 @@ export function Sidebar({
               key={t.tableName}
               className={`table-list-item${t.tableName === activeTable ? " active" : ""}${selectedForCombine.has(t.tableName) ? " selected" : ""}`}
             >
-              {comparableTables.length >= 2 && (
+              {tables.length >= 2 && (
                 rowCombineSelectionDisabledReason ? (
                   <Tooltip2
                     content={rowCombineSelectionDisabledReason}
@@ -474,89 +487,106 @@ export function Sidebar({
         </div>
       )}
 
-      {jsonWorkspaceActive && jsonFileActions && (
+      {documentWorkspaceActive && activeDocumentFileActions && (
         <div className="sidebar-section sidebar-file-actions">
           <div className="sidebar-section-header">
             <div className="sidebar-heading-block">
               <h4>File Options</h4>
-              {jsonFileActions.isDirty && (
+              {activeDocumentFileActions.isDirty && (
                 <span className="sidebar-dirty-dot" title="Unsaved changes" />
               )}
             </div>
-            <span className={`sidebar-file-state${jsonFileActions.isDirty ? " is-dirty" : ""}`}>
-              {jsonFileActions.isDirty ? "Unsaved" : "Saved"}
+            <span className={`sidebar-file-state${activeDocumentFileActions.isDirty ? " is-dirty" : ""}`}>
+              {activeDocumentFileActions.isDirty ? "Unsaved" : "Saved"}
             </span>
           </div>
           <div className="sidebar-file-action-grid">
             <Button
               icon="folder-open"
               text="Open"
-              onClick={jsonFileActions.onOpenFiles}
+              onClick={activeDocumentFileActions.onOpenFiles}
               small
             />
             <Button
               icon="floppy-disk"
               text="Save"
               intent={Intent.PRIMARY}
-              onClick={jsonFileActions.onSave}
-              disabled={!jsonFileActions.isDirty || !jsonFileActions.isValid || jsonFileActions.saving}
-              loading={jsonFileActions.saving}
+              onClick={activeDocumentFileActions.onSave}
+              disabled={!activeDocumentFileActions.isDirty || !activeDocumentFileActions.isValid || activeDocumentFileActions.saving}
+              loading={activeDocumentFileActions.saving}
               small
             />
-            <Button
-              icon="download"
-              text="Save As"
-              onClick={jsonFileActions.onSaveAs}
-              disabled={!jsonFileActions.isValid || jsonFileActions.saving}
-              small
-            />
+            {activeDocumentFileActions.onSaveAs && (
+              <Button
+                icon="download"
+                text="Save As"
+                onClick={activeDocumentFileActions.onSaveAs}
+                disabled={!activeDocumentFileActions.isValid || activeDocumentFileActions.saving}
+                small
+              />
+            )}
             <Button
               icon="reset"
               text="Revert"
-              onClick={jsonFileActions.onRevert}
-              disabled={!jsonFileActions.isDirty}
+              onClick={activeDocumentFileActions.onRevert}
+              disabled={!activeDocumentFileActions.isDirty}
               small
             />
             <Button
               icon="history"
               text="History"
-              active={jsonFileActions.historyOpen}
-              onClick={jsonFileActions.onToggleHistory}
+              active={activeDocumentFileActions.historyOpen}
+              onClick={activeDocumentFileActions.onToggleHistory}
               small
             />
-            <Button
-              icon="path"
-              text="Copy Path"
-              onClick={jsonFileActions.onCopyPath}
-              disabled={!jsonFileActions.isValid}
-              small
-            />
-            <Tooltip2
-              content={exportCsvDisabledReason ?? "Export flattened table as CSV"}
-              disabled={!exportCsvDisabledReason}
-              placement="top"
-              minimal
-            >
-              <span className="sidebar-file-action-tooltip">
-                <Button
-                  icon="export"
-                  text="Export CSV"
-                  onClick={jsonFileActions.onExportCsv}
-                  disabled={!jsonFileActions.canExportCsv}
-                  loading={jsonFileActions.exporting}
-                  small
-                  fill
-                />
-              </span>
-            </Tooltip2>
-            <Button
-              icon="comparison"
-              text="Compare"
-              onClick={jsonFileActions.onCompare}
-              disabled={!jsonFileActions.canCompare}
-              title={jsonFileActions.canCompare ? "Compare with another loaded JSON" : "Open another JSON file to compare"}
-              small
-            />
+            {activeDocumentFileActions.onCopyPath && (
+              <Button
+                icon="path"
+                text="Copy Path"
+                onClick={activeDocumentFileActions.onCopyPath}
+                disabled={!activeDocumentFileActions.isValid}
+                small
+              />
+            )}
+            {documentExportAction && (
+              <Tooltip2
+                content={exportDisabledReason ?? activeDocumentFileActions.exportTitle ?? "Export"}
+                disabled={!exportDisabledReason}
+                placement="top"
+                minimal
+              >
+                <span className="sidebar-file-action-tooltip">
+                  <Button
+                    icon="export"
+                    text={activeDocumentFileActions.exportLabel ?? "Export CSV"}
+                    onClick={documentExportAction}
+                    disabled={!documentCanExport}
+                    loading={!!activeDocumentFileActions.exporting}
+                    small
+                    fill
+                  />
+                </span>
+              </Tooltip2>
+            )}
+            {activeDocumentFileActions.onCompare && (
+              <Button
+                icon="comparison"
+                text="Compare"
+                onClick={activeDocumentFileActions.onCompare}
+                disabled={activeDocumentFileActions.canCompare === false}
+                title={activeDocumentFileActions.compareTitle ?? (activeDocumentFileActions.canCompare ? "Compare with another loaded JSON" : "Open another JSON file to compare")}
+                small
+              />
+            )}
+            {activeDocumentFileActions.onToggleEdit && (
+              <Button
+                icon={activeDocumentFileActions.editActive ? "tick" : "edit"}
+                text={activeDocumentFileActions.editLabel ?? (activeDocumentFileActions.editActive ? "Done" : "Edit")}
+                intent={activeDocumentFileActions.editActive ? undefined : Intent.PRIMARY}
+                onClick={activeDocumentFileActions.onToggleEdit}
+                small
+              />
+            )}
           </div>
         </div>
       )}
@@ -720,6 +750,13 @@ export function Sidebar({
       {!documentWorkspaceActive && activeTable && schema.length > 0 && (
         <div className="sidebar-section sidebar-actions">
           <Button
+            icon="folder-open"
+            text="Open"
+            title="Open file"
+            onClick={onOpenFiles}
+            small
+          />
+          <Button
             icon="grouped-bar-chart"
             text="Aggregate"
             onClick={() => setAggregateDialogOpen(true)}
@@ -732,7 +769,7 @@ export function Sidebar({
             onClick={() => setPivotDialogOpen(true)}
             small
           />
-          {tables.length >= 2 && (
+          {comparableTables.length >= 2 && (
             <Button
               icon="data-lineage"
               text="Lookup"
@@ -802,7 +839,7 @@ export function Sidebar({
         intent={Intent.DANGER}
         icon="trash"
       >
-        <p>Remove table <strong>{deleteTarget}</strong>? This will drop it from the current session.</p>
+        <p>Remove file <strong>{deleteTarget}</strong>? This will drop it from the current session.</p>
       </Alert>
 
       <DataOperationsDialog
