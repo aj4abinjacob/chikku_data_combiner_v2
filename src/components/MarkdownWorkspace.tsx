@@ -1,7 +1,8 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Callout, Icon, Intent } from "@blueprintjs/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import html2pdf from "html2pdf.js";
+import html2canvas from "html2canvas-pro";
+import { jsPDF } from "jspdf";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -74,6 +75,7 @@ const MARKDOWN_WHEEL_ZOOM_THROTTLE_MS = 80;
 const MARKDOWN_SCROLL_SYNC_RELEASE_MS = 120;
 const MARKDOWN_PDF_ASSET_TIMEOUT_MS = 3000;
 const MARKDOWN_PDF_EXPORT_ROOT_ID = "markdown-pdf-export-root";
+const MARKDOWN_PDF_MARGIN_IN = 0.55;
 const MARKDOWN_SEARCH_MARK_CLASS = "markdown-search-mark";
 const MARKDOWN_SEARCH_SKIP_TAGS = new Set(["script", "style"]);
 const MARKDOWN_PDF_EXPORT_STYLES = `
@@ -168,6 +170,23 @@ const MARKDOWN_PDF_EXPORT_STYLES = `
 
   #${MARKDOWN_PDF_EXPORT_ROOT_ID} li + li {
     margin-top: 4px;
+  }
+
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} input[type="checkbox"] {
+    width: 12px;
+    height: 12px;
+    margin: 0 6px 0 0;
+    border: 1px solid #8a9ba8;
+    border-radius: 3px;
+    appearance: none;
+    background: #ffffff;
+    vertical-align: -2px;
+  }
+
+  #${MARKDOWN_PDF_EXPORT_ROOT_ID} input[type="checkbox"]:checked {
+    border-color: #137cbd;
+    background: #137cbd;
+    box-shadow: inset 0 0 0 2px #ffffff;
   }
 
   #${MARKDOWN_PDF_EXPORT_ROOT_ID} blockquote {
@@ -615,10 +634,6 @@ function ensurePdfExtension(filePath: string): string {
   return /\.pdf$/i.test(filePath) ? filePath : `${filePath}.pdf`;
 }
 
-function getPdfFileName(filePath: string): string {
-  return ensurePdfExtension(getFileName(filePath).replace(/\.[^.\\/]+$/, "") || "markdown");
-}
-
 function createMarkdownPdfExportRoot(contentHtml: string): { root: HTMLElement; article: HTMLElement } {
   document.getElementById(MARKDOWN_PDF_EXPORT_ROOT_ID)?.remove();
 
@@ -649,6 +664,53 @@ async function waitForPdfAssets(container: ParentNode): Promise<void> {
     }))),
     new Promise<void>((resolve) => window.setTimeout(resolve, MARKDOWN_PDF_ASSET_TIMEOUT_MS)),
   ]);
+}
+
+function createPdfBytesFromCanvas(canvas: HTMLCanvasElement): Uint8Array {
+  const pdf = new jsPDF({ unit: "in", format: "letter", orientation: "portrait" });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const contentWidth = pageWidth - MARKDOWN_PDF_MARGIN_IN * 2;
+  const contentHeight = pageHeight - MARKDOWN_PDF_MARGIN_IN * 2;
+  const sliceHeight = Math.max(1, Math.floor((contentHeight / contentWidth) * canvas.width));
+  const pageCanvas = document.createElement("canvas");
+  const pageContext = pageCanvas.getContext("2d");
+
+  if (!pageContext) {
+    throw new Error("Unable to prepare PDF canvas.");
+  }
+
+  pageCanvas.width = canvas.width;
+
+  for (let sourceY = 0, pageIndex = 0; sourceY < canvas.height; sourceY += sliceHeight, pageIndex += 1) {
+    const currentSliceHeight = Math.min(sliceHeight, canvas.height - sourceY);
+    pageCanvas.height = currentSliceHeight;
+    pageContext.fillStyle = "#ffffff";
+    pageContext.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+    pageContext.drawImage(
+      canvas,
+      0,
+      sourceY,
+      canvas.width,
+      currentSliceHeight,
+      0,
+      0,
+      canvas.width,
+      currentSliceHeight,
+    );
+
+    if (pageIndex > 0) pdf.addPage();
+    pdf.addImage(
+      pageCanvas.toDataURL("image/jpeg", 0.98),
+      "JPEG",
+      MARKDOWN_PDF_MARGIN_IN,
+      MARKDOWN_PDF_MARGIN_IN,
+      contentWidth,
+      (currentSliceHeight / canvas.width) * contentWidth,
+    );
+  }
+
+  return new Uint8Array(pdf.output("arraybuffer"));
 }
 
 function collectText(children: React.ReactNode): string {
@@ -1345,32 +1407,19 @@ export function MarkdownWorkspace({
       await waitForPdfAssets(exportRoot);
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 
-      const worker = html2pdf()
-        .set({
-          margin: [0.55, 0.55, 0.55, 0.55],
-          filename: getPdfFileName(table.filePath),
-          image: { type: "jpeg", quality: 0.98 },
-          enableLinks: true,
-          html2canvas: {
-            backgroundColor: "#ffffff",
-            logging: false,
-            scale: Math.min(2, Math.max(1.5, window.devicePixelRatio || 1)),
-            scrollX: 0,
-            scrollY: 0,
-            useCORS: true,
-            windowWidth: exportRoot.scrollWidth,
-          },
-          jsPDF: { unit: "in", format: "letter", orientation: "portrait" },
-          pagebreak: {
-            mode: ["css", "legacy"],
-            avoid: ["blockquote", "img", "pre", "tr"],
-          },
-        } as any)
-        .from(exportDom.article)
-        .toPdf();
+      const canvas = await html2canvas(exportDom.article, {
+        backgroundColor: "#ffffff",
+        imageTimeout: MARKDOWN_PDF_ASSET_TIMEOUT_MS,
+        logging: false,
+        scale: Math.min(2, Math.max(1.5, window.devicePixelRatio || 1)),
+        scrollX: 0,
+        scrollY: 0,
+        useCORS: true,
+        windowHeight: exportRoot.scrollHeight,
+        windowWidth: exportRoot.scrollWidth,
+      });
 
-      const pdf = await worker.get("pdf");
-      const bytes = new Uint8Array(pdf.output("arraybuffer"));
+      const bytes = createPdfBytesFromCanvas(canvas);
       await window.api.writeBinaryFile(ensurePdfExtension(path), bytes);
       pushHistory("Exported PDF", rawText);
     } finally {
