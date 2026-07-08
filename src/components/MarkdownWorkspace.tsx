@@ -44,6 +44,16 @@ const MARKDOWN_SPLIT_PREVIEW_MIN_PX = 280;
 const MARKDOWN_SPLIT_KEY_STEP = 4;
 const MARKDOWN_SPLIT_MIN_PERCENT = 22;
 const MARKDOWN_SPLIT_MAX_PERCENT = 78;
+const MARKDOWN_DEFAULT_ZOOM = 1;
+const MARKDOWN_ZOOM_LEVELS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+const MARKDOWN_BODY_FONT_SIZE_PX = 14.5;
+const MARKDOWN_H1_FONT_SIZE_PX = 28;
+const MARKDOWN_H2_FONT_SIZE_PX = 18;
+const MARKDOWN_H3_FONT_SIZE_PX = 15;
+const MARKDOWN_SMALL_HEADING_FONT_SIZE_PX = 13;
+const MARKDOWN_CODE_FONT_SIZE_PX = 12;
+const MARKDOWN_TABLE_FONT_SIZE_PX = 13;
+const MARKDOWN_WHEEL_ZOOM_THROTTLE_MS = 80;
 
 function getFileExtension(filePath: string): string {
   return filePath.split(".").pop()?.toUpperCase() || "MD";
@@ -189,6 +199,65 @@ function formatTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function isApplePlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /mac|iphone|ipad|ipod/i.test(navigator.platform);
+}
+
+function getMarkdownShortcutModifierLabel(): string {
+  return isApplePlatform() ? "Cmd" : "Ctrl";
+}
+
+function hasPlatformZoomModifier(event: KeyboardEvent): boolean {
+  return isApplePlatform()
+    ? event.metaKey && !event.ctrlKey
+    : event.ctrlKey && !event.metaKey;
+}
+
+function hasWheelZoomModifier(event: WheelEvent): boolean {
+  if (event.altKey) return false;
+  if (event.ctrlKey && !event.metaKey) return true;
+  return isApplePlatform() ? event.metaKey && !event.ctrlKey : false;
+}
+
+function getMarkdownZoomShortcutAction(event: KeyboardEvent): "in" | "out" | "reset" | null {
+  if (event.altKey || !hasPlatformZoomModifier(event)) return null;
+
+  const key = event.key.toLowerCase();
+  if (key === "+" || key === "=" || event.code === "Equal" || event.code === "NumpadAdd") {
+    return "in";
+  }
+  if (key === "-" || key === "_" || event.code === "Minus" || event.code === "NumpadSubtract") {
+    return "out";
+  }
+  if (!event.shiftKey && (key === "0" || event.code === "Digit0" || event.code === "Numpad0")) {
+    return "reset";
+  }
+  return null;
+}
+
+function getMarkdownWheelZoomDirection(event: WheelEvent): 1 | -1 | null {
+  if (!hasWheelZoomModifier(event)) return null;
+  if (event.deltaY < 0) return 1;
+  if (event.deltaY > 0) return -1;
+  return null;
+}
+
+function getNextMarkdownZoom(currentZoom: number, direction: 1 | -1): number {
+  if (direction > 0) {
+    return MARKDOWN_ZOOM_LEVELS.find((level) => level > currentZoom + 0.001) ?? currentZoom;
+  }
+
+  for (let i = MARKDOWN_ZOOM_LEVELS.length - 1; i >= 0; i--) {
+    if (MARKDOWN_ZOOM_LEVELS[i] < currentZoom - 0.001) return MARKDOWN_ZOOM_LEVELS[i];
+  }
+  return currentZoom;
+}
+
+function formatMarkdownZoom(zoom: number): string {
+  return `${Math.round(zoom * 100)}%`;
+}
+
 function collectText(children: React.ReactNode): string {
   return React.Children.toArray(children)
     .map((child) => {
@@ -297,6 +366,7 @@ export function MarkdownWorkspace({
   const [history, setHistory] = useState<MarkdownHistoryEntry[]>([]);
   const [markdownSplitPercent, setMarkdownSplitPercent] = useState(34);
   const [markdownSplitResizing, setMarkdownSplitResizing] = useState(false);
+  const [markdownZoom, setMarkdownZoom] = useState(MARKDOWN_DEFAULT_ZOOM);
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
   const nextHistoryId = useRef(1);
   const markdownLayoutRef = useRef<HTMLDivElement>(null);
@@ -305,6 +375,7 @@ export function MarkdownWorkspace({
   const lineNumberScrollTopRef = useRef(0);
   const lineNumberScrollFrameRef = useRef<number | null>(null);
   const splitPointerIdRef = useRef<number | null>(null);
+  const wheelZoomLastAtRef = useRef(0);
 
   const extension = getFileExtension(table.filePath);
   const isDirty = rawText !== savedText;
@@ -317,6 +388,24 @@ export function MarkdownWorkspace({
     () => Array.from({ length: Math.max(lineCount, 1) }, (_, index) => index + 1),
     [lineCount]
   );
+  const markdownZoomPercent = formatMarkdownZoom(markdownZoom);
+  const markdownZoomAdjusted = markdownZoom !== MARKDOWN_DEFAULT_ZOOM;
+  const markdownZoomStatus = markdownZoom > MARKDOWN_DEFAULT_ZOOM
+    ? `Zoomed in ${markdownZoomPercent}`
+    : markdownZoom < MARKDOWN_DEFAULT_ZOOM
+      ? `Zoomed out ${markdownZoomPercent}`
+      : `Zoom ${markdownZoomPercent}`;
+  const markdownZoomIcon = markdownZoom > MARKDOWN_DEFAULT_ZOOM
+    ? "zoom-in"
+    : markdownZoom < MARKDOWN_DEFAULT_ZOOM
+      ? "zoom-out"
+      : "search";
+  const markdownZoomShortcutModifier = useMemo(() => getMarkdownShortcutModifierLabel(), []);
+  const zoomInTitle = `Zoom in (${markdownZoomShortcutModifier}+Plus, ${markdownZoomShortcutModifier}+=, or ${markdownZoomShortcutModifier}+scroll up)`;
+  const zoomOutTitle = `Zoom out (${markdownZoomShortcutModifier}+Minus or ${markdownZoomShortcutModifier}+scroll down)`;
+  const resetZoomTitle = `Reset zoom (${markdownZoomShortcutModifier}+0)`;
+  const canZoomIn = markdownZoom < MARKDOWN_ZOOM_LEVELS[MARKDOWN_ZOOM_LEVELS.length - 1];
+  const canZoomOut = markdownZoom > MARKDOWN_ZOOM_LEVELS[0];
 
   const updateLineNumbersScroll = useCallback((scrollTop: number) => {
     lineNumberScrollTopRef.current = scrollTop;
@@ -427,6 +516,63 @@ export function MarkdownWorkspace({
       return (clampedPx / bounds.rect.width) * 100;
     });
   }, [getMarkdownSplitBounds]);
+
+  const handleZoomIn = useCallback(() => {
+    setMarkdownZoom((currentZoom) => getNextMarkdownZoom(currentZoom, 1));
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setMarkdownZoom((currentZoom) => getNextMarkdownZoom(currentZoom, -1));
+  }, []);
+
+  const handleResetZoom = useCallback(() => {
+    setMarkdownZoom(MARKDOWN_DEFAULT_ZOOM);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const action = getMarkdownZoomShortcutAction(event);
+      if (!action) return;
+
+      event.preventDefault();
+      if (action === "in") {
+        handleZoomIn();
+      } else if (action === "out") {
+        handleZoomOut();
+      } else {
+        handleResetZoom();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleResetZoom, handleZoomIn, handleZoomOut]);
+
+  useEffect(() => {
+    const layout = markdownLayoutRef.current;
+    if (!layout) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      const direction = getMarkdownWheelZoomDirection(event);
+      if (!direction) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      const now = Date.now();
+      if (now - wheelZoomLastAtRef.current < MARKDOWN_WHEEL_ZOOM_THROTTLE_MS) return;
+      wheelZoomLastAtRef.current = now;
+
+      if (direction > 0) {
+        handleZoomIn();
+      } else {
+        handleZoomOut();
+      }
+    };
+
+    const wheelOptions: AddEventListenerOptions = { passive: false, capture: true };
+    layout.addEventListener("wheel", handleWheel, wheelOptions);
+    return () => layout.removeEventListener("wheel", handleWheel, wheelOptions);
+  }, [handleZoomIn, handleZoomOut]);
 
   useEffect(() => {
     if (headings.length === 0) {
@@ -614,8 +760,15 @@ export function MarkdownWorkspace({
       </div>
     </aside>
   ) : null;
-  const markdownSplitStyle = {
+  const markdownLayoutStyle = {
     "--markdown-edit-left": `${markdownSplitPercent}%`,
+    "--markdown-body-font-size": `${MARKDOWN_BODY_FONT_SIZE_PX * markdownZoom}px`,
+    "--markdown-h1-font-size": `${MARKDOWN_H1_FONT_SIZE_PX * markdownZoom}px`,
+    "--markdown-h2-font-size": `${MARKDOWN_H2_FONT_SIZE_PX * markdownZoom}px`,
+    "--markdown-h3-font-size": `${MARKDOWN_H3_FONT_SIZE_PX * markdownZoom}px`,
+    "--markdown-small-heading-font-size": `${MARKDOWN_SMALL_HEADING_FONT_SIZE_PX * markdownZoom}px`,
+    "--markdown-code-font-size": `${MARKDOWN_CODE_FONT_SIZE_PX * markdownZoom}px`,
+    "--markdown-table-font-size": `${MARKDOWN_TABLE_FONT_SIZE_PX * markdownZoom}px`,
   } as React.CSSProperties;
 
   return (
@@ -629,7 +782,7 @@ export function MarkdownWorkspace({
       <div
         ref={markdownLayoutRef}
         className={`markdown-layout${isEditing ? " editing" : ""}${markdownSplitResizing ? " markdown-split-resizing" : ""}`}
-        style={markdownSplitStyle}
+        style={markdownLayoutStyle}
       >
         {isEditing && (
           <>
@@ -725,6 +878,46 @@ export function MarkdownWorkspace({
         <span>{wordCount.toLocaleString()} words</span>
         <span>{lineCount.toLocaleString()} lines</span>
         <span>{headings.length.toLocaleString()} headings</span>
+        <div
+          className={`markdown-zoom-controls${markdownZoomAdjusted ? " is-adjusted" : ""}`}
+          aria-label="Markdown zoom controls"
+        >
+          <Button
+            minimal
+            small
+            icon="zoom-out"
+            title={zoomOutTitle}
+            aria-label="Zoom out"
+            disabled={!canZoomOut}
+            onClick={handleZoomOut}
+          />
+          <span
+            className={`markdown-zoom-readout${markdownZoom > MARKDOWN_DEFAULT_ZOOM ? " zoomed-in" : markdownZoom < MARKDOWN_DEFAULT_ZOOM ? " zoomed-out" : ""}`}
+            aria-live="polite"
+            title={markdownZoomStatus}
+          >
+            <Icon icon={markdownZoomIcon} size={13} />
+            {markdownZoomStatus}
+          </span>
+          <Button
+            minimal
+            small
+            icon="zoom-in"
+            title={zoomInTitle}
+            aria-label="Zoom in"
+            disabled={!canZoomIn}
+            onClick={handleZoomIn}
+          />
+          <Button
+            minimal
+            small
+            icon="reset"
+            title={resetZoomTitle}
+            aria-label="Reset zoom"
+            disabled={!markdownZoomAdjusted}
+            onClick={handleResetZoom}
+          />
+        </div>
       </div>
     </div>
   );
