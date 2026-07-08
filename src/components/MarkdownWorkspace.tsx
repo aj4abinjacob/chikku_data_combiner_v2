@@ -923,6 +923,8 @@ export function MarkdownWorkspace({
   const [exporting, setExporting] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusIntent, setStatusIntent] = useState<"success" | "danger" | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<MarkdownHistoryEntry[]>([]);
@@ -958,6 +960,8 @@ export function MarkdownWorkspace({
   const deferredRawText = useDeferredValue(rawText);
   const previewText = isEditing ? deferredRawText : rawText;
   const headings = useMemo(() => extractHeadings(previewText), [previewText]);
+  const statusIcon = statusIntent === "danger" ? "error" : isDirty ? "edit" : "tick-circle";
+  const statusLabel = statusMessage ?? (isDirty ? "Unsaved" : "Saved");
   const trimmedContentSearch = contentSearch.trim();
   const trimmedHeadingSearch = headingSearch.trim();
   const sourceSearchMatches = useMemo(
@@ -1431,6 +1435,8 @@ export function MarkdownWorkspace({
     let disposed = false;
     setLoading(true);
     setLoadError(null);
+    setStatusMessage(null);
+    setStatusIntent(null);
     setIsEditing(false);
     setHistoryOpen(false);
 
@@ -1458,29 +1464,53 @@ export function MarkdownWorkspace({
     };
   }, [table.filePath, table.reloadVersion]);
 
+  useEffect(() => {
+    if (!statusMessage) return;
+    const id = window.setTimeout(() => {
+      setStatusMessage(null);
+      setStatusIntent(null);
+    }, 4000);
+    return () => window.clearTimeout(id);
+  }, [statusMessage]);
+
+  const confirmMarkdownAction = useCallback((message: string, intent: "success" | "danger" = "success") => {
+    setStatusMessage(message);
+    setStatusIntent(intent);
+  }, []);
+
   const handleSave = useCallback(async () => {
     setSaving(true);
+    setStatusMessage(null);
+    setStatusIntent(null);
     try {
       await window.api.writeTextFile(table.filePath, rawText);
       setSavedText(rawText);
       pushHistory("Saved", rawText);
       onReloadTable();
+      confirmMarkdownAction("Saved");
+    } catch (err) {
+      confirmMarkdownAction(`Save failed: ${String(err)}`, "danger");
     } finally {
       setSaving(false);
     }
-  }, [onReloadTable, pushHistory, rawText, table.filePath]);
+  }, [confirmMarkdownAction, onReloadTable, pushHistory, rawText, table.filePath]);
 
   const handleExport = useCallback(async () => {
     setExporting(true);
+    setStatusMessage(null);
+    setStatusIntent(null);
     try {
       const path = await window.api.saveFileDialog(extension.toLowerCase() === "markdown" ? "markdown" : "md");
       if (!path) return;
       await window.api.writeTextFile(path, rawText);
       pushHistory("Exported copy", rawText);
+      confirmMarkdownAction(`Exported copy to ${getFileName(path)}`);
+    } catch (err) {
+      confirmMarkdownAction(`Export failed: ${String(err)}`, "danger");
     } finally {
       setExporting(false);
     }
-  }, [extension, pushHistory, rawText]);
+  }, [confirmMarkdownAction, extension, pushHistory, rawText]);
 
   const handleExportPdf = useCallback(async () => {
     const article = renderedArticleRef.current;
@@ -1488,6 +1518,8 @@ export function MarkdownWorkspace({
 
     let exportRoot: HTMLElement | null = null;
     setExportingPdf(true);
+    setStatusMessage(null);
+    setStatusIntent(null);
 
     try {
       const path = await window.api.saveFileDialog("pdf");
@@ -1516,13 +1548,17 @@ export function MarkdownWorkspace({
       });
 
       const bytes = createPdfBytesFromCanvas(canvas);
-      await window.api.writeBinaryFile(ensurePdfExtension(path), bytes);
+      const pdfPath = ensurePdfExtension(path);
+      await window.api.writeBinaryFile(pdfPath, bytes);
       pushHistory("Exported PDF", rawText);
+      confirmMarkdownAction(`PDF exported to ${getFileName(pdfPath)}`);
+    } catch (err) {
+      confirmMarkdownAction(`PDF export failed: ${String(err)}`, "danger");
     } finally {
       setExportingPdf(false);
       exportRoot?.remove();
     }
-  }, [pushHistory, rawText, table.filePath]);
+  }, [confirmMarkdownAction, pushHistory, rawText, table.filePath]);
 
   const handleRevert = useCallback(() => {
     setRawText(savedText);
@@ -1717,7 +1753,11 @@ export function MarkdownWorkspace({
                   aria-label="Markdown source editor"
                   spellCheck={false}
                   wrap="off"
-                  onChange={(event) => setRawText(event.currentTarget.value)}
+                  onChange={(event) => {
+                    setRawText(event.currentTarget.value);
+                    setStatusMessage(null);
+                    setStatusIntent(null);
+                  }}
                   onScroll={handleSourceScroll}
                 />
               </div>
@@ -1818,9 +1858,9 @@ export function MarkdownWorkspace({
       </div>
 
       <div className="markdown-status-strip">
-        <span>
-          <Icon icon={isDirty ? "edit" : "tick-circle"} size={13} />
-          {isDirty ? "Unsaved" : "Saved"}
+        <span className={`markdown-save-status${statusIntent ? ` is-${statusIntent}` : ""}`} aria-live="polite">
+          <Icon icon={statusIcon} size={13} />
+          {statusLabel}
         </span>
         <span>{wordCount.toLocaleString()} words</span>
         <span>{lineCount.toLocaleString()} lines</span>
