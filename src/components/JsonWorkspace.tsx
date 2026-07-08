@@ -1424,14 +1424,12 @@ export function JsonWorkspace({
       onRevert: handleRevert,
       onToggleHistory: () => setHistoryPanelOpen((prev) => !prev),
       onExportCsv: handleExportCsv,
-      onCopyPath: () => handleCopyPath(selectedPath),
       onCompare: () => setCompareMode(true),
     });
   }, [
     canCompare,
     canExportCsv,
     exporting,
-    handleCopyPath,
     handleExportCsv,
     handleRevert,
     handleSave,
@@ -1443,7 +1441,6 @@ export function JsonWorkspace({
     onFileActionsChange,
     onOpenFiles,
     saving,
-    selectedPath,
   ]);
 
   useEffect(() => {

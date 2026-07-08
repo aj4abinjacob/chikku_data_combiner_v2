@@ -162,7 +162,6 @@ export interface DocumentWorkspaceFileActions {
   onExportCsv?: () => void | Promise<void>;
   onExport?: () => void | Promise<void>;
   onExportPdf?: () => void | Promise<void>;
-  onCopyPath?: () => void | Promise<void>;
   onCompare?: () => void;
   exportLabel?: string;
   exportTitle?: string;

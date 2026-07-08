@@ -621,15 +621,6 @@ export function Sidebar({
               onClick={activeDocumentFileActions.onToggleHistory}
               small
             />
-            {activeDocumentFileActions.onCopyPath && (
-              <Button
-                icon="path"
-                text="Copy Path"
-                onClick={activeDocumentFileActions.onCopyPath}
-                disabled={!activeDocumentFileActions.isValid}
-                small
-              />
-            )}
             {documentExportAction && (
               <Tooltip2
                 content={exportDisabledReason ?? activeDocumentFileActions.exportTitle ?? "Export"}
