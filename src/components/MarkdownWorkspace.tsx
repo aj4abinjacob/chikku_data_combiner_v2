@@ -72,6 +72,9 @@ const MARKDOWN_TABLE_FONT_SIZE_PX = 13;
 const MARKDOWN_WHEEL_ZOOM_THROTTLE_MS = 80;
 const MARKDOWN_SCROLL_SYNC_RELEASE_MS = 120;
 const MARKDOWN_PRINT_ASSET_TIMEOUT_MS = 3000;
+const MARKDOWN_PRINT_ROOT_ID = "markdown-pdf-print-root";
+const MARKDOWN_PRINT_STYLE_ID = "markdown-pdf-print-style";
+const MARKDOWN_PRINT_MODE_CLASS = "markdown-pdf-printing";
 const MARKDOWN_SEARCH_MARK_CLASS = "markdown-search-mark";
 const MARKDOWN_SEARCH_SKIP_TAGS = new Set(["script", "style"]);
 const MARKDOWN_PRINT_STYLES = `
@@ -262,6 +265,38 @@ const MARKDOWN_PRINT_STYLES = `
   .bp4-icon,
   svg {
     display: none;
+  }
+`;
+const MARKDOWN_PRINT_HOST_STYLES = `
+  #${MARKDOWN_PRINT_ROOT_ID} {
+    position: fixed;
+    left: -10000px;
+    top: 0;
+    width: 800px;
+    max-height: 1000px;
+    overflow: hidden;
+    visibility: hidden;
+    pointer-events: none;
+    background: #ffffff;
+  }
+
+  @media print {
+    body.${MARKDOWN_PRINT_MODE_CLASS} > *:not(#${MARKDOWN_PRINT_ROOT_ID}) {
+      display: none !important;
+    }
+
+    body.${MARKDOWN_PRINT_MODE_CLASS} #${MARKDOWN_PRINT_ROOT_ID} {
+      position: static !important;
+      left: auto !important;
+      top: auto !important;
+      width: auto !important;
+      max-height: none !important;
+      overflow: visible !important;
+      visibility: visible !important;
+      pointer-events: auto !important;
+    }
+
+    ${MARKDOWN_PRINT_STYLES}
   }
 `;
 
@@ -606,30 +641,32 @@ function formatMarkdownZoom(zoom: number): string {
   return `${Math.round(zoom * 100)}%`;
 }
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+function ensureMarkdownPrintStyle(): void {
+  let style = document.getElementById(MARKDOWN_PRINT_STYLE_ID) as HTMLStyleElement | null;
+  if (!style) {
+    style = document.createElement("style");
+    style.id = MARKDOWN_PRINT_STYLE_ID;
+    document.head.appendChild(style);
+  }
+  style.textContent = MARKDOWN_PRINT_HOST_STYLES;
 }
 
-function buildMarkdownPrintHtml(contentHtml: string, title: string): string {
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>${escapeHtml(title)}</title>
-    <style>${MARKDOWN_PRINT_STYLES}</style>
-  </head>
-  <body>
-    <article class="markdown-rendered">${contentHtml}</article>
-  </body>
-</html>`;
+function getMarkdownPrintRoot(): HTMLElement {
+  let root = document.getElementById(MARKDOWN_PRINT_ROOT_ID);
+  if (!root) {
+    root = document.createElement("div");
+    root.id = MARKDOWN_PRINT_ROOT_ID;
+    document.body.appendChild(root);
+  }
+  return root;
 }
 
-async function waitForPrintableAssets(printDocument: Document): Promise<void> {
-  const pendingImages = Array.from(printDocument.images).filter((image) => !image.complete);
+function buildMarkdownPrintMarkup(contentHtml: string): string {
+  return `<article class="markdown-rendered">${contentHtml}</article>`;
+}
+
+async function waitForPrintableAssets(container: ParentNode): Promise<void> {
+  const pendingImages = Array.from(container.querySelectorAll("img")).filter((image) => !image.complete);
   if (pendingImages.length === 0) return;
 
   await Promise.race([
@@ -1319,45 +1356,33 @@ export function MarkdownWorkspace({
     const article = renderedArticleRef.current;
     if (!article) return;
 
-    let frame: HTMLIFrameElement | null = null;
+    let printRoot: HTMLElement | null = null;
+    const previousTitle = document.title;
     setExportingPdf(true);
 
     try {
-      frame = document.createElement("iframe");
-      frame.title = "Markdown PDF export";
-      frame.style.position = "fixed";
-      frame.style.left = "-10000px";
-      frame.style.top = "0";
-      frame.style.width = "800px";
-      frame.style.height = "1000px";
-      frame.style.border = "0";
-      frame.style.opacity = "0";
-      frame.style.pointerEvents = "none";
-      document.body.appendChild(frame);
-
-      const printWindow = frame.contentWindow;
-      const printDocument = printWindow?.document;
-      if (!printWindow || !printDocument) {
-        throw new Error("Unable to prepare the Markdown PDF export.");
-      }
-
-      printDocument.open();
-      printDocument.write(buildMarkdownPrintHtml(article.innerHTML, getFileName(table.filePath)));
-      printDocument.close();
-      for (const image of Array.from(printDocument.images)) {
+      ensureMarkdownPrintStyle();
+      printRoot = getMarkdownPrintRoot();
+      printRoot.innerHTML = buildMarkdownPrintMarkup(article.innerHTML);
+      for (const image of Array.from(printRoot.querySelectorAll("img"))) {
         image.loading = "eager";
       }
 
-      await waitForPrintableAssets(printDocument);
+      document.title = getFileName(table.filePath);
+      document.body.classList.add(MARKDOWN_PRINT_MODE_CLASS);
+      await waitForPrintableAssets(printRoot);
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 
-      printWindow.focus();
-      printWindow.print();
+      window.focus();
+      window.print();
       pushHistory("Prepared PDF", rawText);
     } finally {
+      document.body.classList.remove(MARKDOWN_PRINT_MODE_CLASS);
+      document.title = previousTitle;
       setExportingPdf(false);
-      if (frame) {
-        window.setTimeout(() => frame?.remove(), 1000);
+      if (printRoot) {
+        window.setTimeout(() => printRoot?.remove(), 1000);
       }
     }
   }, [pushHistory, rawText, table.filePath]);
