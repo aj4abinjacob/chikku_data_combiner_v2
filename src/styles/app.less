@@ -8366,7 +8366,12 @@ button.dg-stats-metric {
 }
 
 .markdown-layout.editing {
-  grid-template-columns: minmax(240px, 34%) 8px minmax(0, 1fr) clamp(200px, 22vw, 250px);
+  grid-template-columns: minmax(240px, var(--markdown-edit-left, 34%)) 8px minmax(0, 1fr) clamp(200px, 22vw, 250px);
+}
+
+.markdown-layout.markdown-split-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .markdown-editor-pane,
@@ -8413,11 +8418,15 @@ button.dg-stats-metric {
 
 .markdown-edit-divider {
   position: relative;
+  z-index: 4;
   min-width: 8px;
   min-height: 0;
   border-left: 1px solid #e1e8ed;
   border-right: 1px solid #d8e1e8;
   background: #f7f9fb;
+  cursor: col-resize;
+  outline: none;
+  touch-action: none;
 
   &::before {
     content: "";
@@ -8428,6 +8437,13 @@ button.dg-stats-metric {
     width: 2px;
     transform: translateX(-50%);
     background: #bfccd6;
+  }
+
+  &:hover::before,
+  &:focus::before,
+  .markdown-layout.markdown-split-resizing &::before {
+    width: 3px;
+    background: #137cbd;
   }
 }
 
@@ -8440,6 +8456,7 @@ button.dg-stats-metric {
   min-height: 0;
   overflow: auto;
   scrollbar-gutter: stable;
+  scroll-behavior: smooth;
 }
 
 .markdown-rendered {
@@ -8854,7 +8871,7 @@ button.dg-stats-metric {
   }
 
   .markdown-layout.editing {
-    grid-template-columns: minmax(230px, 36%) 8px minmax(0, 1fr);
+    grid-template-columns: minmax(230px, var(--markdown-edit-left, 36%)) 8px minmax(0, 1fr);
 
     .markdown-outline {
       display: none;
@@ -14735,6 +14752,12 @@ html.dark-theme #root {
 
   .markdown-edit-divider::before {
     background: @dark-border-1;
+  }
+
+  .markdown-edit-divider:hover::before,
+  .markdown-edit-divider:focus::before,
+  .markdown-layout.markdown-split-resizing .markdown-edit-divider::before {
+    background: @dark-accent;
   }
 
   .markdown-pane-header strong,

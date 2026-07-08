@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Callout, Icon, Intent } from "@blueprintjs/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import ReactMarkdown from "react-markdown";
@@ -38,6 +38,12 @@ const markdownSanitizeSchema = {
 
 const WEB_IMAGE_SRC_PATTERN = /^(?:https?:|data:|blob:|asset:|tauri:)/i;
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/;
+const MARKDOWN_SPLIT_DIVIDER_PX = 8;
+const MARKDOWN_SPLIT_EDITOR_MIN_PX = 240;
+const MARKDOWN_SPLIT_PREVIEW_MIN_PX = 280;
+const MARKDOWN_SPLIT_KEY_STEP = 4;
+const MARKDOWN_SPLIT_MIN_PERCENT = 22;
+const MARKDOWN_SPLIT_MAX_PERCENT = 78;
 
 function getFileExtension(filePath: string): string {
   return filePath.split(".").pop()?.toUpperCase() || "MD";
@@ -202,7 +208,7 @@ function buildHeadingIdQueues(headings: MarkdownHeading[]): Map<string, string[]
   return queues;
 }
 
-function MarkdownPreview({
+const MarkdownPreview = React.memo(function MarkdownPreview({
   text,
   headings,
   filePath,
@@ -272,7 +278,7 @@ function MarkdownPreview({
       {text}
     </ReactMarkdown>
   );
-}
+});
 
 export function MarkdownWorkspace({
   table,
@@ -289,20 +295,138 @@ export function MarkdownWorkspace({
   const [isEditing, setIsEditing] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<MarkdownHistoryEntry[]>([]);
-  const [rawScrollTop, setRawScrollTop] = useState(0);
+  const [markdownSplitPercent, setMarkdownSplitPercent] = useState(34);
+  const [markdownSplitResizing, setMarkdownSplitResizing] = useState(false);
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
   const nextHistoryId = useRef(1);
+  const markdownLayoutRef = useRef<HTMLDivElement>(null);
   const previewScrollRef = useRef<HTMLDivElement>(null);
+  const lineNumbersInnerRef = useRef<HTMLDivElement>(null);
+  const lineNumberScrollTopRef = useRef(0);
+  const lineNumberScrollFrameRef = useRef<number | null>(null);
+  const splitPointerIdRef = useRef<number | null>(null);
 
   const extension = getFileExtension(table.filePath);
   const isDirty = rawText !== savedText;
   const lineCount = rawText.length === 0 ? 0 : rawText.split(/\r\n|\r|\n/).length;
   const wordCount = useMemo(() => countWords(rawText), [rawText]);
-  const headings = useMemo(() => extractHeadings(rawText), [rawText]);
+  const deferredRawText = useDeferredValue(rawText);
+  const previewText = isEditing ? deferredRawText : rawText;
+  const headings = useMemo(() => extractHeadings(previewText), [previewText]);
   const lineNumbers = useMemo(
     () => Array.from({ length: Math.max(lineCount, 1) }, (_, index) => index + 1),
     [lineCount]
   );
+
+  const updateLineNumbersScroll = useCallback((scrollTop: number) => {
+    lineNumberScrollTopRef.current = scrollTop;
+    if (lineNumberScrollFrameRef.current !== null) return;
+
+    lineNumberScrollFrameRef.current = window.requestAnimationFrame(() => {
+      lineNumberScrollFrameRef.current = null;
+      if (lineNumbersInnerRef.current) {
+        lineNumbersInnerRef.current.style.transform = `translateY(-${lineNumberScrollTopRef.current}px)`;
+      }
+    });
+  }, []);
+
+  useEffect(() => () => {
+    if (lineNumberScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(lineNumberScrollFrameRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    lineNumberScrollTopRef.current = 0;
+    if (lineNumbersInnerRef.current) {
+      lineNumbersInnerRef.current.style.transform = "translateY(0px)";
+    }
+  }, [isEditing, table.filePath, table.reloadVersion]);
+
+  useEffect(() => {
+    if (!markdownSplitResizing) return;
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    return () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [markdownSplitResizing]);
+
+  const getMarkdownSplitBounds = useCallback(() => {
+    const container = markdownLayoutRef.current;
+    if (!container) return null;
+
+    const rect = container.getBoundingClientRect();
+    if (rect.width <= 0) return null;
+
+    const outline = container.querySelector<HTMLElement>(".markdown-outline");
+    const outlineWidth = outline && window.getComputedStyle(outline).display !== "none"
+      ? outline.getBoundingClientRect().width
+      : 0;
+    const availableMaxLeftPx = rect.width - MARKDOWN_SPLIT_DIVIDER_PX - outlineWidth - MARKDOWN_SPLIT_PREVIEW_MIN_PX;
+    const minLeftPx = Math.min(MARKDOWN_SPLIT_EDITOR_MIN_PX, Math.max(0, availableMaxLeftPx));
+    const maxLeftPx = Math.max(minLeftPx, availableMaxLeftPx);
+
+    return { rect, minLeftPx, maxLeftPx };
+  }, []);
+
+  const updateMarkdownSplitFromPointer = useCallback((clientX: number) => {
+    const bounds = getMarkdownSplitBounds();
+    if (!bounds) return;
+
+    const leftPx = Math.min(
+      bounds.maxLeftPx,
+      Math.max(bounds.minLeftPx, clientX - bounds.rect.left)
+    );
+    setMarkdownSplitPercent((leftPx / bounds.rect.width) * 100);
+  }, [getMarkdownSplitBounds]);
+
+  const finishMarkdownSplitResize = useCallback((event?: React.PointerEvent<HTMLDivElement>) => {
+    if (event && splitPointerIdRef.current !== event.pointerId) return;
+    if (event?.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    splitPointerIdRef.current = null;
+    setMarkdownSplitResizing(false);
+  }, []);
+
+  const handleMarkdownSplitPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    splitPointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setMarkdownSplitResizing(true);
+    updateMarkdownSplitFromPointer(event.clientX);
+  }, [updateMarkdownSplitFromPointer]);
+
+  const handleMarkdownSplitPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (splitPointerIdRef.current !== event.pointerId) return;
+    event.preventDefault();
+    updateMarkdownSplitFromPointer(event.clientX);
+  }, [updateMarkdownSplitFromPointer]);
+
+  const handleMarkdownSplitKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+
+    const direction = event.key === "ArrowLeft" ? -1 : 1;
+    setMarkdownSplitPercent((prev) => {
+      const target = prev + direction * MARKDOWN_SPLIT_KEY_STEP;
+      const bounds = getMarkdownSplitBounds();
+      if (!bounds) {
+        return Math.min(MARKDOWN_SPLIT_MAX_PERCENT, Math.max(MARKDOWN_SPLIT_MIN_PERCENT, target));
+      }
+
+      const targetPx = (target / 100) * bounds.rect.width;
+      const clampedPx = Math.min(bounds.maxLeftPx, Math.max(bounds.minLeftPx, targetPx));
+      return (clampedPx / bounds.rect.width) * 100;
+    });
+  }, [getMarkdownSplitBounds]);
 
   useEffect(() => {
     if (headings.length === 0) {
@@ -338,7 +462,7 @@ export function MarkdownWorkspace({
     }
 
     return () => observer.disconnect();
-  }, [headings, rawText]);
+  }, [headings, previewText]);
 
   const pushHistory = useCallback((label: string, text: string) => {
     setHistory((prev) => [
@@ -490,6 +614,9 @@ export function MarkdownWorkspace({
       </div>
     </aside>
   ) : null;
+  const markdownSplitStyle = {
+    "--markdown-edit-left": `${markdownSplitPercent}%`,
+  } as React.CSSProperties;
 
   return (
     <div className={`markdown-workspace${isEditing ? " is-editing" : ""}`}>
@@ -499,7 +626,11 @@ export function MarkdownWorkspace({
         </Callout>
       )}
 
-      <div className={`markdown-layout${isEditing ? " editing" : ""}`}>
+      <div
+        ref={markdownLayoutRef}
+        className={`markdown-layout${isEditing ? " editing" : ""}${markdownSplitResizing ? " markdown-split-resizing" : ""}`}
+        style={markdownSplitStyle}
+      >
         {isEditing && (
           <>
             <section className="markdown-editor-pane">
@@ -509,7 +640,7 @@ export function MarkdownWorkspace({
               </div>
               <div className="json-editor markdown-source-editor">
                 <div className="json-line-numbers">
-                  <div className="json-line-numbers-inner" style={{ transform: `translateY(-${rawScrollTop}px)` }}>
+                  <div className="json-line-numbers-inner" ref={lineNumbersInnerRef}>
                     {lineNumbers.map((n) => <span key={n}>{n}</span>)}
                   </div>
                 </div>
@@ -520,11 +651,25 @@ export function MarkdownWorkspace({
                   spellCheck={false}
                   wrap="off"
                   onChange={(event) => setRawText(event.currentTarget.value)}
-                  onScroll={(event) => setRawScrollTop(event.currentTarget.scrollTop)}
+                  onScroll={(event) => updateLineNumbersScroll(event.currentTarget.scrollTop)}
                 />
               </div>
             </section>
-            <div className="markdown-edit-divider" aria-hidden="true" />
+            <div
+              className="markdown-edit-divider"
+              role="separator"
+              aria-label="Resize markdown editor and preview"
+              aria-orientation="vertical"
+              aria-valuemin={MARKDOWN_SPLIT_MIN_PERCENT}
+              aria-valuemax={MARKDOWN_SPLIT_MAX_PERCENT}
+              aria-valuenow={Math.round(markdownSplitPercent)}
+              tabIndex={0}
+              onPointerDown={handleMarkdownSplitPointerDown}
+              onPointerMove={handleMarkdownSplitPointerMove}
+              onPointerUp={finishMarkdownSplitResize}
+              onPointerCancel={finishMarkdownSplitResize}
+              onKeyDown={handleMarkdownSplitKeyDown}
+            />
           </>
         )}
 
@@ -536,7 +681,7 @@ export function MarkdownWorkspace({
               </div>
             ) : (
               <article className="markdown-rendered">
-                <MarkdownPreview text={rawText} headings={headings} filePath={table.filePath} />
+                <MarkdownPreview text={previewText} headings={headings} filePath={table.filePath} />
               </article>
             )}
           </div>
