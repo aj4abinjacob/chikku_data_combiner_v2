@@ -52,6 +52,11 @@
         "role": "Viewer"
       },
       {
+        "ext": ["md", "markdown"],
+        "name": "Markdown File",
+        "role": "Viewer"
+      },
+      {
         "ext": ["parquet"],
         "name": "Parquet File",
         "role": "Viewer"

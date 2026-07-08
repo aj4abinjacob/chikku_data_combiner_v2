@@ -30,15 +30,18 @@ const filterMap: Record<string, { name: string; extensions: string[] }[]> = {
   csv: [{ name: "CSV Files", extensions: ["csv"] }],
   tsv: [{ name: "TSV Files", extensions: ["tsv"] }],
   json: [{ name: "JSON Files", extensions: ["json"] }],
+  md: [{ name: "Markdown Files", extensions: ["md", "markdown"] }],
+  markdown: [{ name: "Markdown Files", extensions: ["md", "markdown"] }],
   parquet: [{ name: "Parquet Files", extensions: ["parquet"] }],
   xlsx: [{ name: "Excel Files", extensions: ["xlsx"] }],
   xls: [{ name: "Excel Files", extensions: ["xls"] }],
 };
 
 const dataFileFilters = [
-  { name: "Data Files", extensions: ["csv", "tsv", "json", "jsonl", "ndjson", "parquet", "xlsx", "xls"] },
+  { name: "Data Files", extensions: ["csv", "tsv", "json", "jsonl", "ndjson", "md", "markdown", "parquet", "xlsx", "xls"] },
   { name: "CSV / TSV", extensions: ["csv", "tsv"] },
   { name: "JSON", extensions: ["json", "jsonl", "ndjson"] },
+  { name: "Markdown", extensions: ["md", "markdown"] },
   { name: "Parquet", extensions: ["parquet"] },
   { name: "Excel", extensions: ["xlsx", "xls"] },
 ];

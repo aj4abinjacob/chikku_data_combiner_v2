@@ -6,7 +6,9 @@ use tauri::menu::{
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_dialog::DialogExt;
 
-const DATA_EXTS: &[&str] = &["csv", "tsv", "json", "jsonl", "ndjson", "parquet", "xlsx", "xls"];
+const DATA_EXTS: &[&str] = &[
+    "csv", "tsv", "json", "jsonl", "ndjson", "md", "markdown", "parquet", "xlsx", "xls",
+];
 
 #[derive(Default)]
 pub struct MenuState {
@@ -137,6 +139,7 @@ fn pick_and_emit<R: Runtime>(app: &AppHandle<R>, event: &'static str) {
         .add_filter("Data Files", DATA_EXTS)
         .add_filter("CSV / TSV", &["csv", "tsv"])
         .add_filter("JSON", &["json", "jsonl", "ndjson"])
+        .add_filter("Markdown", &["md", "markdown"])
         .add_filter("Parquet", &["parquet"])
         .add_filter("Excel", &["xlsx", "xls"])
         .pick_files(move |paths| {

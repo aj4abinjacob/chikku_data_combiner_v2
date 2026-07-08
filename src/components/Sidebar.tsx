@@ -44,11 +44,12 @@ interface SidebarProps {
   onOpenFiles: () => void;
   onHide: () => void;
   jsonWorkspaceActive?: boolean;
+  markdownWorkspaceActive?: boolean;
   jsonFileActions?: JsonWorkspaceFileActions | null;
 }
 
 type FileListIcon = {
-  icon: "array" | "panel-table" | "th-derived";
+  icon: "array" | "document" | "panel-table" | "th-derived";
   className: string;
 };
 
@@ -61,6 +62,15 @@ function isJsonTable(table: LoadedTable): boolean {
   return extension === "json" || extension === "jsonl" || extension === "ndjson";
 }
 
+function isMarkdownTable(table: LoadedTable): boolean {
+  const extension = getFileExtension(table.filePath);
+  return extension === "md" || extension === "markdown";
+}
+
+function isTextWorkspaceTable(table: LoadedTable): boolean {
+  return isJsonTable(table) || isMarkdownTable(table);
+}
+
 function getFileListIcon(table: LoadedTable): FileListIcon {
   if (table.filePath.startsWith("(")) {
     return { icon: "th-derived", className: "table-icon-generated" };
@@ -70,8 +80,25 @@ function getFileListIcon(table: LoadedTable): FileListIcon {
   if (extension === "json" || extension === "jsonl" || extension === "ndjson") {
     return { icon: "array", className: "table-icon-json" };
   }
+  if (extension === "md" || extension === "markdown") {
+    return { icon: "document", className: "table-icon-markdown" };
+  }
 
   return { icon: "panel-table", className: "table-icon-tabular" };
+}
+
+function getFileMetricLabel(table: LoadedTable): string {
+  if (isMarkdownTable(table)) {
+    return table.rowCount.toLocaleString() + " line" + (table.rowCount === 1 ? "" : "s");
+  }
+  return table.rowCount.toLocaleString() + " rows";
+}
+
+function getFileListLabel(table: LoadedTable): string {
+  if (isMarkdownTable(table) && !table.filePath.startsWith("(")) {
+    return table.filePath.split(/[/\\]/).pop() || table.tableName;
+  }
+  return table.tableName;
 }
 
 function getJsonExportCsvDisabledReason(actions: JsonWorkspaceFileActions): string | null {
@@ -111,6 +138,7 @@ export function Sidebar({
   onOpenFiles,
   onHide,
   jsonWorkspaceActive = false,
+  markdownWorkspaceActive = false,
   jsonFileActions = null,
 }: SidebarProps): React.ReactElement {
   const [dataOpDialogOpen, setDataOpDialogOpen] = useState(false);
@@ -126,7 +154,10 @@ export function Sidebar({
   // Drag-and-drop state
   const dragIndexRef = React.useRef<number | null>(null);
   const [dropTarget, setDropTarget] = useState<{ index: number; position: "top" | "bottom" } | null>(null);
-  const combinableTables = useMemo(() => tables.filter((table) => !isJsonTable(table)), [tables]);
+  const documentWorkspaceActive = jsonWorkspaceActive || markdownWorkspaceActive;
+  const workspaceLabel = markdownWorkspaceActive ? "Markdown" : "JSON";
+  const combinableTables = useMemo(() => tables.filter((table) => !isTextWorkspaceTable(table)), [tables]);
+  const comparableTables = useMemo(() => tables.filter((table) => table.schema.length > 0), [tables]);
   const combinableTableNames = useMemo(
     () => new Set(combinableTables.map((table) => table.tableName)),
     [combinableTables]
@@ -153,7 +184,7 @@ export function Sidebar({
   }, [tables, tableSearch]);
 
   const toggleCombineSelection = (tableName: string) => {
-    if (jsonWorkspaceActive) return;
+    if (documentWorkspaceActive) return;
     if (!combinableTableNames.has(tableName)) return;
 
     setSelectedForCombine((prev) => {
@@ -250,19 +281,19 @@ export function Sidebar({
   const allVisible = visibleColumns.length === allColumnNames.length;
   const noneVisible = visibleColumns.length === 0;
   const visibleColumnCount = visibleColumns.length;
-  const compareDisabled = tables.length < 2;
+  const compareDisabled = comparableTables.length < 2;
   const exportCsvDisabledReason = jsonFileActions
     ? getJsonExportCsvDisabledReason(jsonFileActions)
     : null;
-  const combineSelectionDisabledReason = jsonWorkspaceActive
-    ? "Combine selection is unavailable in JSON view."
+  const combineSelectionDisabledReason = documentWorkspaceActive
+    ? "Combine selection is unavailable in " + workspaceLabel + " view."
     : null;
-  const combineDisabledReason = jsonWorkspaceActive
-    ? "Combine is unavailable in JSON view. Switch to a tabular file to combine non-JSON files."
+  const combineDisabledReason = documentWorkspaceActive
+    ? "Combine is unavailable in " + workspaceLabel + " view. Switch to a tabular file to combine data files."
     : combinableTables.length < 2
-      ? "Open at least two non-JSON files to combine."
+      ? "Open at least two tabular files to combine."
       : selectedForCombine.size < 2
-        ? "Select at least two non-JSON files to combine."
+        ? "Select at least two tabular files to combine."
         : null;
   const selectAllForCombineDisabled = !!combineSelectionDisabledReason
     || selectedForCombine.size === combinableTables.length;
@@ -270,7 +301,7 @@ export function Sidebar({
     || selectedForCombine.size === 0;
 
   return (
-    <div className={`sidebar${jsonWorkspaceActive ? " sidebar-json" : ""}`}>
+    <div className={`sidebar${documentWorkspaceActive ? " sidebar-document" : ""}${jsonWorkspaceActive ? " sidebar-json" : ""}`}>
       {/* Loaded files */}
       <div className="sidebar-section sidebar-section-tables">
         <div className="sidebar-section-header">
@@ -315,12 +346,13 @@ export function Sidebar({
         )}
         {filteredTables.map((t) => {
           const fileIcon = getFileListIcon(t);
+          const fileLabel = getFileListLabel(t);
           const canCombineTable = combinableTableNames.has(t.tableName);
-          const rowCombineSelectionDisabledReason = jsonWorkspaceActive
-            ? "Combine selection is unavailable in JSON view."
+          const rowCombineSelectionDisabledReason = documentWorkspaceActive
+            ? "Combine selection is unavailable in " + workspaceLabel + " view."
             : canCombineTable
               ? null
-              : "JSON files cannot be selected for combine.";
+              : "Text workspace files cannot be selected for combine.";
           const combineCheckbox = (
             <Checkbox
               checked={selectedForCombine.has(t.tableName)}
@@ -335,7 +367,7 @@ export function Sidebar({
               key={t.tableName}
               className={`table-list-item${t.tableName === activeTable ? " active" : ""}${selectedForCombine.has(t.tableName) ? " selected" : ""}`}
             >
-              {tables.length >= 2 && (
+              {comparableTables.length >= 2 && (
                 rowCombineSelectionDisabledReason ? (
                   <Tooltip2
                     content={rowCombineSelectionDisabledReason}
@@ -351,15 +383,15 @@ export function Sidebar({
               <span
                 className="table-main"
                 onClick={() => onSelectTable(t.tableName)}
-                title={t.tableName}
+                title={fileLabel}
               >
                 <span className={`table-icon ${fileIcon.className}`}>
                   <Icon icon={fileIcon.icon} size={12} />
                 </span>
                 <span className="table-text">
-                  <span className="table-name">{t.tableName}</span>
+                  <span className="table-name">{fileLabel}</span>
                   <span className="row-count">
-                    {t.rowCount.toLocaleString()} rows
+                    {getFileMetricLabel(t)}
                   </span>
                 </span>
               </span>
@@ -387,7 +419,7 @@ export function Sidebar({
           </div>
           <div className="combine-select-actions">
             <Tooltip2
-              content={combineSelectionDisabledReason ?? "Select all non-JSON files"}
+              content={combineSelectionDisabledReason ?? "Select all tabular files"}
               disabled={!combineSelectionDisabledReason}
               placement="top"
               minimal
@@ -530,7 +562,7 @@ export function Sidebar({
       )}
 
       {/* Column visibility */}
-      {!jsonWorkspaceActive && schema.length > 0 && (
+      {!documentWorkspaceActive && schema.length > 0 && (
         <div className="sidebar-section sidebar-section-columns">
           <div className="column-header-row">
             <div className="sidebar-heading-block">
@@ -685,7 +717,7 @@ export function Sidebar({
       )}
 
       {/* Data operation + filter buttons */}
-      {!jsonWorkspaceActive && activeTable && schema.length > 0 && (
+      {!documentWorkspaceActive && activeTable && schema.length > 0 && (
         <div className="sidebar-section sidebar-actions">
           <Button
             icon="grouped-bar-chart"
@@ -803,7 +835,7 @@ export function Sidebar({
         onClose={() => setMergeDialogOpen(false)}
         activeTable={activeTable}
         schema={schema}
-        tables={tables}
+        tables={comparableTables}
         onExecute={onLookupMerge}
       />
 
@@ -812,7 +844,7 @@ export function Sidebar({
         onClose={() => setDateConvDialogOpen(false)}
         activeTable={activeTable}
         schema={schema}
-        tables={tables}
+        tables={comparableTables}
         onApply={onDataOperation}
       />
     </div>

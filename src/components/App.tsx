@@ -15,6 +15,7 @@ import { ExportDialog } from "./ExportDialog";
 import { HistoryDialog } from "./HistoryDialog";
 import { UpdateNotice } from "./UpdateNotice";
 import { JsonWorkspace } from "./JsonWorkspace";
+import { MarkdownWorkspace } from "./MarkdownWorkspace";
 import { buildColumnStatsSummaryQuery, buildColumnTopValuesQuery, buildColumnUniqueValuesQuery, buildCombineQuery } from "../utils/sqlBuilder";
 import { buildColOpUpdateSQL, buildStepDescription } from "../utils/colOpsSQL";
 import { buildRowOpSQL, buildRowOpStepDescription } from "../utils/rowOpsSQL";
@@ -26,7 +27,7 @@ const FILTER_PANEL_EXIT_MS = 180;
 const DEFAULT_DISPLAY_DECIMAL_PLACES = 4;
 const MIN_DISPLAY_DECIMAL_PLACES = 0;
 const MAX_DISPLAY_DECIMAL_PLACES = 10;
-const SUPPORTED_DATA_EXTENSIONS = new Set(["csv", "tsv", "json", "jsonl", "ndjson", "parquet", "xlsx", "xls"]);
+const SUPPORTED_DATA_EXTENSIONS = new Set(["csv", "tsv", "json", "jsonl", "ndjson", "md", "markdown", "parquet", "xlsx", "xls"]);
 
 function makeTableName(filePath: string): string {
   const name = filePath.split(/[/\\]/).pop() || "table";
@@ -69,8 +70,17 @@ function isJsonFilePath(filePath: string): boolean {
   return ext === "json" || ext === "jsonl" || ext === "ndjson";
 }
 
+function isMarkdownFilePath(filePath: string): boolean {
+  const ext = getFileExtension(filePath);
+  return ext === "md" || ext === "markdown";
+}
+
+function isTextWorkspaceFilePath(filePath: string): boolean {
+  return isJsonFilePath(filePath) || isMarkdownFilePath(filePath);
+}
+
 function isCombinableTable(table: LoadedTable): boolean {
-  return !isJsonFilePath(table.filePath);
+  return !isTextWorkspaceFilePath(table.filePath);
 }
 
 function refreshedTable(previous: LoadedTable, next: LoadedTable): LoadedTable {
@@ -129,6 +139,10 @@ function estimateJsonRowCount(text: string, filePath: string): number {
   } catch (_) {
     return 0;
   }
+}
+
+function estimateTextLineCount(text: string): number {
+  return text.length === 0 ? 0 : text.split(/\r\n|\r|\n/).length;
 }
 
 /** Generate a unique "combined_N" table name that doesn't collide with existing tables */
@@ -342,9 +356,18 @@ export function App(): React.ReactElement {
     [activeTable, tables]
   );
 
+  const sqlBackedTables = useMemo(
+    () => tables.filter((table) => table.filePath.startsWith("(") || !isTextWorkspaceFilePath(table.filePath)),
+    [tables]
+  );
+
   const jsonWorkspaceActive = !!activeLoadedTable
     && !activeLoadedTable.filePath.startsWith("(")
     && isJsonFilePath(activeLoadedTable.filePath);
+  const markdownWorkspaceActive = !!activeLoadedTable
+    && !activeLoadedTable.filePath.startsWith("(")
+    && isMarkdownFilePath(activeLoadedTable.filePath);
+  const textWorkspaceActive = jsonWorkspaceActive || markdownWorkspaceActive;
 
   const handleGetColumnStats = useCallback(
     async (column: string): Promise<ColumnStats> => {
@@ -426,7 +449,7 @@ export function App(): React.ReactElement {
   const { totalRows, getRow, ensureRange } = useChunkCache({
     tableName: activeTable,
     viewState,
-    enabled: viewState.visibleColumns.length > 0 && !pivotActive && !jsonWorkspaceActive && !comparisonActive,
+    enabled: viewState.visibleColumns.length > 0 && !pivotActive && !textWorkspaceActive && !comparisonActive,
     dataVersion,
   });
 
@@ -444,7 +467,7 @@ export function App(): React.ReactElement {
     tableName: activeTable,
     viewState,
     schema,
-    enabled: viewState.visibleColumns.length > 0 && pivotActive && !jsonWorkspaceActive,
+    enabled: viewState.visibleColumns.length > 0 && pivotActive && !textWorkspaceActive,
     dataVersion,
   });
 
@@ -615,7 +638,7 @@ export function App(): React.ReactElement {
     []
   );
 
-  const loadJsonWorkspaceFile = useCallback(
+  const loadTextWorkspaceFile = useCallback(
     async (fp: string, tableName: string): Promise<LoadedTable | null> => {
       try {
         const text = await window.api.readTextFile(fp);
@@ -623,10 +646,10 @@ export function App(): React.ReactElement {
           tableName,
           filePath: fp,
           schema: [],
-          rowCount: estimateJsonRowCount(text, fp),
+          rowCount: isJsonFilePath(fp) ? estimateJsonRowCount(text, fp) : estimateTextLineCount(text),
         };
       } catch (err) {
-        console.error(`Failed to open JSON ${fp}:`, err);
+        console.error(`Failed to open text workspace file ${fp}:`, err);
         return null;
       }
     },
@@ -664,8 +687,8 @@ export function App(): React.ReactElement {
         if (existingIndexes.length > 0) {
           for (const index of existingIndexes) {
             const existingTable = newTables[index];
-            const result = isJsonFilePath(existingTable.filePath)
-              ? await loadJsonWorkspaceFile(existingTable.filePath, existingTable.tableName)
+            const result = isTextWorkspaceFilePath(existingTable.filePath)
+              ? await loadTextWorkspaceFile(existingTable.filePath, existingTable.tableName)
               : await loadSingleFile(
                   existingTable.filePath,
                   existingTable.tableName,
@@ -695,9 +718,9 @@ export function App(): React.ReactElement {
           continue;
         }
 
-        if (isJsonFilePath(fp)) {
+        if (isTextWorkspaceFilePath(fp)) {
           const tableName = makeUniqueTableName(makeTableName(fp), tableNames);
-          const result = await loadJsonWorkspaceFile(fp, tableName);
+          const result = await loadTextWorkspaceFile(fp, tableName);
           if (result) {
             newTables.push(result);
             nextActiveTable = result.tableName;
@@ -773,7 +796,7 @@ export function App(): React.ReactElement {
         refreshExisting
       );
     },
-    [loadSingleFile, loadJsonWorkspaceFile, finalizeLoadedTables]
+    [loadSingleFile, loadTextWorkspaceFile, finalizeLoadedTables]
   );
 
   // Handle Excel sheet picker result
@@ -872,16 +895,18 @@ export function App(): React.ReactElement {
     setResetKey((k) => k + 1);
   }, [activeTable, schema]);
 
-  const handleReloadActiveJsonTable = useCallback(async () => {
+  const handleReloadActiveTextTable = useCallback(async () => {
     const currentTableName = activeTableRef.current;
     if (!currentTableName) return;
     const currentTable = tablesRef.current.find((t) => t.tableName === currentTableName);
     if (!currentTable) return;
 
-    if (isJsonFilePath(currentTable.filePath)) {
+    if (isTextWorkspaceFilePath(currentTable.filePath)) {
       try {
         const text = await window.api.readTextFile(currentTable.filePath);
-        const rowCount = estimateJsonRowCount(text, currentTable.filePath);
+        const rowCount = isJsonFilePath(currentTable.filePath)
+          ? estimateJsonRowCount(text, currentTable.filePath)
+          : estimateTextLineCount(text);
         setTables((prev) =>
           prev.map((table) =>
             table.tableName === currentTable.tableName
@@ -892,7 +917,7 @@ export function App(): React.ReactElement {
         setDataVersion((v) => v + 1);
         setResetKey((k) => k + 1);
       } catch (err) {
-        console.error(`Failed to refresh JSON ${currentTable.filePath}:`, err);
+        console.error(`Failed to refresh text workspace file ${currentTable.filePath}:`, err);
       }
       return;
     }
@@ -922,6 +947,11 @@ export function App(): React.ReactElement {
     window.api.onOpenFiles((filePaths) => loadFiles(filePaths, false));
     window.api.onAddFiles((filePaths) => loadFiles(filePaths, false));
     window.api.onExportCSV(() => {
+      const currentTableName = activeTableRef.current;
+      const currentTable = currentTableName
+        ? tablesRef.current.find((table) => table.tableName === currentTableName)
+        : null;
+      if (currentTable && isTextWorkspaceFilePath(currentTable.filePath)) return;
       setExportDialogOpen(true);
     });
     window.api.onSetDarkMode((isDark) => {
@@ -1005,8 +1035,8 @@ export function App(): React.ReactElement {
   }, [filterPanelOpen, filterPanelMounted]);
 
   useEffect(() => {
-    if (jsonWorkspaceActive) setFilterPanelOpen(false);
-  }, [jsonWorkspaceActive]);
+    if (textWorkspaceActive) setFilterPanelOpen(false);
+  }, [textWorkspaceActive]);
 
   // When active table changes, refresh schema and reset columns
   useEffect(() => {
@@ -1019,7 +1049,7 @@ export function App(): React.ReactElement {
     }
 
     const currentTable = tablesRef.current.find((table) => table.tableName === activeTable);
-    if (currentTable && !currentTable.filePath.startsWith("(") && isJsonFilePath(currentTable.filePath)) {
+    if (currentTable && !currentTable.filePath.startsWith("(") && isTextWorkspaceFilePath(currentTable.filePath)) {
       setSchema([]);
       setComparisonConfig(null);
       setFilterPanelOpen(false);
@@ -2248,7 +2278,7 @@ export function App(): React.ReactElement {
         </div>
       )}
       <div className="main-layout">
-        <div className={`sidebar-shell${sidebarVisible ? " sidebar-shell-open" : " sidebar-shell-collapsed"}${jsonWorkspaceActive ? " sidebar-shell-json" : ""}`}>
+        <div className={`sidebar-shell${sidebarVisible ? " sidebar-shell-open" : " sidebar-shell-collapsed"}${textWorkspaceActive ? " sidebar-shell-document" : ""}${jsonWorkspaceActive ? " sidebar-shell-json" : ""}`}>
           <div className="sidebar-shell-panel" aria-hidden={!sidebarVisible}>
             <Sidebar
               tables={tables}
@@ -2295,6 +2325,7 @@ export function App(): React.ReactElement {
               onOpenFiles={handleChooseFiles}
               onHide={() => setSidebarVisible(false)}
               jsonWorkspaceActive={jsonWorkspaceActive}
+              markdownWorkspaceActive={markdownWorkspaceActive}
               jsonFileActions={jsonFileActions}
             />
           </div>
@@ -2318,8 +2349,14 @@ export function App(): React.ReactElement {
                   table={activeLoadedTable}
                   jsonTables={tables.filter((loadedTable) => !loadedTable.filePath.startsWith("(") && isJsonFilePath(loadedTable.filePath))}
                   onOpenFiles={handleChooseFiles}
-                  onReloadTable={handleReloadActiveJsonTable}
+                  onReloadTable={handleReloadActiveTextTable}
                   onFileActionsChange={setJsonFileActions}
+                />
+              ) : markdownWorkspaceActive && activeLoadedTable ? (
+                <MarkdownWorkspace
+                  table={activeLoadedTable}
+                  onOpenFiles={handleChooseFiles}
+                  onReloadTable={handleReloadActiveTextTable}
                 />
               ) : comparisonActive && comparisonConfig && activeTable ? (
                 <ComparisonView
@@ -2428,7 +2465,7 @@ export function App(): React.ReactElement {
                 <div className="welcome-copy">
                   <span className="welcome-kicker">No files loaded</span>
                   <h2>Open a data file</h2>
-                  <p>CSV, TSV, Excel, JSON, and Parquet files are ready to load.</p>
+                  <p>CSV, TSV, Excel, JSON, Markdown, and Parquet files are ready to load.</p>
                 </div>
                 <div className="welcome-actions">
                   <Button
@@ -2466,7 +2503,8 @@ export function App(): React.ReactElement {
           )}
         </div>
       </div>
-      <StatusBar
+      {!textWorkspaceActive && (
+        <StatusBar
         totalRows={
           comparisonActive
             ? activeLoadedTable?.rowCount ?? 0
@@ -2494,6 +2532,7 @@ export function App(): React.ReactElement {
         filterEnabled={!jsonWorkspaceActive}
         showRowSummary={!jsonWorkspaceActive}
       />
+      )}
       <CombineDialog
         isOpen={combineDialogOpen}
         tables={tables.filter(
@@ -2505,8 +2544,8 @@ export function App(): React.ReactElement {
       <ExportDialog
         isOpen={exportDialogOpen}
         onClose={() => setExportDialogOpen(false)}
-        tables={tables}
-        activeTable={activeTable}
+        tables={sqlBackedTables}
+        activeTable={sqlBackedTables.some((table) => table.tableName === activeTable) ? activeTable : null}
         viewState={viewState}
         schema={schema}
       />

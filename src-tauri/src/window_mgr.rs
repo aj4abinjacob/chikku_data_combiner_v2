@@ -9,7 +9,7 @@ use tauri::TitleBarStyle;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const SUPPORTED_EXTS: &[&str] = &[
-    "csv", "tsv", "json", "jsonl", "ndjson", "parquet", "xlsx", "xls",
+    "csv", "tsv", "json", "jsonl", "ndjson", "md", "markdown", "parquet", "xlsx", "xls",
 ];
 
 pub fn is_supported(path: &str) -> bool {
