@@ -1,7 +1,10 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Callout, Icon, Intent } from "@blueprintjs/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import * as html2canvasPro from "html2canvas-pro";
+// html2canvas-pro's package root can resolve to a non-callable shape in the webpack dev bundle.
+// Import the browser ESM build directly so Markdown PDF export uses the intended renderer.
+// @ts-expect-error The package does not publish typings for this bundled browser entrypoint.
+import * as html2canvasPro from "../../node_modules/html2canvas-pro/dist/html2canvas-pro.esm.js";
 import { jsPDF } from "jspdf";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
