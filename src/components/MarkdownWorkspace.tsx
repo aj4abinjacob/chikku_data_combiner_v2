@@ -6,6 +6,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { DocumentWorkspaceFileActions, LoadedTable } from "../types";
+import { SearchInput } from "./SearchInput";
 
 interface MarkdownWorkspaceProps {
   table: LoadedTable;
@@ -27,6 +28,21 @@ interface MarkdownHistoryEntry {
   text: string;
   timestamp: number;
 }
+
+interface TextSearchMatch {
+  start: number;
+  end: number;
+}
+
+interface MarkdownHastNode {
+  type?: string;
+  tagName?: string;
+  value?: string;
+  properties?: Record<string, unknown>;
+  children?: MarkdownHastNode[];
+}
+
+type MarkdownScrollSyncSource = "source" | "preview";
 
 const markdownSanitizeSchema = {
   ...defaultSchema,
@@ -54,9 +70,207 @@ const MARKDOWN_SMALL_HEADING_FONT_SIZE_PX = 13;
 const MARKDOWN_CODE_FONT_SIZE_PX = 12;
 const MARKDOWN_TABLE_FONT_SIZE_PX = 13;
 const MARKDOWN_WHEEL_ZOOM_THROTTLE_MS = 80;
+const MARKDOWN_SCROLL_SYNC_RELEASE_MS = 120;
+const MARKDOWN_PRINT_ASSET_TIMEOUT_MS = 3000;
+const MARKDOWN_SEARCH_MARK_CLASS = "markdown-search-mark";
+const MARKDOWN_SEARCH_SKIP_TAGS = new Set(["script", "style"]);
+const MARKDOWN_PRINT_STYLES = `
+  @page {
+    margin: 0.65in;
+  }
+
+  html,
+  body {
+    margin: 0;
+    background: #ffffff;
+    color: #25384a;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 11pt;
+    line-height: 1.55;
+  }
+
+  .markdown-rendered {
+    width: 100%;
+    max-width: 7.25in;
+    margin: 0 auto;
+    padding: 0;
+    color: #25384a;
+    overflow-wrap: anywhere;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    color: #10161a;
+    letter-spacing: 0;
+    page-break-after: avoid;
+  }
+
+  h1 {
+    margin: 0 0 14px;
+    font-size: 24pt;
+    line-height: 1.15;
+  }
+
+  h2 {
+    margin: 22px 0 9px;
+    padding-top: 14px;
+    border-top: 1px solid #d8e1e8;
+    font-size: 16pt;
+    line-height: 1.25;
+  }
+
+  h3 {
+    margin: 18px 0 7px;
+    color: #25384a;
+    font-size: 13pt;
+  }
+
+  h4,
+  h5,
+  h6 {
+    margin: 14px 0 6px;
+    color: #394b59;
+    font-size: 11pt;
+  }
+
+  p {
+    margin: 0 0 10px;
+  }
+
+  a {
+    color: #106ba3;
+    text-decoration: none;
+  }
+
+  img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 12px 0 16px;
+    page-break-inside: avoid;
+  }
+
+  ul,
+  ol {
+    margin: 8px 0 12px;
+    padding-left: 22px;
+  }
+
+  li + li {
+    margin-top: 4px;
+  }
+
+  blockquote {
+    margin: 14px 0;
+    padding: 9px 12px;
+    border-left: 3px solid #137cbd;
+    background: #f7fbff;
+    color: #394b59;
+    page-break-inside: avoid;
+  }
+
+  blockquote p:last-child {
+    margin-bottom: 0;
+  }
+
+  code {
+    padding: 1px 4px;
+    border: 1px solid #f1cdd2;
+    border-radius: 4px;
+    background: #fff4f6;
+    color: #9f2b2b;
+    font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+    font-size: 9.5pt;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  pre {
+    margin: 12px 0 16px;
+    padding: 12px 14px;
+    border: 1px solid #c5d0da;
+    border-radius: 6px;
+    background: #f5f8fa;
+    color: #182026;
+    white-space: pre-wrap;
+    word-break: break-word;
+    page-break-inside: avoid;
+  }
+
+  pre code {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 9pt;
+    line-height: 1.55;
+  }
+
+  .markdown-table-scroll {
+    max-width: 100%;
+    margin: 12px 0 16px;
+    overflow: visible;
+    border: 1px solid #d8e1e8;
+    border-radius: 6px;
+    page-break-inside: avoid;
+  }
+
+  table {
+    width: 100%;
+    margin: 0;
+    border: 0;
+    border-collapse: collapse;
+    font-size: 9.5pt;
+  }
+
+  th,
+  td {
+    padding: 6px 8px;
+    border-right: 1px solid #d8e1e8;
+    border-bottom: 1px solid #d8e1e8;
+    text-align: left;
+    vertical-align: top;
+    word-break: break-word;
+  }
+
+  th {
+    background: #f5f8fa;
+    color: #30404d;
+    font-weight: 700;
+  }
+
+  tr:last-child td {
+    border-bottom: 0;
+  }
+
+  th:last-child,
+  td:last-child {
+    border-right: 0;
+  }
+
+  hr {
+    height: 1px;
+    margin: 22px 0;
+    border: 0;
+    background: #d8e1e8;
+  }
+
+  .bp4-icon,
+  svg {
+    display: none;
+  }
+`;
 
 function getFileExtension(filePath: string): string {
   return filePath.split(".").pop()?.toUpperCase() || "MD";
+}
+
+function getFileName(filePath: string): string {
+  return filePath.split(/[/\\]/).pop() || "Markdown";
 }
 
 function getFileDirectory(filePath: string): string {
@@ -195,6 +409,133 @@ function countWords(text: string): number {
   return stripped.trim().split(/\s+/).filter(Boolean).length;
 }
 
+function findTextSearchMatches(text: string, query: string): TextSearchMatch[] {
+  const needle = query.trim();
+  if (!needle) return [];
+
+  const matches: TextSearchMatch[] = [];
+  const lowerText = text.toLowerCase();
+  const lowerNeedle = needle.toLowerCase();
+  let start = 0;
+
+  while (start < lowerText.length) {
+    const index = lowerText.indexOf(lowerNeedle, start);
+    if (index === -1) break;
+    matches.push({ start: index, end: index + needle.length });
+    start = index + needle.length;
+  }
+
+  return matches;
+}
+
+function renderHighlightedSearchText(text: string, query: string): React.ReactNode {
+  const matches = findTextSearchMatches(text, query);
+  if (matches.length === 0) return text;
+
+  const fragments: React.ReactNode[] = [];
+  let cursor = 0;
+
+  for (const match of matches) {
+    if (match.start > cursor) fragments.push(text.slice(cursor, match.start));
+    fragments.push(
+      <mark className="markdown-heading-search-mark" key={`${match.start}-${match.end}`}>
+        {text.slice(match.start, match.end)}
+      </mark>
+    );
+    cursor = match.end;
+  }
+
+  if (cursor < text.length) fragments.push(text.slice(cursor));
+  return fragments;
+}
+
+function splitHastTextBySearch(value: string, query: string, activeIndex: number, nextIndex: { current: number }): MarkdownHastNode[] {
+  const matches = findTextSearchMatches(value, query);
+  if (matches.length === 0) return [{ type: "text", value }];
+
+  const nodes: MarkdownHastNode[] = [];
+  let cursor = 0;
+
+  for (const match of matches) {
+    if (match.start > cursor) nodes.push({ type: "text", value: value.slice(cursor, match.start) });
+
+    const searchIndex = nextIndex.current++;
+    nodes.push({
+      type: "element",
+      tagName: "mark",
+      properties: {
+        className: searchIndex === activeIndex
+          ? [MARKDOWN_SEARCH_MARK_CLASS, "current"]
+          : [MARKDOWN_SEARCH_MARK_CLASS],
+        "data-search-index": String(searchIndex),
+      },
+      children: [{ type: "text", value: value.slice(match.start, match.end) }],
+    });
+
+    cursor = match.end;
+  }
+
+  if (cursor < value.length) nodes.push({ type: "text", value: value.slice(cursor) });
+  return nodes;
+}
+
+function createMarkdownSearchRehypePlugin(query: string, activeIndex: number) {
+  const trimmedQuery = query.trim();
+
+  return () => (tree: MarkdownHastNode) => {
+    if (!trimmedQuery) return;
+
+    const nextIndex = { current: 0 };
+    const visit = (node: MarkdownHastNode) => {
+      if (!node.children || MARKDOWN_SEARCH_SKIP_TAGS.has(node.tagName ?? "")) return;
+
+      const nextChildren: MarkdownHastNode[] = [];
+      for (const child of node.children) {
+        if (child.type === "text" && typeof child.value === "string") {
+          nextChildren.push(...splitHastTextBySearch(child.value, trimmedQuery, activeIndex, nextIndex));
+        } else {
+          visit(child);
+          nextChildren.push(child);
+        }
+      }
+      node.children = nextChildren;
+    };
+
+    visit(tree);
+  };
+}
+
+function getTextareaLineHeightPx(textarea: HTMLTextAreaElement): number {
+  const style = window.getComputedStyle(textarea);
+  const lineHeight = Number.parseFloat(style.lineHeight);
+  if (Number.isFinite(lineHeight)) return lineHeight;
+
+  const fontSize = Number.parseFloat(style.fontSize);
+  return Number.isFinite(fontSize) ? fontSize * 1.4 : 18;
+}
+
+function scrollTextareaToMatch(textarea: HTMLTextAreaElement, text: string, start: number): void {
+  const lineIndex = text.slice(0, start).split(/\r\n|\r|\n/).length - 1;
+  const lineHeight = getTextareaLineHeightPx(textarea);
+  const targetTop = lineIndex * lineHeight - textarea.clientHeight / 2;
+  textarea.scrollTop = Math.max(0, targetTop);
+}
+
+function getScrollProgress(element: HTMLElement): number {
+  const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+  if (maxScrollTop === 0) return 0;
+  return Math.min(1, Math.max(0, element.scrollTop / maxScrollTop));
+}
+
+function applyScrollProgress(element: HTMLElement, progress: number): boolean {
+  const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+  const targetTop = maxScrollTop * Math.min(1, Math.max(0, progress));
+  if (Math.abs(element.scrollTop - targetTop) <= 1) return false;
+
+  element.scrollTo({ top: targetTop, behavior: "smooth" });
+  return true;
+}
+
 function formatTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
@@ -236,6 +577,13 @@ function getMarkdownZoomShortcutAction(event: KeyboardEvent): "in" | "out" | "re
   return null;
 }
 
+function isMarkdownFindShortcut(event: KeyboardEvent): boolean {
+  return !event.altKey
+    && !event.shiftKey
+    && hasPlatformZoomModifier(event)
+    && event.key.toLowerCase() === "f";
+}
+
 function getMarkdownWheelZoomDirection(event: WheelEvent): 1 | -1 | null {
   if (!hasWheelZoomModifier(event)) return null;
   if (event.deltaY < 0) return 1;
@@ -256,6 +604,41 @@ function getNextMarkdownZoom(currentZoom: number, direction: 1 | -1): number {
 
 function formatMarkdownZoom(zoom: number): string {
   return `${Math.round(zoom * 100)}%`;
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildMarkdownPrintHtml(contentHtml: string, title: string): string {
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>${escapeHtml(title)}</title>
+    <style>${MARKDOWN_PRINT_STYLES}</style>
+  </head>
+  <body>
+    <article class="markdown-rendered">${contentHtml}</article>
+  </body>
+</html>`;
+}
+
+async function waitForPrintableAssets(printDocument: Document): Promise<void> {
+  const pendingImages = Array.from(printDocument.images).filter((image) => !image.complete);
+  if (pendingImages.length === 0) return;
+
+  await Promise.race([
+    Promise.all(pendingImages.map((image) => new Promise<void>((resolve) => {
+      image.onload = () => resolve();
+      image.onerror = () => resolve();
+    }))),
+    new Promise<void>((resolve) => window.setTimeout(resolve, MARKDOWN_PRINT_ASSET_TIMEOUT_MS)),
+  ]);
 }
 
 function collectText(children: React.ReactNode): string {
@@ -281,12 +664,23 @@ const MarkdownPreview = React.memo(function MarkdownPreview({
   text,
   headings,
   filePath,
+  searchQuery,
+  activeSearchIndex,
 }: {
   text: string;
   headings: MarkdownHeading[];
   filePath: string;
+  searchQuery: string;
+  activeSearchIndex: number;
 }): React.ReactElement {
   const headingIdQueues = buildHeadingIdQueues(headings);
+  const rehypePlugins = useMemo(() => {
+    const plugins: any[] = [rehypeRaw, [rehypeSanitize, markdownSanitizeSchema]];
+    if (searchQuery.trim()) {
+      plugins.push(createMarkdownSearchRehypePlugin(searchQuery, activeSearchIndex));
+    }
+    return plugins;
+  }, [activeSearchIndex, searchQuery]);
   const makeHeading = (TagName: keyof JSX.IntrinsicElements, level: number) => {
     return ({ children, ...props }: any) => {
       const label = collectText(children).replace(/\s+/g, " ").trim();
@@ -307,7 +701,7 @@ const MarkdownPreview = React.memo(function MarkdownPreview({
 
   return (
     <ReactMarkdown
-      rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownSanitizeSchema]]}
+      rehypePlugins={rehypePlugins}
       remarkPlugins={[remarkGfm]}
       components={{
         h1: makeHeading("h1", 1),
@@ -360,6 +754,7 @@ export function MarkdownWorkspace({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -368,14 +763,26 @@ export function MarkdownWorkspace({
   const [markdownSplitResizing, setMarkdownSplitResizing] = useState(false);
   const [markdownZoom, setMarkdownZoom] = useState(MARKDOWN_DEFAULT_ZOOM);
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
+  const [contentSearch, setContentSearch] = useState("");
+  const [contentSearchIndex, setContentSearchIndex] = useState(0);
+  const [renderedSearchMatchCount, setRenderedSearchMatchCount] = useState(0);
+  const [headingSearch, setHeadingSearch] = useState("");
   const nextHistoryId = useRef(1);
   const markdownLayoutRef = useRef<HTMLDivElement>(null);
   const previewScrollRef = useRef<HTMLDivElement>(null);
+  const renderedArticleRef = useRef<HTMLElement>(null);
+  const previewSearchInputRef = useRef<HTMLInputElement>(null);
+  const sourceSearchInputRef = useRef<HTMLInputElement>(null);
+  const sourceTextareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersInnerRef = useRef<HTMLDivElement>(null);
   const lineNumberScrollTopRef = useRef(0);
   const lineNumberScrollFrameRef = useRef<number | null>(null);
   const splitPointerIdRef = useRef<number | null>(null);
   const wheelZoomLastAtRef = useRef(0);
+  const scrollSyncSourceRef = useRef<MarkdownScrollSyncSource | null>(null);
+  const scrollSyncIgnoredSourceRef = useRef<MarkdownScrollSyncSource | null>(null);
+  const scrollSyncReleaseTimeoutRef = useRef<number | null>(null);
+  const wasEditingRef = useRef(false);
 
   const extension = getFileExtension(table.filePath);
   const isDirty = rawText !== savedText;
@@ -384,10 +791,34 @@ export function MarkdownWorkspace({
   const deferredRawText = useDeferredValue(rawText);
   const previewText = isEditing ? deferredRawText : rawText;
   const headings = useMemo(() => extractHeadings(previewText), [previewText]);
+  const trimmedContentSearch = contentSearch.trim();
+  const trimmedHeadingSearch = headingSearch.trim();
+  const sourceSearchMatches = useMemo(
+    () => findTextSearchMatches(rawText, trimmedContentSearch),
+    [rawText, trimmedContentSearch]
+  );
+  const filteredHeadings = useMemo(() => {
+    if (!trimmedHeadingSearch) return headings;
+
+    const query = trimmedHeadingSearch.toLowerCase();
+    return headings.filter((heading) =>
+      heading.text.toLowerCase().includes(query) || String(heading.line).includes(query)
+    );
+  }, [headings, trimmedHeadingSearch]);
   const lineNumbers = useMemo(
     () => Array.from({ length: Math.max(lineCount, 1) }, (_, index) => index + 1),
     [lineCount]
   );
+  const contentSearchMatchCount = isEditing ? sourceSearchMatches.length : renderedSearchMatchCount;
+  const activeContentSearchIndex = contentSearchMatchCount === 0
+    ? 0
+    : Math.min(contentSearchIndex, contentSearchMatchCount - 1);
+  const contentSearchCountLabel = !trimmedContentSearch
+    ? ""
+    : contentSearchMatchCount === 0
+      ? "0"
+      : `${activeContentSearchIndex + 1}/${contentSearchMatchCount}`;
+  const headingSearchActive = trimmedHeadingSearch.length > 0;
   const markdownZoomPercent = formatMarkdownZoom(markdownZoom);
   const markdownZoomAdjusted = markdownZoom !== MARKDOWN_DEFAULT_ZOOM;
   const markdownZoomStatus = markdownZoom > MARKDOWN_DEFAULT_ZOOM
@@ -423,6 +854,9 @@ export function MarkdownWorkspace({
     if (lineNumberScrollFrameRef.current !== null) {
       window.cancelAnimationFrame(lineNumberScrollFrameRef.current);
     }
+    if (scrollSyncReleaseTimeoutRef.current !== null) {
+      window.clearTimeout(scrollSyncReleaseTimeoutRef.current);
+    }
   }, []);
 
   useEffect(() => {
@@ -431,6 +865,198 @@ export function MarkdownWorkspace({
       lineNumbersInnerRef.current.style.transform = "translateY(0px)";
     }
   }, [isEditing, table.filePath, table.reloadVersion]);
+
+  const scheduleScrollSyncRelease = useCallback(() => {
+    if (scrollSyncReleaseTimeoutRef.current !== null) {
+      window.clearTimeout(scrollSyncReleaseTimeoutRef.current);
+    }
+    scrollSyncReleaseTimeoutRef.current = window.setTimeout(() => {
+      scrollSyncReleaseTimeoutRef.current = null;
+      scrollSyncSourceRef.current = null;
+      scrollSyncIgnoredSourceRef.current = null;
+    }, MARKDOWN_SCROLL_SYNC_RELEASE_MS);
+  }, []);
+
+  const syncMarkdownScroll = useCallback((source: MarkdownScrollSyncSource) => {
+    if (!isEditing) return;
+
+    const textarea = sourceTextareaRef.current;
+    const preview = previewScrollRef.current;
+    if (!textarea || !preview) return;
+
+    if (scrollSyncIgnoredSourceRef.current === source) {
+      scrollSyncIgnoredSourceRef.current = null;
+      scheduleScrollSyncRelease();
+      return;
+    }
+
+    const activeSource = scrollSyncSourceRef.current;
+    if (activeSource && activeSource !== source) {
+      scheduleScrollSyncRelease();
+      return;
+    }
+
+    const from = source === "source" ? textarea : preview;
+    const to = source === "source" ? preview : textarea;
+    const syncedSource: MarkdownScrollSyncSource = source === "source" ? "preview" : "source";
+
+    scrollSyncSourceRef.current = source;
+    if (applyScrollProgress(to, getScrollProgress(from))) {
+      scrollSyncIgnoredSourceRef.current = syncedSource;
+    }
+    if (source === "preview") {
+      updateLineNumbersScroll(textarea.scrollTop);
+    }
+
+    scheduleScrollSyncRelease();
+  }, [isEditing, scheduleScrollSyncRelease, updateLineNumbersScroll]);
+
+  const handleSourceScroll = useCallback((event: React.UIEvent<HTMLTextAreaElement>) => {
+    updateLineNumbersScroll(event.currentTarget.scrollTop);
+    syncMarkdownScroll("source");
+  }, [syncMarkdownScroll, updateLineNumbersScroll]);
+
+  const handlePreviewScroll = useCallback(() => {
+    syncMarkdownScroll("preview");
+  }, [syncMarkdownScroll]);
+
+  useEffect(() => {
+    if (!isEditing) {
+      wasEditingRef.current = false;
+      scrollSyncSourceRef.current = null;
+      scrollSyncIgnoredSourceRef.current = null;
+      if (scrollSyncReleaseTimeoutRef.current !== null) {
+        window.clearTimeout(scrollSyncReleaseTimeoutRef.current);
+        scrollSyncReleaseTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    const syncSource: MarkdownScrollSyncSource = wasEditingRef.current ? "source" : "preview";
+    wasEditingRef.current = true;
+
+    const frame = window.requestAnimationFrame(() => {
+      syncMarkdownScroll(syncSource);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isEditing, markdownZoom, previewText, syncMarkdownScroll]);
+
+  const handleContentSearchChange = useCallback((value: string) => {
+    setContentSearch(value);
+    setContentSearchIndex(0);
+  }, []);
+
+  const revealSourceSearchMatch = useCallback((index: number) => {
+    const textarea = sourceTextareaRef.current;
+    if (!textarea || sourceSearchMatches.length === 0) return;
+
+    const normalizedIndex = ((index % sourceSearchMatches.length) + sourceSearchMatches.length) % sourceSearchMatches.length;
+    const match = sourceSearchMatches[normalizedIndex];
+    textarea.setSelectionRange(match.start, match.end);
+    scrollTextareaToMatch(textarea, rawText, match.start);
+    updateLineNumbersScroll(textarea.scrollTop);
+    syncMarkdownScroll("source");
+  }, [rawText, sourceSearchMatches, syncMarkdownScroll, updateLineNumbersScroll]);
+
+  const revealRenderedSearchMatch = useCallback((index: number) => {
+    const marks = renderedArticleRef.current?.querySelectorAll<HTMLElement>(`.${MARKDOWN_SEARCH_MARK_CLASS}`);
+    if (!marks || marks.length === 0) return;
+
+    const normalizedIndex = ((index % marks.length) + marks.length) % marks.length;
+    marks[normalizedIndex]?.scrollIntoView({ block: "center", inline: "nearest" });
+  }, []);
+
+  const revealContentSearchMatch = useCallback((index: number) => {
+    if (isEditing) {
+      revealSourceSearchMatch(index);
+    } else {
+      revealRenderedSearchMatch(index);
+    }
+  }, [isEditing, revealRenderedSearchMatch, revealSourceSearchMatch]);
+
+  const moveContentSearch = useCallback((direction: 1 | -1) => {
+    if (!trimmedContentSearch || contentSearchMatchCount === 0) return;
+
+    setContentSearchIndex((current) => {
+      const next = ((current + direction) % contentSearchMatchCount + contentSearchMatchCount) % contentSearchMatchCount;
+      window.requestAnimationFrame(() => revealContentSearchMatch(next));
+      return next;
+    });
+  }, [contentSearchMatchCount, revealContentSearchMatch, trimmedContentSearch]);
+
+  const handleContentSearchKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    moveContentSearch(event.shiftKey ? -1 : 1);
+  }, [moveContentSearch]);
+
+  const focusMarkdownFindSearch = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      const input = isEditing ? sourceSearchInputRef.current : previewSearchInputRef.current;
+      input?.focus();
+      input?.select();
+    });
+  }, [isEditing]);
+
+  useEffect(() => {
+    setContentSearchIndex(0);
+  }, [isEditing, trimmedContentSearch]);
+
+  useEffect(() => {
+    if (!trimmedContentSearch) {
+      if (contentSearchIndex !== 0) setContentSearchIndex(0);
+      return;
+    }
+
+    if (contentSearchMatchCount > 0 && contentSearchIndex >= contentSearchMatchCount) {
+      setContentSearchIndex(0);
+    }
+  }, [contentSearchIndex, contentSearchMatchCount, trimmedContentSearch]);
+
+  useEffect(() => {
+    if (isEditing || !trimmedContentSearch) {
+      setRenderedSearchMatchCount(0);
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      setRenderedSearchMatchCount(
+        renderedArticleRef.current?.querySelectorAll(`.${MARKDOWN_SEARCH_MARK_CLASS}`).length ?? 0
+      );
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isEditing, previewText, trimmedContentSearch]);
+
+  useEffect(() => {
+    if (isEditing || !trimmedContentSearch || renderedSearchMatchCount === 0) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      revealRenderedSearchMatch(activeContentSearchIndex);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    activeContentSearchIndex,
+    isEditing,
+    renderedSearchMatchCount,
+    revealRenderedSearchMatch,
+    trimmedContentSearch,
+  ]);
+
+  useEffect(() => {
+    if (!isEditing || !trimmedContentSearch || sourceSearchMatches.length === 0) return;
+    if (document.activeElement === sourceTextareaRef.current) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      revealSourceSearchMatch(activeContentSearchIndex);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    activeContentSearchIndex,
+    isEditing,
+    revealSourceSearchMatch,
+    sourceSearchMatches.length,
+    trimmedContentSearch,
+  ]);
 
   useEffect(() => {
     if (!markdownSplitResizing) return;
@@ -547,6 +1173,18 @@ export function MarkdownWorkspace({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleResetZoom, handleZoomIn, handleZoomOut]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isMarkdownFindShortcut(event)) return;
+
+      event.preventDefault();
+      focusMarkdownFindSearch();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [focusMarkdownFindSearch]);
 
   useEffect(() => {
     const layout = markdownLayoutRef.current;
@@ -677,10 +1315,57 @@ export function MarkdownWorkspace({
     }
   }, [extension, pushHistory, rawText]);
 
+  const handleExportPdf = useCallback(async () => {
+    const article = renderedArticleRef.current;
+    if (!article) return;
+
+    let frame: HTMLIFrameElement | null = null;
+    setExportingPdf(true);
+
+    try {
+      frame = document.createElement("iframe");
+      frame.title = "Markdown PDF export";
+      frame.style.position = "fixed";
+      frame.style.left = "-10000px";
+      frame.style.top = "0";
+      frame.style.width = "800px";
+      frame.style.height = "1000px";
+      frame.style.border = "0";
+      frame.style.opacity = "0";
+      frame.style.pointerEvents = "none";
+      document.body.appendChild(frame);
+
+      const printWindow = frame.contentWindow;
+      const printDocument = printWindow?.document;
+      if (!printWindow || !printDocument) {
+        throw new Error("Unable to prepare the Markdown PDF export.");
+      }
+
+      printDocument.open();
+      printDocument.write(buildMarkdownPrintHtml(article.innerHTML, getFileName(table.filePath)));
+      printDocument.close();
+      for (const image of Array.from(printDocument.images)) {
+        image.loading = "eager";
+      }
+
+      await waitForPrintableAssets(printDocument);
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+
+      printWindow.focus();
+      printWindow.print();
+      pushHistory("Prepared PDF", rawText);
+    } finally {
+      setExportingPdf(false);
+      if (frame) {
+        window.setTimeout(() => frame?.remove(), 1000);
+      }
+    }
+  }, [pushHistory, rawText, table.filePath]);
+
   const handleRevert = useCallback(() => {
     setRawText(savedText);
     setIsEditing(false);
-    pushHistory("Reverted", savedText);
+    pushHistory("Undo to saved", savedText);
   }, [pushHistory, savedText]);
 
   const handleRestoreHistory = useCallback((entry: MarkdownHistoryEntry) => {
@@ -709,23 +1394,31 @@ export function MarkdownWorkspace({
       isValid: documentReady,
       saving,
       exporting,
-      canExport: documentReady && !exporting,
+      exportingPdf,
+      canExport: documentReady && !exporting && !exportingPdf,
+      canExportPdf: documentReady && !exporting && !exportingPdf,
       historyOpen,
       onOpenFiles,
       onSave: handleSave,
       onRevert: handleRevert,
       onToggleHistory: () => setHistoryOpen((open) => !open),
       onExport: handleExport,
+      onExportPdf: handleExportPdf,
       exportLabel: "Export",
       exportTitle: "Export Markdown copy",
       exportDisabledReason: loadError ? "Resolve the load error before exporting." : loading ? "Markdown is still loading." : null,
+      exportPdfLabel: "PDF",
+      exportPdfTitle: "Export rendered Markdown as PDF",
+      exportPdfDisabledReason: loadError ? "Resolve the load error before exporting PDF." : loading ? "Markdown is still loading." : null,
       onToggleEdit: () => setIsEditing((editing) => !editing),
       editActive: isEditing,
       editLabel: isEditing ? "Done" : "Edit",
     });
   }, [
     exporting,
+    exportingPdf,
     handleExport,
+    handleExportPdf,
     handleRevert,
     handleSave,
     historyOpen,
@@ -758,8 +1451,63 @@ export function MarkdownWorkspace({
           </button>
         ))}
       </div>
+      <div className="markdown-history-footer">
+        <span>{history.length.toLocaleString()} entries</span>
+        <div className="markdown-history-actions">
+          <Button
+            minimal
+            small
+            icon="undo"
+            text="Undo"
+            onClick={handleRevert}
+            disabled={!isDirty}
+            title="Undo to saved"
+          />
+        </div>
+      </div>
     </aside>
   ) : null;
+  const renderContentSearchControl = (
+    inputRef: React.RefObject<HTMLInputElement>,
+    placeholder: string,
+    ariaLabel: string
+  ) => (
+    <div className="markdown-pane-search">
+      <SearchInput
+        inputRef={inputRef}
+        small
+        value={contentSearch}
+        onChange={handleContentSearchChange}
+        onKeyDown={handleContentSearchKeyDown}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        clearAriaLabel="Clear markdown search"
+      />
+      <span className="markdown-search-count" aria-live="polite">
+        {contentSearchCountLabel}
+      </span>
+      <div className="markdown-search-actions">
+        <Button
+          minimal
+          small
+          icon="chevron-up"
+          aria-label="Previous match"
+          title="Previous match"
+          disabled={!trimmedContentSearch || contentSearchMatchCount === 0}
+          onClick={() => moveContentSearch(-1)}
+        />
+        <Button
+          minimal
+          small
+          icon="chevron-down"
+          aria-label="Next match"
+          title="Next match"
+          disabled={!trimmedContentSearch || contentSearchMatchCount === 0}
+          onClick={() => moveContentSearch(1)}
+        />
+      </div>
+    </div>
+  );
   const markdownLayoutStyle = {
     "--markdown-edit-left": `${markdownSplitPercent}%`,
     "--markdown-body-font-size": `${MARKDOWN_BODY_FONT_SIZE_PX * markdownZoom}px`,
@@ -787,9 +1535,12 @@ export function MarkdownWorkspace({
         {isEditing && (
           <>
             <section className="markdown-editor-pane">
-              <div className="markdown-pane-header">
-                <strong>Source</strong>
-                <span>{lineCount.toLocaleString()} lines</span>
+              <div className="markdown-pane-header markdown-pane-header-with-search">
+                <div className="markdown-pane-title">
+                  <strong>Source</strong>
+                  <span>{lineCount.toLocaleString()} lines</span>
+                </div>
+                {renderContentSearchControl(sourceSearchInputRef, "Search source...", "Search markdown source")}
               </div>
               <div className="json-editor markdown-source-editor">
                 <div className="json-line-numbers">
@@ -798,13 +1549,14 @@ export function MarkdownWorkspace({
                   </div>
                 </div>
                 <textarea
+                  ref={sourceTextareaRef}
                   className="json-code-input"
                   value={rawText}
                   aria-label="Markdown source editor"
                   spellCheck={false}
                   wrap="off"
                   onChange={(event) => setRawText(event.currentTarget.value)}
-                  onScroll={(event) => updateLineNumbersScroll(event.currentTarget.scrollTop)}
+                  onScroll={handleSourceScroll}
                 />
               </div>
             </section>
@@ -827,14 +1579,29 @@ export function MarkdownWorkspace({
         )}
 
         <section className="markdown-preview-pane">
-          <div className="markdown-preview-scroll" ref={previewScrollRef}>
+          {!isEditing && (
+            <div className="markdown-pane-header markdown-pane-header-with-search">
+              <div className="markdown-pane-title">
+                <strong>Preview</strong>
+                <span>{wordCount.toLocaleString()} words</span>
+              </div>
+              {renderContentSearchControl(previewSearchInputRef, "Search content...", "Search rendered markdown")}
+            </div>
+          )}
+          <div className="markdown-preview-scroll" ref={previewScrollRef} onScroll={handlePreviewScroll}>
             {loading ? (
               <div className="markdown-empty">
                 <Icon icon="refresh" size={18} />
               </div>
             ) : (
-              <article className="markdown-rendered">
-                <MarkdownPreview text={previewText} headings={headings} filePath={table.filePath} />
+              <article className="markdown-rendered" ref={renderedArticleRef}>
+                <MarkdownPreview
+                  text={previewText}
+                  headings={headings}
+                  filePath={table.filePath}
+                  searchQuery={isEditing ? "" : contentSearch}
+                  activeSearchIndex={activeContentSearchIndex}
+                />
               </article>
             )}
           </div>
@@ -843,13 +1610,29 @@ export function MarkdownWorkspace({
         <aside className="markdown-outline">
           <div className="markdown-outline-header">
             <strong>Outline</strong>
-            <span>{headings.length.toLocaleString()}</span>
+            <span>
+              {headingSearchActive
+                ? `${filteredHeadings.length.toLocaleString()}/${headings.length.toLocaleString()}`
+                : headings.length.toLocaleString()}
+            </span>
+          </div>
+          <div className="markdown-outline-tools">
+            <SearchInput
+              small
+              value={headingSearch}
+              onChange={setHeadingSearch}
+              placeholder="Search headings..."
+              aria-label="Search headings"
+              clearAriaLabel="Clear heading search"
+            />
           </div>
           <div className="markdown-outline-scroll">
             {headings.length === 0 ? (
               <div className="markdown-outline-empty" aria-label="No headings" />
+            ) : filteredHeadings.length === 0 ? (
+              <div className="markdown-outline-empty">No headings match</div>
             ) : (
-              headings.map((heading) => (
+              filteredHeadings.map((heading) => (
                 <button
                   key={heading.id}
                   type="button"
@@ -857,14 +1640,16 @@ export function MarkdownWorkspace({
                   onClick={() => scrollToHeading(heading.id)}
                   title={heading.text}
                 >
-                  <span>{heading.text}</span>
+                  <span>{renderHighlightedSearchText(heading.text, headingSearch)}</span>
                   <em>{heading.line}</em>
                 </button>
               ))
             )}
           </div>
           <div className="markdown-outline-footer">
-            {headings.length.toLocaleString()} headings
+            {headingSearchActive
+              ? `${filteredHeadings.length.toLocaleString()} of ${headings.length.toLocaleString()} headings`
+              : `${headings.length.toLocaleString()} headings`}
           </div>
         </aside>
         {historyPanel}

@@ -147,8 +147,10 @@ export interface DocumentWorkspaceFileActions {
   isTableView?: boolean;
   saving: boolean;
   exporting?: boolean;
+  exportingPdf?: boolean;
   canExportCsv?: boolean;
   canExport?: boolean;
+  canExportPdf?: boolean;
   canCompare?: boolean;
   historyOpen: boolean;
   onOpenFiles: () => void;
@@ -158,11 +160,15 @@ export interface DocumentWorkspaceFileActions {
   onToggleHistory: () => void;
   onExportCsv?: () => void | Promise<void>;
   onExport?: () => void | Promise<void>;
+  onExportPdf?: () => void | Promise<void>;
   onCopyPath?: () => void | Promise<void>;
   onCompare?: () => void;
   exportLabel?: string;
   exportTitle?: string;
   exportDisabledReason?: string | null;
+  exportPdfLabel?: string;
+  exportPdfTitle?: string;
+  exportPdfDisabledReason?: string | null;
   compareTitle?: string;
   onToggleEdit?: () => void;
   editActive?: boolean;

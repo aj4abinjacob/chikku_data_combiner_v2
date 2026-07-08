@@ -396,6 +396,10 @@ html, body, #root {
   align-items: center;
   padding-top: 6px;
   flex-shrink: 0;
+
+  .bp4-button {
+    min-height: 30px;
+  }
 }
 
 // ── Sidebar ──
@@ -531,7 +535,7 @@ html, body, #root {
 
       .bp4-button {
         font-size: 11px;
-        min-height: 20px;
+        min-height: 26px;
         padding: 0 6px;
         color: #5c7080;
 
@@ -7239,6 +7243,53 @@ button.dg-stats-metric {
   border-left: 1px solid #d8e1e8;
 }
 
+.json-history-panel .json-panel-header {
+  height: 34px;
+  min-height: 0;
+  padding: 0 8px 0 10px;
+}
+
+.json-history-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  flex-wrap: wrap;
+
+  .bp4-button {
+    min-height: 24px;
+    padding: 0 7px;
+    border-radius: var(--control-radius);
+    font-size: 11px;
+  }
+}
+
+.json-history-panel .json-panel-footer {
+  height: auto;
+  min-height: 40px;
+  padding: 6px 8px 6px 10px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  flex-wrap: wrap;
+}
+
+.json-history-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #5c7080;
+  font-family: "SF Mono", "Menlo", "Monaco", monospace;
+  font-size: 11px;
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 .json-history-scroll {
   flex: 1;
   min-height: 0;
@@ -8106,7 +8157,7 @@ button.dg-stats-metric {
   font-size: 11px;
   flex-shrink: 0;
 
-  span {
+  > span {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -8482,6 +8533,79 @@ button.dg-stats-metric {
   }
 }
 
+.markdown-pane-header-with-search {
+  height: 38px;
+  display: grid;
+  grid-template-columns: auto minmax(112px, 1fr);
+  align-items: center;
+}
+
+.markdown-pane-title {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+
+  strong,
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.markdown-pane-search {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(82px, 1fr) minmax(28px, auto) auto;
+  align-items: center;
+  gap: 4px;
+
+  .bp4-input-group {
+    min-width: 0;
+  }
+
+  .bp4-input {
+    height: 26px;
+    border: 1px solid #d8e1e8;
+    border-radius: var(--control-radius);
+    box-shadow: none;
+    font-size: 12px;
+
+    &:focus {
+      border-color: #137cbd;
+      box-shadow: 0 0 0 1px #137cbd, 0 0 0 3px rgba(19, 124, 189, 0.14);
+    }
+  }
+}
+
+.markdown-search-count {
+  color: #5c7080;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.markdown-search-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+
+  .bp4-button {
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0 3px;
+    border-radius: var(--control-radius);
+    color: #5c7080;
+    box-shadow: none;
+
+    &:hover:not(:disabled) {
+      background: #eef3f7;
+      color: #30404d;
+    }
+  }
+}
+
 .markdown-source-editor {
   border-top: 0;
 }
@@ -8724,6 +8848,19 @@ button.dg-stats-metric {
   padding-top: 24px;
 }
 
+.markdown-search-mark,
+.markdown-heading-search-mark {
+  border-radius: 3px;
+  background: #ffe49a;
+  color: inherit;
+  padding: 0 1px;
+}
+
+.markdown-search-mark.current {
+  background: #ffd042;
+  box-shadow: 0 0 0 1px rgba(191, 128, 0, 0.42);
+}
+
 .markdown-empty {
   min-height: 160px;
   display: flex;
@@ -8762,6 +8899,26 @@ button.dg-stats-metric {
     color: #8a9ba8;
     font-size: 11px;
     font-weight: 600;
+  }
+}
+
+.markdown-outline-tools {
+  padding: 8px 8px 6px;
+  border-bottom: 1px solid #e1e8ed;
+  background: #fbfdff;
+  flex-shrink: 0;
+
+  .bp4-input {
+    height: 28px;
+    border: 1px solid #d8e1e8;
+    border-radius: var(--control-radius);
+    box-shadow: none;
+    font-size: 12px;
+
+    &:focus {
+      border-color: #137cbd;
+      box-shadow: 0 0 0 1px #137cbd, 0 0 0 3px rgba(19, 124, 189, 0.14);
+    }
   }
 }
 
@@ -8874,6 +9031,42 @@ button.dg-stats-metric {
   strong {
     color: #182026;
     font-size: 13px;
+  }
+}
+
+.markdown-history-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+
+  .bp4-button {
+    min-height: 24px;
+    padding: 0 7px;
+    border-radius: var(--control-radius);
+    font-size: 11px;
+  }
+}
+
+.markdown-history-footer {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid #e1e8ed;
+  background: #f7f9fb;
+  color: #5c7080;
+  font-size: 11px;
+  flex-shrink: 0;
+
+  > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
@@ -14877,9 +15070,11 @@ html.dark-theme #root {
   .markdown-edit-divider,
   .markdown-outline,
   .markdown-outline-header,
+  .markdown-outline-tools,
   .markdown-outline-footer,
   .markdown-history-panel,
   .markdown-history-header,
+  .markdown-history-footer,
   .markdown-status-strip {
     border-color: @dark-border-1;
   }
@@ -14888,8 +15083,10 @@ html.dark-theme #root {
   .markdown-edit-divider,
   .markdown-outline,
   .markdown-outline-header,
+  .markdown-outline-tools,
   .markdown-outline-footer,
   .markdown-history-header,
+  .markdown-history-footer,
   .markdown-status-strip {
     background: @dark-bg-3;
   }
@@ -14918,11 +15115,13 @@ html.dark-theme #root {
   .markdown-outline-header,
   .markdown-outline-footer,
   .markdown-empty,
+  .markdown-history-footer,
   .markdown-status-strip {
     color: @dark-text-3;
   }
 
   .markdown-pane-header span,
+  .markdown-search-count,
   .markdown-outline-header span,
   .markdown-outline-row em,
   .markdown-outline-empty,
@@ -14989,6 +15188,42 @@ html.dark-theme #root {
     hr {
       background: @dark-border-1;
     }
+  }
+
+  .markdown-pane-search,
+  .markdown-outline-tools {
+    .bp4-input {
+      border-color: @dark-border-1;
+      background: @dark-bg-2;
+      color: @dark-text-1;
+
+      &:focus {
+        border-color: @dark-accent;
+        box-shadow: 0 0 0 1px @dark-accent, 0 0 0 3px rgba(93, 183, 255, 0.2);
+      }
+    }
+  }
+
+  .markdown-search-actions {
+    .bp4-button {
+      color: @dark-text-3;
+
+      &:hover:not(:disabled) {
+        background: @dark-bg-4;
+        color: @dark-text-1;
+      }
+    }
+  }
+
+  .markdown-search-mark,
+  .markdown-heading-search-mark {
+    background: rgba(255, 205, 66, 0.45);
+    color: @dark-text-1;
+  }
+
+  .markdown-search-mark.current {
+    background: rgba(255, 205, 66, 0.74);
+    box-shadow: 0 0 0 1px rgba(255, 214, 88, 0.7);
   }
 
   .markdown-outline-row {

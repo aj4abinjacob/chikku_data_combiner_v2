@@ -113,6 +113,7 @@ function getFileListLabel(table: LoadedTable): string {
 
 function getDocumentExportDisabledReason(actions: DocumentWorkspaceFileActions): string | null {
   if (actions.canExport ?? actions.canExportCsv) return null;
+  if (actions.exportingPdf) return actions.exportDisabledReason ?? "Preparing PDF...";
   if (actions.exporting) return actions.exportDisabledReason ?? "Exporting...";
   if (actions.exportDisabledReason) return actions.exportDisabledReason;
   if (!actions.isValid) {
@@ -370,11 +371,20 @@ export function Sidebar({
     ? documentFileActions
     : null;
   const documentExportAction = activeDocumentFileActions?.onExport ?? activeDocumentFileActions?.onExportCsv ?? null;
+  const documentPdfAction = activeDocumentFileActions?.onExportPdf ?? null;
   const documentCanExport = activeDocumentFileActions
     ? activeDocumentFileActions.canExport ?? activeDocumentFileActions.canExportCsv ?? false
     : false;
+  const documentCanExportPdf = activeDocumentFileActions
+    ? activeDocumentFileActions.canExportPdf ?? activeDocumentFileActions.isValid
+    : false;
   const exportDisabledReason = activeDocumentFileActions
     ? getDocumentExportDisabledReason(activeDocumentFileActions)
+    : null;
+  const exportPdfDisabledReason = activeDocumentFileActions
+    ? activeDocumentFileActions.exportPdfDisabledReason
+      ?? (activeDocumentFileActions.exportingPdf ? "Preparing PDF..." : null)
+      ?? (!documentCanExportPdf ? "PDF export is unavailable." : null)
     : null;
   const combineSelectionDisabledReason = documentWorkspaceActive
     ? `Combine selection is unavailable in ${workspaceLabel} view.`
@@ -605,13 +615,6 @@ export function Sidebar({
               />
             )}
             <Button
-              icon="reset"
-              text="Revert"
-              onClick={activeDocumentFileActions.onRevert}
-              disabled={!activeDocumentFileActions.isDirty}
-              small
-            />
-            <Button
               icon="history"
               text="History"
               active={activeDocumentFileActions.historyOpen}
@@ -641,6 +644,26 @@ export function Sidebar({
                     onClick={documentExportAction}
                     disabled={!documentCanExport}
                     loading={!!activeDocumentFileActions.exporting}
+                    small
+                    fill
+                  />
+                </span>
+              </Tooltip2>
+            )}
+            {documentPdfAction && (
+              <Tooltip2
+                content={exportPdfDisabledReason ?? activeDocumentFileActions.exportPdfTitle ?? "Export PDF"}
+                disabled={!exportPdfDisabledReason}
+                placement="top"
+                minimal
+              >
+                <span className="sidebar-file-action-tooltip">
+                  <Button
+                    icon="print"
+                    text={activeDocumentFileActions.exportPdfLabel ?? "PDF"}
+                    onClick={documentPdfAction}
+                    disabled={!documentCanExportPdf}
+                    loading={!!activeDocumentFileActions.exportingPdf}
                     small
                     fill
                   />

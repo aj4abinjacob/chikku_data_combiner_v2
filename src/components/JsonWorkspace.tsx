@@ -1935,8 +1935,14 @@ export function JsonWorkspace({
         )}
       </div>
       <div className="json-panel-footer">
-        <span>{history.index + 1} / {history.entries.length}</span>
-        <span>{canRedo ? `${history.entries.length - 1 - history.index} ahead` : "latest"}</span>
+        <div className="json-history-meta">
+          <span>{history.index + 1} / {history.entries.length}</span>
+          <span>{canRedo ? `${history.entries.length - 1 - history.index} ahead` : "latest"}</span>
+        </div>
+        <div className="json-history-actions">
+          <Button minimal small icon="undo" text="Undo" onClick={handleUndo} disabled={!canUndo} />
+          <Button minimal small icon="redo" text="Redo" onClick={handleRedo} disabled={!canRedo} />
+        </div>
       </div>
     </section>
   );
@@ -2244,8 +2250,6 @@ export function JsonWorkspace({
                   Text editor
                 </span>
                 <div className="json-icon-actions">
-                  <Button minimal small icon="undo" text="Undo" onClick={handleUndo} disabled={!canUndo} />
-                  <Button minimal small icon="redo" text="Redo" onClick={handleRedo} disabled={!canRedo} />
                   <Button
                     minimal
                     small
