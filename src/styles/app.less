@@ -403,6 +403,7 @@ html, body, #root {
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
   height: 100%;
+  position: relative;
   background: #f7f9fb;
   border-right: 1px solid #d8e1e8;
   display: flex;
@@ -609,6 +610,8 @@ html, body, #root {
     border: 1px solid #e1e8ed;
     border-radius: 6px;
     transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+    -webkit-user-select: none;
+    user-select: none;
 
     &.active {
       background: #eef7ff;
@@ -702,6 +705,9 @@ html, body, #root {
       display: block;
       color: #182026;
       font-weight: 500;
+      cursor: text;
+      -webkit-user-select: text;
+      user-select: text;
     }
 
     .table-text {
@@ -730,6 +736,70 @@ html, body, #root {
 
     .table-delete-btn:hover {
       opacity: 1 !important;
+    }
+  }
+
+  .file-context-menu {
+    position: absolute;
+    z-index: 1400;
+    width: 168px;
+    padding: 4px;
+    border: 1px solid #cfd9e3;
+    border-radius: var(--control-radius);
+    background: #fff;
+    box-shadow: 0 8px 18px rgba(17, 20, 24, 0.12), 0 1px 2px rgba(17, 20, 24, 0.08);
+    animation: motion-popover-in var(--motion-duration-fast) var(--motion-ease-out);
+  }
+
+  .file-context-menu-item {
+    width: 100%;
+    min-height: 28px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #30404d;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+
+    .bp4-icon {
+      flex-shrink: 0;
+      color: #5c7080;
+    }
+
+    span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    &:hover:not(:disabled),
+    &:focus-visible:not(:disabled) {
+      outline: none;
+      background: #eef7ff;
+      color: #106ba3;
+
+      .bp4-icon {
+        color: #137cbd;
+      }
+    }
+
+    &:disabled {
+      color: #8a9ba8;
+      cursor: default;
+
+      .bp4-icon {
+        color: #a7b6c2;
+      }
     }
   }
 
@@ -12013,6 +12083,38 @@ html.dark-theme #root {
         color: @dark-text-3;
       }
 
+    }
+
+    .file-context-menu {
+      border-color: @dark-border-1;
+      background: @dark-bg-3;
+      box-shadow: 0 12px 26px fade(#000, 34%), 0 0 0 1px fade(#000, 22%);
+    }
+
+    .file-context-menu-item {
+      color: @dark-text-2;
+
+      .bp4-icon {
+        color: @dark-text-3;
+      }
+
+      &:hover:not(:disabled),
+      &:focus-visible:not(:disabled) {
+        background: @dark-bg-4;
+        color: @dark-text-1;
+
+        .bp4-icon {
+          color: @dark-accent;
+        }
+      }
+
+      &:disabled {
+        color: @dark-text-4;
+
+        .bp4-icon {
+          color: @dark-text-4;
+        }
+      }
     }
 
     .sidebar-file-actions {

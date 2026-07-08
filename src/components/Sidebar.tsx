@@ -48,10 +48,20 @@ interface SidebarProps {
   documentFileActions?: DocumentWorkspaceFileActions | null;
 }
 
+interface FileContextMenuState {
+  table: LoadedTable;
+  x: number;
+  y: number;
+}
+
 type FileListIcon = {
   icon: "array" | "document" | "panel-table" | "th-derived";
   className: string;
 };
+
+const FILE_CONTEXT_MENU_WIDTH = 168;
+const FILE_CONTEXT_MENU_HEIGHT = 36;
+const FILE_CONTEXT_MENU_MARGIN = 8;
 
 function getFileExtension(filePath: string): string {
   return filePath.split(".").pop()?.toLowerCase() || "";
@@ -155,6 +165,9 @@ export function Sidebar({
   const [selectedForCombine, setSelectedForCombine] = useState<Set<string>>(new Set());
   const [columnSearch, setColumnSearch] = useState("");
   const [tableSearch, setTableSearch] = useState("");
+  const [fileContextMenu, setFileContextMenu] = useState<FileContextMenuState | null>(null);
+  const sidebarRef = React.useRef<HTMLDivElement>(null);
+  const fileContextMenuRef = React.useRef<HTMLDivElement>(null);
 
   // Drag-and-drop state
   const dragIndexRef = React.useRef<number | null>(null);
@@ -207,6 +220,71 @@ export function Sidebar({
   const deselectAllTablesForCombine = () => {
     setSelectedForCombine(new Set());
   };
+
+  const openFileContextMenu = (event: React.MouseEvent<HTMLDivElement>, table: LoadedTable) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const rect = sidebarRef.current?.getBoundingClientRect();
+    const left = rect?.left ?? 0;
+    const top = rect?.top ?? 0;
+    const width = rect?.width ?? window.innerWidth;
+    const height = rect?.height ?? window.innerHeight;
+    const rowRect = event.currentTarget.getBoundingClientRect();
+    const maxX = Math.max(FILE_CONTEXT_MENU_MARGIN, width - FILE_CONTEXT_MENU_WIDTH - FILE_CONTEXT_MENU_MARGIN);
+    const maxY = Math.max(FILE_CONTEXT_MENU_MARGIN, height - FILE_CONTEXT_MENU_HEIGHT - FILE_CONTEXT_MENU_MARGIN);
+    const x = Math.max(
+      FILE_CONTEXT_MENU_MARGIN,
+      Math.min(event.clientX - left, maxX)
+    );
+    const y = Math.max(
+      FILE_CONTEXT_MENU_MARGIN,
+      Math.min(rowRect.bottom - top + 4, maxY)
+    );
+
+    setFileContextMenu({ table, x, y });
+  };
+
+  const copyContextFilePath = async () => {
+    if (!fileContextMenu || fileContextMenu.table.filePath.startsWith("(")) return;
+
+    try {
+      await navigator.clipboard.writeText(fileContextMenu.table.filePath);
+    } catch (err) {
+      console.warn("Failed to copy file path:", err);
+    } finally {
+      setFileContextMenu(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!fileContextMenu) return;
+
+    const isInsideMenu = (target: EventTarget | null): boolean => {
+      return target instanceof Node && !!fileContextMenuRef.current?.contains(target);
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (isInsideMenu(event.target)) return;
+      setFileContextMenu(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFileContextMenu(null);
+    };
+    const closeMenu = () => setFileContextMenu(null);
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [fileContextMenu]);
 
   // Use columnOrder if available, otherwise fall back to schema order
   const orderedColumns = columnOrder.length > 0
@@ -314,7 +392,7 @@ export function Sidebar({
     || selectedForCombine.size === 0;
 
   return (
-    <div className={`sidebar${documentWorkspaceActive ? " sidebar-document" : ""}${jsonWorkspaceActive ? " sidebar-json" : ""}`}>
+    <div ref={sidebarRef} className={`sidebar${documentWorkspaceActive ? " sidebar-document" : ""}${jsonWorkspaceActive ? " sidebar-json" : ""}`}>
       {/* Loaded files */}
       <div className="sidebar-section sidebar-section-tables">
         <div className="sidebar-section-header">
@@ -379,6 +457,7 @@ export function Sidebar({
             <div
               key={t.tableName}
               className={`table-list-item${t.tableName === activeTable ? " active" : ""}${selectedForCombine.has(t.tableName) ? " selected" : ""}`}
+              onContextMenu={(event) => openFileContextMenu(event, t)}
             >
               {tables.length >= 2 && (
                 rowCombineSelectionDisabledReason ? (
@@ -824,6 +903,28 @@ export function Sidebar({
             onClick={onExport}
             small
           />
+        </div>
+      )}
+
+      {fileContextMenu && (
+        <div
+          ref={fileContextMenuRef}
+          className="file-context-menu"
+          style={{ left: fileContextMenu.x, top: fileContextMenu.y }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button
+            type="button"
+            className="file-context-menu-item"
+            disabled={fileContextMenu.table.filePath.startsWith("(")}
+            title={fileContextMenu.table.filePath.startsWith("(") ? "No file path available" : "Copy full file path"}
+            onClick={() => {
+              void copyContextFilePath();
+            }}
+          >
+            <Icon icon="path" size={13} />
+            <span>Copy Full Path</span>
+          </button>
         </div>
       )}
 
