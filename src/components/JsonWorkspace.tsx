@@ -35,6 +35,19 @@ const JSON_TREE_MENU_HEIGHT_PX = 118;
 const JSON_TREE_MENU_MARGIN_PX = 8;
 
 type JsonCommandFeedbackKey = "copy" | "minify" | "format" | "wrap";
+type JsonTreeSearchMode = "tree" | "value";
+
+function isApplePlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /mac|iphone|ipad|ipod/i.test(navigator.platform);
+}
+
+function isFindShortcut(event: KeyboardEvent): boolean {
+  if (event.key.toLowerCase() !== "f" || event.altKey || event.shiftKey) return false;
+  return isApplePlatform()
+    ? event.metaKey && !event.ctrlKey
+    : event.ctrlKey && !event.metaKey;
+}
 
 interface JsonTreeContextItem {
   name: string;
@@ -201,7 +214,7 @@ function nodeMatches(value: JsonValue, name: string, path: string, query: string
   if (name.toLowerCase().includes(q) || searchablePathText(path).includes(q)) return true;
   if (getJsonType(value).includes(q)) return true;
   if (value === null || typeof value !== "object") {
-    return String(value).toLowerCase().includes(q);
+    return scalarValueMatches(value, query);
   }
   if (Array.isArray(value)) {
     return value.some((child, index) => nodeMatches(child, String(index), `${path}[${index}]`, query));
@@ -218,7 +231,7 @@ function nodeSelfMatches(value: JsonValue, name: string, path: string, query: st
   if (name.toLowerCase().includes(q) || searchablePathText(path).includes(q)) return true;
   if (getJsonType(value).includes(q)) return true;
   if (value === null || typeof value !== "object") {
-    return String(value).toLowerCase().includes(q);
+    return scalarValueMatches(value, query);
   }
   return false;
 }
@@ -240,6 +253,139 @@ function countSelfMatches(value: JsonValue, name: string, path: string, query: s
   return total;
 }
 
+function scalarValueMatches(value: JsonValue, query: string): boolean {
+  if (value !== null && typeof value === "object") return false;
+  const queries = valueSearchQueries(query);
+  if (queries.length === 0) return false;
+  const texts = scalarValueSearchTexts(value).map((text) => text.toLowerCase());
+  return queries.some((q) => texts.some((text) => text.includes(q)));
+}
+
+function scalarValueSearchTexts(value: JsonValue): string[] {
+  if (value !== null && typeof value === "object") return [];
+  const text = formatJsonScalar(value);
+  const literal = typeof value === "string" ? JSON.stringify(value) : text;
+  return Array.from(new Set([text, literal].filter(Boolean)));
+}
+
+function valueSearchQueries(query: string): string[] {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const variants = [trimmed];
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+  if (trimmed.length >= 2 && ((first === "\"" && last === "\"") || (first === "'" && last === "'"))) {
+    variants.push(trimmed.slice(1, -1));
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed === null || typeof parsed === "string" || typeof parsed === "number" || typeof parsed === "boolean") {
+      variants.push(formatJsonScalar(parsed as JsonValue));
+    }
+  } catch {
+    // Plain contains search does not require JSON-literal input.
+  }
+
+  return Array.from(new Set(variants.map((item) => item.toLowerCase()).filter(Boolean)));
+}
+
+function findContainedValueQuery(text: string, query: string): string {
+  const lowerText = text.toLowerCase();
+  return valueSearchQueries(query).find((q) => lowerText.includes(q)) ?? query.trim();
+}
+
+function nodeMatchesValue(value: JsonValue, path: string, query: string): boolean {
+  const q = query.trim();
+  if (!q) return true;
+  if (scalarValueMatches(value, q)) return true;
+  if (Array.isArray(value)) {
+    return value.some((child, index) => nodeMatchesValue(child, `${path}[${index}]`, q));
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value).some(([key, child]) => {
+      const childPath = path === "$" ? `$.${key}` : `${path}.${key}`;
+      return nodeMatchesValue(child, childPath, q);
+    });
+  }
+  return false;
+}
+
+function nodeMatchesForMode(
+  value: JsonValue,
+  name: string,
+  path: string,
+  query: string,
+  mode: JsonTreeSearchMode
+): boolean {
+  return mode === "value"
+    ? nodeMatchesValue(value, path, query)
+    : nodeMatches(value, name, path, query);
+}
+
+function countValueMatches(value: JsonValue, query: string): number {
+  let total = scalarValueMatches(value, query) ? 1 : 0;
+  if (Array.isArray(value)) {
+    value.forEach((child) => {
+      total += countValueMatches(child, query);
+    });
+  } else if (value && typeof value === "object") {
+    Object.values(value).forEach((child) => {
+      total += countValueMatches(child, query);
+    });
+  }
+  return total;
+}
+
+function countMatchesForMode(
+  value: JsonValue,
+  name: string,
+  path: string,
+  query: string,
+  mode: JsonTreeSearchMode
+): number {
+  return mode === "value"
+    ? countValueMatches(value, query)
+    : countSelfMatches(value, name, path, query);
+}
+
+function renderHighlightedSearchText(text: string, query: string): React.ReactNode {
+  const q = findContainedValueQuery(text, query);
+  if (!q) return text;
+
+  const lowerText = text.toLowerCase();
+  const lowerQuery = q.toLowerCase();
+  const firstIndex = lowerText.indexOf(lowerQuery);
+  if (firstIndex === -1) return text;
+
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  let matchIndex = firstIndex;
+  let key = 0;
+
+  while (matchIndex !== -1) {
+    if (matchIndex > cursor) {
+      parts.push(<React.Fragment key={`text-${key}`}>{text.slice(cursor, matchIndex)}</React.Fragment>);
+      key += 1;
+    }
+    parts.push(
+      <mark key={`match-${key}`} className="json-tree-value-highlight">
+        {text.slice(matchIndex, matchIndex + q.length)}
+      </mark>
+    );
+    key += 1;
+    cursor = matchIndex + q.length;
+    matchIndex = lowerText.indexOf(lowerQuery, cursor);
+  }
+
+  if (cursor < text.length) {
+    parts.push(<React.Fragment key={`text-${key}`}>{text.slice(cursor)}</React.Fragment>);
+  }
+
+  return parts;
+}
+
 function JsonTypeBadge({ value }: { value: JsonValue }): React.ReactElement {
   const type = getJsonType(value);
   const count = getChildCount(value);
@@ -255,6 +401,7 @@ interface JsonTreeRowProps {
   expanded: Set<string>;
   selectedPath: string;
   search: string;
+  searchMode: JsonTreeSearchMode;
   onToggle: (path: string) => void;
   onSelect: (path: string) => void;
   onContextMenu: (event: React.MouseEvent<HTMLDivElement>, item: JsonTreeContextItem) => void;
@@ -268,11 +415,12 @@ function JsonTreeRow({
   expanded,
   selectedPath,
   search,
+  searchMode,
   onToggle,
   onSelect,
   onContextMenu,
 }: JsonTreeRowProps): React.ReactElement | null {
-  if (!nodeMatches(value, name, path, search)) return null;
+  if (!nodeMatchesForMode(value, name, path, search, searchMode)) return null;
 
   const expandable = value !== null && typeof value === "object" && getChildCount(value) > 0;
   const isExpanded = expanded.has(path);
@@ -280,6 +428,12 @@ function JsonTreeRow({
   const isVisuallyExpanded = isExpanded || searchActive;
   const scalar = formatJsonScalar(value);
   const isSelected = selectedPath === path;
+  const isValueMatch = scalarValueMatches(value, search);
+  const isSearchMatch = searchActive && (
+    searchMode === "value"
+      ? isValueMatch
+      : nodeSelfMatches(value, name, path, search)
+  );
 
   let children: React.ReactNode = null;
   if (expandable && isVisuallyExpanded) {
@@ -294,6 +448,7 @@ function JsonTreeRow({
           expanded={expanded}
           selectedPath={selectedPath}
           search={search}
+          searchMode={searchMode}
           onToggle={onToggle}
           onSelect={onSelect}
           onContextMenu={onContextMenu}
@@ -312,6 +467,7 @@ function JsonTreeRow({
             expanded={expanded}
             selectedPath={selectedPath}
             search={search}
+            searchMode={searchMode}
             onToggle={onToggle}
             onSelect={onSelect}
             onContextMenu={onContextMenu}
@@ -324,7 +480,7 @@ function JsonTreeRow({
   return (
     <>
       <div
-        className={`json-tree-row${isSelected ? " selected" : ""}`}
+        className={`json-tree-row${isSelected ? " selected" : ""}${isSearchMatch ? " search-match" : ""}`}
         style={{ paddingLeft: 8 + depth * 18 }}
         role="treeitem"
         tabIndex={0}
@@ -363,7 +519,11 @@ function JsonTreeRow({
           <span className="json-tree-toggle-spacer" />
         )}
         <span className="json-tree-name">{name}</span>
-        {scalar && <span className="json-tree-value">{scalar}</span>}
+        {scalar && (
+          <span className={`json-tree-value${isValueMatch ? " is-value-match" : ""}`}>
+            {isValueMatch ? renderHighlightedSearchText(scalar, search) : scalar}
+          </span>
+        )}
         <JsonTypeBadge value={value} />
       </div>
       {children}
@@ -387,6 +547,7 @@ export function JsonWorkspace({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState("$");
   const [treeSearch, setTreeSearch] = useState("");
+  const [treeSearchMode, setTreeSearchMode] = useState<JsonTreeSearchMode>("tree");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["$"]));
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
   const [structuredView, setStructuredView] = useState<"tree" | "table">("tree");
@@ -398,6 +559,7 @@ export function JsonWorkspace({
   const [compareLoadError, setCompareLoadError] = useState<string | null>(null);
   const [compareView, setCompareView] = useState<"tree" | "table">("tree");
   const [compareSearch, setCompareSearch] = useState("");
+  const [compareSearchMode, setCompareSearchMode] = useState<JsonTreeSearchMode>("tree");
   const [compareSelectedPath, setCompareSelectedPath] = useState("$");
   const [compareExpanded, setCompareExpanded] = useState<Set<string>>(() => new Set(["$"]));
   const [history, dispatchHistory] = useReducer(jsonHistoryReducer, { entries: [], index: 0 });
@@ -414,6 +576,8 @@ export function JsonWorkspace({
   const [commandFeedback, setCommandFeedback] = useState<JsonCommandFeedback | null>(null);
   const [treeContextMenu, setTreeContextMenu] = useState<JsonTreeContextMenuState | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const sourceTreeSearchRef = useRef<HTMLInputElement>(null);
+  const compareTreeSearchRef = useRef<HTMLInputElement>(null);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const treeContextMenuRef = useRef<HTMLDivElement>(null);
   const rawTextRef = useRef(rawText);
@@ -594,6 +758,7 @@ export function JsonWorkspace({
         setCompareSelectedPath("$");
         setCompareExpanded(new Set(["$"]));
         setCompareSearch("");
+        setCompareSearchMode("tree");
       })
       .catch((err) => {
         if (!cancelled) {
@@ -880,6 +1045,17 @@ export function JsonWorkspace({
     showCommandFeedback("wrap", nextWrapped ? "Wrapped" : "Unwrapped");
   }, [flushPendingHistory, showCommandFeedback, wrapEditorContent]);
 
+  const focusTreeSearch = useCallback((
+    inputRef: React.RefObject<HTMLInputElement>,
+    onViewChange: React.Dispatch<React.SetStateAction<"tree" | "table">>
+  ) => {
+    onViewChange("tree");
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+  }, []);
+
   useEffect(() => {
     onFileActionsChange?.({
       isDirty,
@@ -923,7 +1099,18 @@ export function JsonWorkspace({
       const meta = event.metaKey || event.ctrlKey;
       if (!meta) return;
       const key = event.key.toLowerCase();
-      if (key === "s") {
+      if (isFindShortcut(event)) {
+        event.preventDefault();
+        const activeElement = document.activeElement;
+        const activeComparePane = activeElement instanceof Element
+          ? activeElement.closest(".json-structured-document.json-compare-pane")
+          : null;
+        if (compareMode && activeComparePane) {
+          focusTreeSearch(compareTreeSearchRef, setCompareView);
+        } else {
+          focusTreeSearch(sourceTreeSearchRef, setStructuredView);
+        }
+      } else if (key === "s") {
         event.preventDefault();
         if (isDirty && isValid && !saving) handleSave();
       } else if (key === "z" && !event.shiftKey) {
@@ -936,7 +1123,18 @@ export function JsonWorkspace({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleSave, isDirty, isValid, saving, canUndo, canRedo, handleUndo, handleRedo]);
+  }, [
+    canRedo,
+    canUndo,
+    compareMode,
+    focusTreeSearch,
+    handleRedo,
+    handleSave,
+    handleUndo,
+    isDirty,
+    isValid,
+    saving,
+  ]);
 
   useEffect(() => {
     if (!statusMessage) return;
@@ -1034,6 +1232,9 @@ export function JsonWorkspace({
     onViewChange,
     search,
     onSearchChange,
+    searchInputRef,
+    searchMode,
+    onSearchModeChange,
     selected,
     onSelectedChange,
     expandedPaths,
@@ -1058,6 +1259,9 @@ export function JsonWorkspace({
     onViewChange: React.Dispatch<React.SetStateAction<"tree" | "table">>;
     search: string;
     onSearchChange: React.Dispatch<React.SetStateAction<string>>;
+    searchInputRef: React.RefObject<HTMLInputElement>;
+    searchMode: JsonTreeSearchMode;
+    onSearchModeChange: React.Dispatch<React.SetStateAction<JsonTreeSearchMode>>;
     selected: string;
     onSelectedChange: React.Dispatch<React.SetStateAction<string>>;
     expandedPaths: Set<string>;
@@ -1068,12 +1272,16 @@ export function JsonWorkspace({
     titleActions?: React.ReactNode;
   }) => {
     const searchActive = search.trim().length > 0;
-    const matchesRoot = isValidDocument ? nodeMatches(parsedResult.value as JsonValue, "root", "$", search) : false;
+    const matchesRoot = isValidDocument
+      ? nodeMatchesForMode(parsedResult.value as JsonValue, "root", "$", search, searchMode)
+      : false;
     const matchCount = isValidDocument && searchActive
-      ? countSelfMatches(parsedResult.value as JsonValue, "root", "$", search)
+      ? countMatchesForMode(parsedResult.value as JsonValue, "root", "$", search, searchMode)
       : 0;
     const paneSelectedLabel = flattenPathForLabel(selected) || "$";
     const errorMessage = loadErrorMessage || parsedResult.error;
+    const searchPlaceholder = searchMode === "value" ? "Search values..." : "Search tree...";
+    const matchLabel = searchMode === "value" ? "value match" : "match";
 
     return (
       <section className={className}>
@@ -1110,12 +1318,31 @@ export function JsonWorkspace({
           <div className="json-structured-body">
             <div className="json-tree-tools">
               <InputGroup
+                inputRef={searchInputRef}
                 small
                 leftIcon="search"
-                placeholder="Search tree..."
+                placeholder={searchPlaceholder}
                 value={search}
                 onChange={(event) => onSearchChange(event.currentTarget.value)}
               />
+              <div className="json-tree-search-mode" role="group" aria-label={`${title} search mode`}>
+                <Button
+                  minimal
+                  small
+                  icon="list"
+                  text="Tree"
+                  active={searchMode === "tree"}
+                  onClick={() => onSearchModeChange("tree")}
+                />
+                <Button
+                  minimal
+                  small
+                  icon="variable"
+                  text="Values"
+                  active={searchMode === "value"}
+                  onClick={() => onSearchModeChange("value")}
+                />
+              </div>
               <span className="json-path-pill" title={selected}>
                 <Icon icon="path" size={12} />
                 <span>Selected path:</span>
@@ -1124,7 +1351,7 @@ export function JsonWorkspace({
             </div>
             {searchActive && (
               <div className="json-tree-search-meta">
-                {matchCount.toLocaleString()} match{matchCount === 1 ? "" : "es"}
+                {matchCount.toLocaleString()} {matchLabel}{matchCount === 1 ? "" : "es"}
               </div>
             )}
             <div className="json-tree-column-header" aria-hidden="true">
@@ -1138,7 +1365,7 @@ export function JsonWorkspace({
               {!loadingDocument && isValidDocument && searchActive && !matchesRoot && (
                 <div className="json-tree-empty">
                   <Icon icon="search" size={18} />
-                  <span>No matches for "{search.trim()}"</span>
+                  <span>No {searchMode === "value" ? "value " : ""}matches for "{search.trim()}"</span>
                 </div>
               )}
               {!loadingDocument && isValidDocument && (!searchActive || matchesRoot) && (
@@ -1150,6 +1377,7 @@ export function JsonWorkspace({
                   expanded={expandedPaths}
                   selectedPath={selected}
                   search={search}
+                  searchMode={searchMode}
                   onToggle={onTogglePath}
                   onSelect={onSelectedChange}
                   onContextMenu={(event, item) => openTreeContextMenu(event, item, onSelectedChange)}
@@ -1416,6 +1644,9 @@ export function JsonWorkspace({
               onViewChange: setStructuredView,
               search: treeSearch,
               onSearchChange: setTreeSearch,
+              searchInputRef: sourceTreeSearchRef,
+              searchMode: treeSearchMode,
+              onSearchModeChange: setTreeSearchMode,
               selected: selectedPath,
               onSelectedChange: setSelectedPath,
               expandedPaths: expanded,
@@ -1442,6 +1673,9 @@ export function JsonWorkspace({
               onViewChange: setCompareView,
               search: compareSearch,
               onSearchChange: setCompareSearch,
+              searchInputRef: compareTreeSearchRef,
+              searchMode: compareSearchMode,
+              onSearchModeChange: setCompareSearchMode,
               selected: compareSelectedPath,
               onSelectedChange: setCompareSelectedPath,
               expandedPaths: compareExpanded,
@@ -1566,6 +1800,9 @@ export function JsonWorkspace({
               onViewChange: setStructuredView,
               search: treeSearch,
               onSearchChange: setTreeSearch,
+              searchInputRef: sourceTreeSearchRef,
+              searchMode: treeSearchMode,
+              onSearchModeChange: setTreeSearchMode,
               selected: selectedPath,
               onSelectedChange: setSelectedPath,
               expandedPaths: expanded,
