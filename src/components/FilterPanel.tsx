@@ -1342,55 +1342,63 @@ function QcPanel({
     <div className="qc-panel">
       <div className="qc-workbench">
         <div className="qc-card qc-create-card">
-          <div className="qc-card-title">
-            <strong>{session ? "QC field" : "Create QC field"}</strong>
-            {session && (
-              <Tag minimal intent={session.done ? Intent.SUCCESS : Intent.PRIMARY}>
-                {session.done ? "Done" : "Draft"}
-              </Tag>
-            )}
-          </div>
-
-          <label className="qc-panel-field">
-            <span>Column</span>
-            <InputGroup
-              value={session?.columnName ?? columnName}
-              onChange={(e) => {
-                setColumnName(e.target.value);
-                setMessage(null);
-              }}
-              small
-              disabled={!!session || !canCreate}
-            />
-          </label>
-
-          <div className="qc-panel-field">
-            <span>Field type</span>
-            <div className="qc-mode-toggle qc-mode-toggle-full" role="group" aria-label="QC type">
-              <button
-                type="button"
-                className={activeMode === "boolean" ? "active" : ""}
-                onClick={() => setDraftMode("boolean")}
-                disabled={!!session}
-              >
-                Boolean
-              </button>
-              <button
-                type="button"
-                className={activeMode === "options" ? "active" : ""}
-                onClick={() => setDraftMode("options")}
-                disabled={!!session}
-              >
-                Dropdown
-              </button>
+          <div className="qc-create-header">
+            <div className="qc-card-title">
+              <div>
+                <strong>{session ? "QC field" : "Create QC field"}</strong>
+                <em>{activeMode === "boolean" ? "Boolean" : "Dropdown"}</em>
+              </div>
+              {session && (
+                <Tag minimal intent={session.done ? Intent.SUCCESS : Intent.PRIMARY}>
+                  {session.done ? "Done" : "Draft"}
+                </Tag>
+              )}
             </div>
           </div>
 
-          {activeMode === "boolean" ? (
-            <>
+          <div className="qc-create-body">
+            <label className="qc-panel-field qc-column-field">
+              <span>Column</span>
+              <InputGroup
+                value={session?.columnName ?? columnName}
+                onChange={(e) => {
+                  setColumnName(e.target.value);
+                  setMessage(null);
+                }}
+                small
+                disabled={!!session || !canCreate}
+              />
+            </label>
+
+            <div className="qc-panel-field">
+              <span>Field type</span>
+              <div className="qc-mode-toggle qc-mode-toggle-full" role="group" aria-label="QC type">
+                <button
+                  type="button"
+                  className={activeMode === "boolean" ? "active" : ""}
+                  onClick={() => setDraftMode("boolean")}
+                  disabled={!!session}
+                >
+                  Boolean
+                </button>
+                <button
+                  type="button"
+                  className={activeMode === "options" ? "active" : ""}
+                  onClick={() => setDraftMode("options")}
+                  disabled={!!session}
+                >
+                  Dropdown
+                </button>
+              </div>
+            </div>
+
+            {activeMode === "boolean" ? (
               <div className="qc-bool-values-grid">
-                <label className="qc-panel-field">
-                  <span>Tick value</span>
+                <label className="qc-panel-field qc-value-field accepted">
+                  <span>
+                    <Icon icon="tick" size={11} />
+                    Tick value
+                  </span>
                   <InputGroup
                     value={session?.trueValue ?? trueValue}
                     onChange={(e) => setTrueValue(e.target.value)}
@@ -1398,8 +1406,11 @@ function QcPanel({
                     disabled={!!session || !canCreate}
                   />
                 </label>
-                <label className="qc-panel-field">
-                  <span>X value</span>
+                <label className="qc-panel-field qc-value-field rejected">
+                  <span>
+                    <Icon icon="cross" size={11} />
+                    X value
+                  </span>
                   <InputGroup
                     value={session?.falseValue ?? falseValue}
                     onChange={(e) => setFalseValue(e.target.value)}
@@ -1408,39 +1419,44 @@ function QcPanel({
                   />
                 </label>
               </div>
-              {!session && (
-                <Button
-                  small
-                  icon="undo"
-                  text="Reset values"
-                  disabled={!canCreate}
-                  onClick={resetBoolDefaults}
-                />
-              )}
-            </>
-          ) : (
-            <div className="qc-create-note">
-              Dropdown options are managed in the values panel.
-            </div>
-          )}
+            ) : (
+              <div className="qc-create-note">
+                Dropdown options are managed in the values panel.
+              </div>
+            )}
+          </div>
 
-          <Checkbox
-            checked
-            disabled
-            label="Leave untouched as NULL"
-            className="qc-null-checkbox"
-          />
-
-          {!session && (
-            <Button
-              intent={Intent.PRIMARY}
-              icon="add"
-              text="Create QC Column"
-              disabled={!canCreate || (isOptionMode && parsedOptions.length === 0)}
-              loading={working === "create"}
-              onClick={handleCreate}
+          <div className="qc-create-footer">
+            <Checkbox
+              checked
+              disabled
+              label="Leave untouched as NULL"
+              className="qc-null-checkbox"
             />
-          )}
+
+            {!session && (
+              <div className="qc-create-actions">
+                {activeMode === "boolean" && (
+                  <Button
+                    small
+                    icon="undo"
+                    text="Reset values"
+                    disabled={!canCreate}
+                    onClick={resetBoolDefaults}
+                  />
+                )}
+                <Button
+                  intent={Intent.PRIMARY}
+                  icon="add"
+                  text="Create QC Column"
+                  disabled={!canCreate || (isOptionMode && parsedOptions.length === 0)}
+                  loading={working === "create"}
+                  onClick={handleCreate}
+                  small
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="qc-card qc-values-card">
