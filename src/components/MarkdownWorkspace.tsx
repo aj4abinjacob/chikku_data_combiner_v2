@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Callout, Icon, Intent } from "@blueprintjs/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -27,8 +28,115 @@ interface MarkdownHistoryEntry {
   timestamp: number;
 }
 
+const markdownSanitizeSchema = {
+  ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    src: Array.from(new Set([...(defaultSchema.protocols?.src ?? []), "data", "blob", "asset", "file"])),
+  },
+};
+
+const WEB_IMAGE_SRC_PATTERN = /^(?:https?:|data:|blob:|asset:|tauri:)/i;
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/;
+
 function getFileExtension(filePath: string): string {
   return filePath.split(".").pop()?.toUpperCase() || "MD";
+}
+
+function getFileDirectory(filePath: string): string {
+  const separatorIndex = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  return separatorIndex >= 0 ? filePath.slice(0, separatorIndex) : "";
+}
+
+function splitPathSuffix(src: string): { path: string; suffix: string } {
+  const suffixIndex = src.search(/[?#]/);
+  return suffixIndex === -1
+    ? { path: src, suffix: "" }
+    : { path: src.slice(0, suffixIndex), suffix: src.slice(suffixIndex) };
+}
+
+function safeDecodePath(filePath: string): string {
+  try {
+    return decodeURI(filePath);
+  } catch {
+    return filePath;
+  }
+}
+
+function fileUrlToPath(src: string): string {
+  try {
+    const url = new URL(src);
+    const decodedPath = decodeURIComponent(url.pathname);
+    if (url.hostname) return `//${url.hostname}${decodedPath}`;
+    return /^\/[a-zA-Z]:/.test(decodedPath) ? decodedPath.slice(1) : decodedPath;
+  } catch {
+    return src;
+  }
+}
+
+function isAbsoluteLocalPath(filePath: string): boolean {
+  return filePath.startsWith("/") || filePath.startsWith("\\\\") || WINDOWS_ABSOLUTE_PATH_PATTERN.test(filePath);
+}
+
+function normalizeLocalPath(filePath: string): string {
+  const useBackslash = filePath.includes("\\") && !filePath.includes("/");
+  const normalized = filePath.replace(/\\/g, "/");
+  const drive = /^[a-zA-Z]:/.exec(normalized)?.[0] ?? "";
+  const isUnc = normalized.startsWith("//");
+  const isRooted = normalized.startsWith("/");
+  const prefix = drive ? `${drive}/` : isUnc ? "//" : isRooted ? "/" : "";
+  const rest = drive
+    ? normalized.slice(drive.length).replace(/^\/+/, "")
+    : isUnc
+      ? normalized.slice(2)
+      : normalized.replace(/^\/+/, "");
+  const parts: string[] = [];
+
+  for (const part of rest.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (parts.length > 0 && parts[parts.length - 1] !== "..") {
+        parts.pop();
+      } else if (!prefix) {
+        parts.push(part);
+      }
+      continue;
+    }
+    parts.push(part);
+  }
+
+  const path = `${prefix}${parts.join("/")}`;
+  return useBackslash ? path.replace(/\//g, "\\") : path;
+}
+
+function resolveLocalImagePath(markdownFilePath: string, imagePath: string): string {
+  const localPath = /^file:/i.test(imagePath) ? fileUrlToPath(imagePath) : safeDecodePath(imagePath);
+  if (isAbsoluteLocalPath(localPath)) return normalizeLocalPath(localPath);
+
+  const directory = getFileDirectory(markdownFilePath);
+  if (!directory) return normalizeLocalPath(localPath);
+
+  const separator = directory.includes("\\") && !directory.includes("/") ? "\\" : "/";
+  const joined = `${directory}${directory.endsWith("/") || directory.endsWith("\\") ? "" : separator}${localPath}`;
+  return normalizeLocalPath(joined);
+}
+
+function canConvertFileSrc(): boolean {
+  return typeof (window as any).__TAURI_INTERNALS__?.convertFileSrc === "function";
+}
+
+function resolveMarkdownImageSrc(src: string | undefined, markdownFilePath: string): string | undefined {
+  if (!src) return src;
+
+  const trimmed = src.trim();
+  if (!trimmed || WEB_IMAGE_SRC_PATTERN.test(trimmed) || trimmed.startsWith("//")) return src;
+  if (!canConvertFileSrc()) return src;
+
+  const { path, suffix } = splitPathSuffix(trimmed);
+  if (!path) return src;
+
+  const localPath = resolveLocalImagePath(markdownFilePath, path);
+  return `${convertFileSrc(localPath)}${suffix}`;
 }
 
 function slugify(text: string): string {
@@ -94,7 +202,15 @@ function buildHeadingIdQueues(headings: MarkdownHeading[]): Map<string, string[]
   return queues;
 }
 
-function MarkdownPreview({ text, headings }: { text: string; headings: MarkdownHeading[] }): React.ReactElement {
+function MarkdownPreview({
+  text,
+  headings,
+  filePath,
+}: {
+  text: string;
+  headings: MarkdownHeading[];
+  filePath: string;
+}): React.ReactElement {
   const headingIdQueues = buildHeadingIdQueues(headings);
   const makeHeading = (TagName: keyof JSX.IntrinsicElements, level: number) => {
     return ({ children, ...props }: any) => {
@@ -116,7 +232,7 @@ function MarkdownPreview({ text, headings }: { text: string; headings: MarkdownH
 
   return (
     <ReactMarkdown
-      rehypePlugins={[rehypeRaw, [rehypeSanitize, defaultSchema]]}
+      rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownSanitizeSchema]]}
       remarkPlugins={[remarkGfm]}
       components={{
         h1: makeHeading("h1", 1),
@@ -142,6 +258,14 @@ function MarkdownPreview({ text, headings }: { text: string; headings: MarkdownH
           <div className="markdown-table-scroll">
             <table {...props}>{children}</table>
           </div>
+        ),
+        img: ({ src, alt, ...props }) => (
+          <img
+            src={resolveMarkdownImageSrc(src, filePath)}
+            alt={alt ?? ""}
+            loading="lazy"
+            {...props}
+          />
         ),
       }}
     >
@@ -412,7 +536,7 @@ export function MarkdownWorkspace({
               </div>
             ) : (
               <article className="markdown-rendered">
-                <MarkdownPreview text={rawText} headings={headings} />
+                <MarkdownPreview text={rawText} headings={headings} filePath={table.filePath} />
               </article>
             )}
           </div>
