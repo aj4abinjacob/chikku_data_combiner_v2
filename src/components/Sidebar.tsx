@@ -42,6 +42,7 @@ interface SidebarProps {
   onExport: () => void;
   onOpenHistory: () => void;
   onOpenFiles: () => void;
+  onOpenHelp: () => void;
   onHide: () => void;
   jsonWorkspaceActive?: boolean;
   markdownWorkspaceActive?: boolean;
@@ -152,6 +153,7 @@ export function Sidebar({
   onExport,
   onOpenHistory,
   onOpenFiles,
+  onOpenHelp,
   onHide,
   jsonWorkspaceActive = false,
   markdownWorkspaceActive = false,
@@ -411,6 +413,14 @@ export function Sidebar({
             <span className="sidebar-count">{tables.length}</span>
           </div>
           <div className="table-header-actions">
+            <Button
+              icon="help"
+              minimal
+              small
+              onClick={onOpenHelp}
+              title="Open Help Center (F1)"
+              aria-label="Open Help Center"
+            />
             <Button
               icon="chevron-left"
               minimal

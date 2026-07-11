@@ -100,6 +100,7 @@ Includes substring, custom SQL, create/delete/combine/rename columns, sampling, 
 Shown instead of the data grid when the active file is json/jsonl/ndjson. Layout: toolbar (filename + dirty dot, Open/Save/Save As/Revert, Undo/Redo, Format/Minify, History toggle, validity tag) + resizable JSON tree panel + raw textarea editor (synced line numbers) + optional History panel + collapsible Flatten Preview. Full snapshot undo/redo via `useReducer` (`jsonHistoryReducer`, 100-entry cap, debounced typing pushes, immediate Format/Minify/Revert pushes); history list supports jump-to-any-point. Save writes in place via `writeTextFile`; Save As writes a copy (stays on current file). Cmd/Ctrl+S save, Cmd+Z/Cmd+Shift+Z undo/redo.
 
 ### Other Components
+- **HelpCenter.tsx**: Searchable in-app documentation covering first-run guidance, tabular workflows, multi-file tools, QC/history, JSON, Markdown, export, and shortcuts; available from the sidebar, welcome screen, collapsed sidebar, or F1
 - **ExportDialog.tsx**: Format selection (CSV/TSV/JSON/Excel/Parquet), table selection, view options, Excel row/col limit warnings
 - **CombineDialog.tsx**: Column mapping modal for UNION ALL with auto VARCHAR cast
 - **AggregateDialog.tsx**: Aggregate stats, optional Group By, materializes as `aggregate_N`

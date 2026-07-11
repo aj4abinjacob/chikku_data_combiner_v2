@@ -16,6 +16,7 @@ import { HistoryDialog } from "./HistoryDialog";
 import { UpdateNotice } from "./UpdateNotice";
 import { JsonWorkspace } from "./JsonWorkspace";
 import { MarkdownWorkspace } from "./MarkdownWorkspace";
+import { HelpCenter } from "./HelpCenter";
 import { buildColumnStatsSummaryQuery, buildColumnTopValuesQuery, buildColumnUniqueValuesQuery, buildCombineQuery } from "../utils/sqlBuilder";
 import { buildColOpUpdateSQL, buildStepDescription } from "../utils/colOpsSQL";
 import { buildRowOpSQL, buildRowOpStepDescription } from "../utils/rowOpsSQL";
@@ -474,6 +475,7 @@ export function App(): React.ReactElement {
   const [savedViewNextId, setSavedViewNextId] = useState(1);
   const [tableHistories, setTableHistories] = useState<Map<string, TableHistory>>(new Map());
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [helpCenterOpen, setHelpCenterOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("theme") === "dark");
   const [displayDecimalPlaces, setDisplayDecimalPlaces] = useState(() => {
     const storedValue = localStorage.getItem("displayDecimalPlaces");
@@ -2606,6 +2608,16 @@ export function App(): React.ReactElement {
       .catch((err) => console.warn("Failed to set window title", err));
   }, [activeDisplayFileName]);
 
+  useEffect(() => {
+    const handleHelpShortcut = (event: KeyboardEvent) => {
+      if (event.key !== "F1") return;
+      event.preventDefault();
+      setHelpCenterOpen(true);
+    };
+    window.addEventListener("keydown", handleHelpShortcut);
+    return () => window.removeEventListener("keydown", handleHelpShortcut);
+  }, []);
+
   return (
     <div className={`app-container${darkMode ? " bp4-dark dark-theme" : ""}${fileDragClass}`}>
       {fileDragState !== "idle" && (
@@ -2681,6 +2693,7 @@ export function App(): React.ReactElement {
               onExport={() => setExportDialogOpen(true)}
               onOpenHistory={() => setHistoryDialogOpen(true)}
               onOpenFiles={handleChooseFiles}
+              onOpenHelp={() => setHelpCenterOpen(true)}
               onHide={() => setSidebarVisible(false)}
               jsonWorkspaceActive={jsonWorkspaceActive}
               markdownWorkspaceActive={markdownWorkspaceActive}
@@ -2695,6 +2708,14 @@ export function App(): React.ReactElement {
                 small
                 onClick={() => setSidebarVisible(true)}
                 title="Show sidebar"
+              />
+              <Button
+                icon="help"
+                minimal
+                small
+                onClick={() => setHelpCenterOpen(true)}
+                title="Open Help Center (F1)"
+                aria-label="Open Help Center"
               />
             </div>
           </div>
@@ -2858,6 +2879,13 @@ export function App(): React.ReactElement {
                     large
                     onClick={handleChooseFiles}
                   />
+                  <Button
+                    icon="help"
+                    text="How Chikku works"
+                    large
+                    minimal
+                    onClick={() => setHelpCenterOpen(true)}
+                  />
                 </div>
                 <div className="welcome-path">
                   <div className="welcome-path-item">
@@ -2915,6 +2943,10 @@ export function App(): React.ReactElement {
         )}
         onClose={() => setCombineDialogOpen(false)}
         onCombine={handleCombineExecute}
+      />
+      <HelpCenter
+        isOpen={helpCenterOpen}
+        onClose={() => setHelpCenterOpen(false)}
       />
       <ExportDialog
         isOpen={exportDialogOpen}

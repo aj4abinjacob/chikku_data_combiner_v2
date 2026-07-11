@@ -11,6 +11,7 @@ A Tauri desktop app for viewing, combining, and transforming CSV/data files. Bui
 - **Pivot & Aggregate** — Build grouped, aggregate, pivot, lookup, and row-operation workflows
 - **Export** — Export filtered or combined results to CSV, TSV, JSON, Excel, or Parquet
 - **Cell Selection & Copy** — Select cells and copy as TSV
+- **In-App Help** — Searchable guidance for tabular, JSON, Markdown, multi-file, review, and export workflows
 
 ## Tech Stack
 
@@ -90,6 +91,7 @@ Each Tauri window owns its own in-memory DuckDB session. Files opened through th
 | Cmd+Shift+O / Ctrl+Shift+O | Add files to existing session |
 | Cmd+E / Ctrl+E | Export |
 | Cmd+C / Ctrl+C | Copy selected cells |
+| F1 | Open the in-app Help Center |
 
 ## License
 
