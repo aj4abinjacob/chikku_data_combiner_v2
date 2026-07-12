@@ -1,4 +1,4 @@
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Button, Callout, Icon, Intent } from "@blueprintjs/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 // html2canvas-pro's package root can resolve to a non-callable shape in the webpack dev bundle.
@@ -32,6 +32,59 @@ interface MarkdownHistoryEntry {
   label: string;
   text: string;
   timestamp: number;
+}
+
+interface MarkdownHistoryState {
+  entries: MarkdownHistoryEntry[];
+  index: number;
+}
+
+type MarkdownHistoryAction =
+  | { type: "clear" }
+  | { type: "reset"; entry: MarkdownHistoryEntry }
+  | { type: "push"; entry: MarkdownHistoryEntry }
+  | { type: "checkpoint"; entry: MarkdownHistoryEntry }
+  | { type: "undo" }
+  | { type: "redo" }
+  | { type: "jump"; id: number };
+
+function markdownHistoryReducer(state: MarkdownHistoryState, action: MarkdownHistoryAction): MarkdownHistoryState {
+  switch (action.type) {
+    case "clear":
+      return { entries: [], index: 0 };
+    case "reset":
+      return { entries: [action.entry], index: 0 };
+    case "push": {
+      const current = state.entries[state.index];
+      if (current?.text === action.entry.text) {
+        return state;
+      }
+
+      const kept = state.entries.slice(0, state.index + 1);
+      const next = [...kept, action.entry];
+      const overflow = Math.max(0, next.length - MARKDOWN_HISTORY_LIMIT);
+      const entries = overflow ? next.slice(overflow) : next;
+      return { entries, index: entries.length - 1 };
+    }
+    case "checkpoint": {
+      let index = state.index;
+      while (index >= 0 && state.entries[index]?.text !== action.entry.text) index--;
+      if (index < 0) return state;
+      const entries = [...state.entries];
+      entries[index] = { ...action.entry, id: entries[index].id };
+      return { ...state, entries };
+    }
+    case "undo":
+      return state.index > 0 ? { ...state, index: state.index - 1 } : state;
+    case "redo":
+      return state.index < state.entries.length - 1 ? { ...state, index: state.index + 1 } : state;
+    case "jump": {
+      const index = state.entries.findIndex((entry) => entry.id === action.id);
+      return index >= 0 ? { ...state, index } : state;
+    }
+    default:
+      return state;
+  }
 }
 
 interface TextSearchMatch {
@@ -81,6 +134,8 @@ const MARKDOWN_PDF_EXPORT_ROOT_ID = "markdown-pdf-export-root";
 const MARKDOWN_PDF_MARGIN_IN = 0.55;
 const MARKDOWN_SEARCH_MARK_CLASS = "markdown-search-mark";
 const MARKDOWN_SEARCH_SKIP_TAGS = new Set(["script", "style"]);
+const MARKDOWN_HISTORY_LIMIT = 50;
+const MARKDOWN_TYPING_PUSH_DELAY_MS = 700;
 const MARKDOWN_PDF_EXPORT_STYLES = `
   #${MARKDOWN_PDF_EXPORT_ROOT_ID} {
     position: fixed;
@@ -927,7 +982,7 @@ export function MarkdownWorkspace({
   const [statusIntent, setStatusIntent] = useState<"success" | "danger" | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [history, setHistory] = useState<MarkdownHistoryEntry[]>([]);
+  const [history, dispatchHistory] = useReducer(markdownHistoryReducer, { entries: [], index: 0 });
   const [markdownSplitPercent, setMarkdownSplitPercent] = useState(34);
   const [markdownSplitResizing, setMarkdownSplitResizing] = useState(false);
   const [markdownZoom, setMarkdownZoom] = useState(MARKDOWN_DEFAULT_ZOOM);
@@ -937,6 +992,9 @@ export function MarkdownWorkspace({
   const [renderedSearchMatchCount, setRenderedSearchMatchCount] = useState(0);
   const [headingSearch, setHeadingSearch] = useState("");
   const nextHistoryId = useRef(1);
+  const rawTextRef = useRef(rawText);
+  const historyPushTimerRef = useRef<number | null>(null);
+  const historyNavigationPendingRef = useRef(false);
   const markdownLayoutRef = useRef<HTMLDivElement>(null);
   const previewScrollRef = useRef<HTMLDivElement>(null);
   const renderedArticleRef = useRef<HTMLElement>(null);
@@ -1008,6 +1066,8 @@ export function MarkdownWorkspace({
   const resetZoomTitle = `Reset zoom (${markdownZoomShortcutModifier}+0)`;
   const canZoomIn = markdownZoom < MARKDOWN_ZOOM_LEVELS[MARKDOWN_ZOOM_LEVELS.length - 1];
   const canZoomOut = markdownZoom > MARKDOWN_ZOOM_LEVELS[0];
+  const canUndoHistory = history.index > 0;
+  const canRedoHistory = history.index < history.entries.length - 1;
 
   const updateLineNumbersScroll = useCallback((scrollTop: number) => {
     lineNumberScrollTopRef.current = scrollTop;
@@ -1419,20 +1479,48 @@ export function MarkdownWorkspace({
     return () => observer.disconnect();
   }, [headings, previewText]);
 
-  const pushHistory = useCallback((label: string, text: string) => {
-    setHistory((prev) => [
-      {
-        id: nextHistoryId.current++,
-        label,
-        text,
-        timestamp: Date.now(),
-      },
-      ...prev,
-    ].slice(0, 50));
+  const createHistoryEntry = useCallback((label: string, text: string): MarkdownHistoryEntry => ({
+    id: nextHistoryId.current++,
+    label,
+    text,
+    timestamp: Date.now(),
+  }), []);
+
+  const flushPendingHistory = useCallback(() => {
+    if (historyPushTimerRef.current === null) return;
+    window.clearTimeout(historyPushTimerRef.current);
+    historyPushTimerRef.current = null;
+    dispatchHistory({ type: "push", entry: createHistoryEntry("Edited", rawTextRef.current) });
+  }, [createHistoryEntry]);
+
+  useEffect(() => {
+    if (!historyNavigationPendingRef.current) return;
+    historyNavigationPendingRef.current = false;
+    const entry = history.entries[history.index];
+    if (!entry || entry.text === rawTextRef.current) return;
+    if (historyPushTimerRef.current !== null) {
+      window.clearTimeout(historyPushTimerRef.current);
+      historyPushTimerRef.current = null;
+    }
+    rawTextRef.current = entry.text;
+    setRawText(entry.text);
+    setStatusMessage(null);
+    setStatusIntent(null);
+  }, [history.entries, history.index]);
+
+  useEffect(() => () => {
+    if (historyPushTimerRef.current !== null) {
+      window.clearTimeout(historyPushTimerRef.current);
+    }
   }, []);
 
   useEffect(() => {
     let disposed = false;
+    if (historyPushTimerRef.current !== null) {
+      window.clearTimeout(historyPushTimerRef.current);
+      historyPushTimerRef.current = null;
+    }
+    historyNavigationPendingRef.current = false;
     setLoading(true);
     setLoadError(null);
     setStatusMessage(null);
@@ -1445,15 +1533,20 @@ export function MarkdownWorkspace({
         if (disposed) return;
         setRawText(text);
         setSavedText(text);
+        rawTextRef.current = text;
         nextHistoryId.current = 2;
-        setHistory([{ id: 1, label: "Opened", text, timestamp: Date.now() }]);
+        dispatchHistory({
+          type: "reset",
+          entry: { id: 1, label: "Opened", text, timestamp: Date.now() },
+        });
       })
       .catch((err) => {
         if (disposed) return;
         setLoadError(String(err));
         setRawText("");
         setSavedText("");
-        setHistory([]);
+        rawTextRef.current = "";
+        dispatchHistory({ type: "clear" });
       })
       .finally(() => {
         if (!disposed) setLoading(false);
@@ -1479,13 +1572,14 @@ export function MarkdownWorkspace({
   }, []);
 
   const handleSave = useCallback(async () => {
+    flushPendingHistory();
     setSaving(true);
     setStatusMessage(null);
     setStatusIntent(null);
     try {
       await window.api.writeTextFile(table.filePath, rawText);
       setSavedText(rawText);
-      pushHistory("Saved", rawText);
+      dispatchHistory({ type: "checkpoint", entry: createHistoryEntry("Saved", rawText) });
       onReloadTable();
       confirmMarkdownAction("Saved");
     } catch (err) {
@@ -1493,9 +1587,10 @@ export function MarkdownWorkspace({
     } finally {
       setSaving(false);
     }
-  }, [confirmMarkdownAction, onReloadTable, pushHistory, rawText, table.filePath]);
+  }, [confirmMarkdownAction, createHistoryEntry, flushPendingHistory, onReloadTable, rawText, table.filePath]);
 
   const handleExport = useCallback(async () => {
+    flushPendingHistory();
     setExporting(true);
     setStatusMessage(null);
     setStatusIntent(null);
@@ -1503,19 +1598,19 @@ export function MarkdownWorkspace({
       const path = await window.api.saveFileDialog(extension.toLowerCase() === "markdown" ? "markdown" : "md");
       if (!path) return;
       await window.api.writeTextFile(path, rawText);
-      pushHistory("Exported copy", rawText);
       confirmMarkdownAction(`Exported copy to ${getFileName(path)}`);
     } catch (err) {
       confirmMarkdownAction(`Export failed: ${String(err)}`, "danger");
     } finally {
       setExporting(false);
     }
-  }, [confirmMarkdownAction, extension, pushHistory, rawText]);
+  }, [confirmMarkdownAction, extension, flushPendingHistory, rawText]);
 
   const handleExportPdf = useCallback(async () => {
     const article = renderedArticleRef.current;
     if (!article) return;
 
+    flushPendingHistory();
     let exportRoot: HTMLElement | null = null;
     setExportingPdf(true);
     setStatusMessage(null);
@@ -1550,7 +1645,6 @@ export function MarkdownWorkspace({
       const bytes = createPdfBytesFromCanvas(canvas);
       const pdfPath = ensurePdfExtension(path);
       await window.api.writeBinaryFile(pdfPath, bytes);
-      pushHistory("Exported PDF", rawText);
       confirmMarkdownAction(`PDF exported to ${getFileName(pdfPath)}`);
     } catch (err) {
       confirmMarkdownAction(`PDF export failed: ${String(err)}`, "danger");
@@ -1558,20 +1652,62 @@ export function MarkdownWorkspace({
       setExportingPdf(false);
       exportRoot?.remove();
     }
-  }, [confirmMarkdownAction, pushHistory, rawText, table.filePath]);
+  }, [confirmMarkdownAction, flushPendingHistory, table.filePath]);
 
   const handleRevert = useCallback(() => {
+    flushPendingHistory();
+    rawTextRef.current = savedText;
     setRawText(savedText);
     setIsEditing(false);
-    pushHistory("Undo to saved", savedText);
-  }, [pushHistory, savedText]);
+    dispatchHistory({ type: "push", entry: createHistoryEntry("Reverted to saved", savedText) });
+  }, [createHistoryEntry, flushPendingHistory, savedText]);
 
   const handleRestoreHistory = useCallback((entry: MarkdownHistoryEntry) => {
-    setRawText(entry.text);
+    flushPendingHistory();
+    historyNavigationPendingRef.current = true;
+    dispatchHistory({ type: "jump", id: entry.id });
     setIsEditing(true);
     setHistoryOpen(false);
-    pushHistory(`Restored ${entry.label.toLowerCase()}`, entry.text);
-  }, [pushHistory]);
+  }, [flushPendingHistory]);
+
+  const handleHistoryUndo = useCallback(() => {
+    if (!canUndoHistory) return;
+    flushPendingHistory();
+    historyNavigationPendingRef.current = true;
+    dispatchHistory({ type: "undo" });
+  }, [canUndoHistory, flushPendingHistory]);
+
+  const handleHistoryRedo = useCallback(() => {
+    if (!canRedoHistory) return;
+    flushPendingHistory();
+    historyNavigationPendingRef.current = true;
+    dispatchHistory({ type: "redo" });
+  }, [canRedoHistory, flushPendingHistory]);
+
+  const handleToggleHistory = useCallback(() => {
+    if (!historyOpen) flushPendingHistory();
+    setHistoryOpen((open) => !open);
+  }, [flushPendingHistory, historyOpen]);
+
+  const handleToggleEdit = useCallback(() => {
+    if (isEditing) flushPendingHistory();
+    setIsEditing((editing) => !editing);
+  }, [flushPendingHistory, isEditing]);
+
+  const handleRawTextChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const text = event.currentTarget.value;
+    rawTextRef.current = text;
+    setRawText(text);
+    setStatusMessage(null);
+    setStatusIntent(null);
+    if (historyPushTimerRef.current !== null) {
+      window.clearTimeout(historyPushTimerRef.current);
+    }
+    historyPushTimerRef.current = window.setTimeout(() => {
+      historyPushTimerRef.current = null;
+      dispatchHistory({ type: "push", entry: createHistoryEntry("Edited", rawTextRef.current) });
+    }, MARKDOWN_TYPING_PUSH_DELAY_MS);
+  }, [createHistoryEntry]);
 
   const scrollToHeading = useCallback((id: string) => {
     const element = document.getElementById(id);
@@ -1599,7 +1735,7 @@ export function MarkdownWorkspace({
       onOpenFiles,
       onSave: handleSave,
       onRevert: handleRevert,
-      onToggleHistory: () => setHistoryOpen((open) => !open),
+      onToggleHistory: handleToggleHistory,
       onExport: handleExport,
       onExportPdf: handleExportPdf,
       exportLabel: "Export",
@@ -1608,7 +1744,7 @@ export function MarkdownWorkspace({
       exportPdfLabel: "PDF",
       exportPdfTitle: "Export rendered Markdown as PDF",
       exportPdfDisabledReason: loadError ? "Resolve the load error before exporting PDF." : loading ? "Markdown is still loading." : null,
-      onToggleEdit: () => setIsEditing((editing) => !editing),
+      onToggleEdit: handleToggleEdit,
       editActive: isEditing,
       editLabel: isEditing ? "Done" : "Edit",
     });
@@ -1619,6 +1755,8 @@ export function MarkdownWorkspace({
     handleExportPdf,
     handleRevert,
     handleSave,
+    handleToggleEdit,
+    handleToggleHistory,
     historyOpen,
     isDirty,
     isEditing,
@@ -1636,30 +1774,51 @@ export function MarkdownWorkspace({
         <Button minimal small icon="cross" onClick={() => setHistoryOpen(false)} title="Close history" />
       </div>
       <div className="markdown-history-scroll">
-        {history.map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            className="markdown-history-row"
-            onClick={() => handleRestoreHistory(entry)}
-          >
-            <Icon icon="time" size={12} />
-            <span>{entry.label}</span>
-            <time>{formatTime(entry.timestamp)}</time>
-          </button>
-        ))}
+        {history.entries
+          .map((entry, index) => ({ entry, index }))
+          .reverse()
+          .map(({ entry, index }) => {
+            const isCurrent = index === history.index;
+            return (
+              <button
+                key={entry.id}
+                type="button"
+                className={`markdown-history-row${isCurrent ? " current" : ""}${index > history.index ? " ahead" : ""}`}
+                onClick={() => handleRestoreHistory(entry)}
+                aria-current={isCurrent ? "step" : undefined}
+                title={`Restore: ${entry.label}`}
+              >
+                <Icon icon={isCurrent ? "small-tick" : "time"} size={12} />
+                <span>{entry.label}</span>
+                <time>{formatTime(entry.timestamp)}</time>
+              </button>
+            );
+          })}
       </div>
       <div className="markdown-history-footer">
-        <span>{history.length.toLocaleString()} entries</span>
+        <span>
+          {history.entries.length === 0
+            ? "No history"
+            : `${(history.index + 1).toLocaleString()} / ${history.entries.length.toLocaleString()}`}
+        </span>
         <div className="markdown-history-actions">
           <Button
             minimal
             small
             icon="undo"
             text="Undo"
-            onClick={handleRevert}
-            disabled={!isDirty}
-            title="Undo to saved"
+            onClick={handleHistoryUndo}
+            disabled={!canUndoHistory}
+            title="Undo last Markdown edit"
+          />
+          <Button
+            minimal
+            small
+            icon="redo"
+            text="Redo"
+            onClick={handleHistoryRedo}
+            disabled={!canRedoHistory}
+            title="Redo Markdown edit"
           />
         </div>
       </div>
@@ -1753,11 +1912,7 @@ export function MarkdownWorkspace({
                   aria-label="Markdown source editor"
                   spellCheck={false}
                   wrap="off"
-                  onChange={(event) => {
-                    setRawText(event.currentTarget.value);
-                    setStatusMessage(null);
-                    setStatusIntent(null);
-                  }}
+                  onChange={handleRawTextChange}
                   onScroll={handleSourceScroll}
                 />
               </div>
