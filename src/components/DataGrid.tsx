@@ -5,7 +5,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy, QcSession, INTERNAL_ROW_ID_COLUMN } from "../types";
 
 const TOOLTIP_DELAY = 600; // ms before tooltip appears
-const HEADER_TOOLTIP_DELAY = 250;
 
 const ROW_HEIGHT = 28;
 const DEFAULT_COLUMN_WIDTH = 150;
@@ -130,7 +129,6 @@ export function DataGrid({
 
   // ── Cell tooltip state ──
   const [tooltip, setTooltip] = useState<{
-    kind: "cell" | "header";
     text: string;
     x: number;
     y: number;
@@ -323,7 +321,6 @@ export function DataGrid({
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       tooltipTimer.current = setTimeout(() => {
         setTooltip({
-          kind: "cell",
           text: value,
           x: rect.left,
           y: rect.top,
@@ -333,33 +330,6 @@ export function DataGrid({
     },
     [clearDismissTimer]
   );
-
-  const handleHeaderMouseEnter = useCallback(
-    (e: React.MouseEvent, column: string) => {
-      clearDismissTimer();
-      const target = e.target as HTMLElement;
-      if (target.closest(".dg-header-stats-btn, .col-resize-handle")) return;
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      tooltipTimer.current = setTimeout(() => {
-        setTooltip({
-          kind: "header",
-          text: column,
-          x: rect.left,
-          y: rect.top,
-          cellHeight: rect.height,
-        });
-      }, HEADER_TOOLTIP_DELAY);
-    },
-    [clearDismissTimer]
-  );
-
-  const handleHeaderMouseLeave = useCallback(() => {
-    if (tooltipTimer.current) {
-      clearTimeout(tooltipTimer.current);
-      tooltipTimer.current = null;
-    }
-    scheduleDismiss(100);
-  }, [scheduleDismiss]);
 
   const handleCellMouseLeave = useCallback(() => {
     if (tooltipTimer.current) {
@@ -426,7 +396,6 @@ export function DataGrid({
   // ── Column resize state ──
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const isDragging = useRef(false);
-  const justFinishedResize = useRef(false);
   const dragColRef = useRef<string | null>(null);
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(0);
@@ -434,7 +403,6 @@ export function DataGrid({
   // ── Header drag-reorder state ──
   const [draggingColumn, setDraggingColumn] = useState<string | null>(null);
   const headerDragCol = useRef<string | null>(null);
-  const justFinishedHeaderDrag = useRef(false);
   const [headerDropTarget, setHeaderDropTarget] = useState<{
     col: string;
     position: "left" | "right";
@@ -534,8 +502,6 @@ export function DataGrid({
     const onMouseUp = () => {
       if (!isDragging.current) return;
       isDragging.current = false;
-      justFinishedResize.current = true;
-      requestAnimationFrame(() => { justFinishedResize.current = false; });
       dragColRef.current = null;
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
@@ -591,11 +557,7 @@ export function DataGrid({
     setHeaderDropTarget(null);
   }, []);
 
-  const finishHeaderDrag = useCallback((markFinished: boolean) => {
-    if (markFinished) {
-      justFinishedHeaderDrag.current = true;
-      requestAnimationFrame(() => { justFinishedHeaderDrag.current = false; });
-    }
+  const finishHeaderDrag = useCallback(() => {
     headerDragCol.current = null;
     setDraggingColumn(null);
     setHeaderDropTarget(null);
@@ -608,37 +570,37 @@ export function DataGrid({
       e.stopPropagation();
       const fromCol = headerDragCol.current;
       if (!fromCol || !headerDropTarget || !onReorderColumns) {
-        finishHeaderDrag(false);
+        finishHeaderDrag();
         return;
       }
 
       const newOrder = [...displayColumns];
       const fromIndex = newOrder.indexOf(fromCol);
       if (fromIndex < 0) {
-        finishHeaderDrag(false);
+        finishHeaderDrag();
         return;
       }
       newOrder.splice(fromIndex, 1);
       let toIndex = newOrder.indexOf(headerDropTarget.col);
       if (toIndex < 0) {
-        finishHeaderDrag(false);
+        finishHeaderDrag();
         return;
       }
       if (headerDropTarget.position === "right") toIndex++;
       if (fromIndex === toIndex) {
-        finishHeaderDrag(true);
+        finishHeaderDrag();
         return;
       }
       newOrder.splice(toIndex, 0, fromCol);
 
       onReorderColumns(newOrder);
-      finishHeaderDrag(true);
+      finishHeaderDrag();
     },
     [displayColumns, finishHeaderDrag, headerDropTarget, onReorderColumns]
   );
 
   const handleHeaderDragEnd = useCallback(() => {
-    finishHeaderDrag(!!headerDragCol.current);
+    finishHeaderDrag();
   }, [finishHeaderDrag]);
 
   const handleResizeStart = useCallback(
@@ -681,7 +643,7 @@ export function DataGrid({
       if (!ctx) return;
 
       const CELL_PADDING = 24; // 12px left + 12px right
-      const HEADER_EXTRA = 30; // room for sort indicator + resize handle
+      const HEADER_EXTRA = 56; // room for sort, stats, and resize controls
       // Measure header text (bold)
       ctx.font = 'bold 13px "SF Mono", Menlo, Monaco, monospace';
       let maxWidth = ctx.measureText(col).width + CELL_PADDING + HEADER_EXTRA;
@@ -1198,12 +1160,14 @@ export function DataGrid({
             )}
             {displayColumns.map((col) => {
               const sortInfo = sortIndexMap.get(col);
+              const hasStatsControl = !!onGetColumnStats && !pivotMode;
               return (
                 <div
                   key={col}
                   className={[
                     "dg-cell dg-header-cell",
                     onReorderColumns && !pivotMode ? "reorder-enabled" : "",
+                    hasStatsControl ? "has-stats-control" : "",
                     draggingColumn === col ? "column-dragging" : "",
                     activeStatsColumn === col ? "column-inspected" : "",
                     activeQcColumn === col ? "qc-column-active" : "",
@@ -1216,40 +1180,65 @@ export function DataGrid({
                   style={{ width: columnWidths[col] ?? DEFAULT_COLUMN_WIDTH }}
                   aria-label={`Column header: ${col}`}
                   draggable={!pivotMode && !!onReorderColumns}
-                  onMouseEnter={(e) => handleHeaderMouseEnter(e, col)}
-                  onMouseLeave={handleHeaderMouseLeave}
-                  onClick={(e) => {
-                    if (!justFinishedResize.current && !justFinishedHeaderDrag.current) {
-                      onSort(col, e.shiftKey);
-                    }
-                  }}
                   onDragStart={(e) => handleHeaderDragStart(e, col)}
                   onDragOver={(e) => handleHeaderDragOver(e, col)}
                   onDragLeave={handleHeaderDragLeave}
                   onDrop={handleHeaderDrop}
                   onDragEnd={handleHeaderDragEnd}
                 >
-                  <span className="dg-header-text">{col}</span>
-                  {sortInfo && (
-                    <span className="sort-indicator">
-                      {sortColumns.length > 1 && (
+                  <span
+                    className="dg-header-text"
+                    onMouseEnter={(e) => {
+                      const label = e.currentTarget;
+                      label.title = label.scrollWidth > label.clientWidth ? col : "";
+                    }}
+                  >
+                    {col}
+                  </span>
+                  <button
+                    type="button"
+                    className={`dg-header-sort-btn${sortInfo ? " active" : ""}`}
+                    title={
+                      sortInfo?.direction === "ASC"
+                        ? `Sorted ${col} ascending. Click for descending`
+                        : sortInfo?.direction === "DESC"
+                          ? `Sorted ${col} descending. Click to clear`
+                          : `Sort ${col} ascending`
+                    }
+                    aria-label={
+                      sortInfo?.direction === "ASC"
+                        ? `${col}: sorted ascending. Sort descending`
+                        : sortInfo?.direction === "DESC"
+                          ? `${col}: sorted descending. Clear sort`
+                          : `Sort ${col} ascending`
+                    }
+                    draggable={false}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSort(col, e.shiftKey);
+                    }}
+                  >
+                    <span className="sort-indicator" aria-hidden="true">
+                      {sortInfo && sortColumns.length > 1 && (
                         <span className="sort-indicator-number">{sortInfo.index}</span>
                       )}
                       <Icon icon="sort-alphabetical" size={12} />
-                      <Icon
-                        icon={sortInfo.direction === "ASC" ? "chevron-up" : "chevron-down"}
-                        size={10}
-                      />
+                      {sortInfo && (
+                        <Icon
+                          icon={sortInfo.direction === "ASC" ? "chevron-up" : "chevron-down"}
+                          size={10}
+                        />
+                      )}
                     </span>
-                  )}
-                  {onGetColumnStats && !pivotMode && (
+                  </button>
+                  {hasStatsControl && (
                     <button
                       type="button"
                       className={`dg-header-stats-btn${activeStatsColumn === col ? " active" : ""}`}
                       title="Show column stats"
                       aria-label={`Show stats for ${col}`}
                       draggable={false}
-                      onMouseEnter={handleHeaderMouseLeave}
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -1525,7 +1514,6 @@ export function DataGrid({
           ref={tooltipRef}
           className={[
             "dg-tooltip",
-            tooltip.kind === "header" ? "dg-header-tooltip" : "",
             tooltipFlipped ? "dg-tooltip-below" : "",
           ].filter(Boolean).join(" ")}
           style={{
@@ -1535,25 +1523,16 @@ export function DataGrid({
           onMouseEnter={handleTooltipMouseEnter}
           onMouseLeave={handleTooltipMouseLeave}
         >
-          {tooltip.kind === "header" ? (
-            <div className="dg-header-tooltip-body">
-              <span className="dg-header-tooltip-label">Column header</span>
-              <span className="dg-header-tooltip-name">{tooltip.text}</span>
-            </div>
-          ) : (
-            <>
-              <div className="dg-tooltip-body">
-                <TooltipContent text={tooltip.text} />
-              </div>
-              <button
-                className={`dg-tooltip-copy${copied ? " copied" : ""}`}
-                onClick={handleCopyTooltip}
-                title="Copy to clipboard"
-              >
-                <Icon icon={copied ? "tick" : "clipboard"} size={12} />
-              </button>
-            </>
-          )}
+          <div className="dg-tooltip-body">
+            <TooltipContent text={tooltip.text} />
+          </div>
+          <button
+            className={`dg-tooltip-copy${copied ? " copied" : ""}`}
+            onClick={handleCopyTooltip}
+            title="Copy to clipboard"
+          >
+            <Icon icon={copied ? "tick" : "clipboard"} size={12} />
+          </button>
         </div>
       )}
     </div>

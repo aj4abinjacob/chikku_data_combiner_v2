@@ -1291,7 +1291,7 @@ html, body, #root {
 
 .dg-header-cell {
   font-weight: 600;
-  cursor: pointer;
+  cursor: default;
   position: relative;
   background: #f5f8fa;
   border-right: 1px solid #d8e1e8;
@@ -1317,37 +1317,14 @@ html, body, #root {
     box-shadow: inset 0 -2px 0 #137cbd;
   }
 
-  .sort-indicator {
-    margin-left: auto;
-    color: #5c7080;
-    display: inline-flex;
-    align-items: center;
-    gap: 1px;
-    opacity: 0.55;
-
-    .sort-indicator-number {
-      font-size: 9px;
-      font-weight: 700;
-      color: #137cbd;
-      min-width: 10px;
-      text-align: center;
-    }
-  }
-
-  .dg-header-text {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
+  .dg-header-sort-btn,
   .dg-header-stats-btn {
     position: absolute;
     top: 50%;
-    right: 6px;
     flex-shrink: 0;
     width: 22px;
     height: 22px;
-    margin-left: 0;
+    margin: 0;
     padding: 0;
     border: none;
     border-radius: var(--control-radius);
@@ -1381,6 +1358,43 @@ html, body, #root {
     }
   }
 
+  .dg-header-sort-btn {
+    right: 6px;
+
+    &.active {
+      pointer-events: auto;
+      transform: translateY(-50%);
+    }
+  }
+
+  .sort-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+
+    .sort-indicator-number {
+      font-size: 9px;
+      font-weight: 700;
+      color: #137cbd;
+      min-width: 10px;
+      text-align: center;
+    }
+  }
+
+  .dg-header-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dg-header-stats-btn {
+    right: 6px;
+  }
+
+  &.has-stats-control .dg-header-sort-btn {
+    right: 30px;
+  }
+
   &:hover,
   &:focus-within,
   &.column-inspected {
@@ -1388,10 +1402,11 @@ html, body, #root {
       padding-right: 28px;
     }
 
-    .sort-indicator {
-      margin-right: 28px;
+    &.has-stats-control .dg-header-text {
+      padding-right: 52px;
     }
 
+    .dg-header-sort-btn,
     .dg-header-stats-btn {
       opacity: 0.58;
       pointer-events: auto;
@@ -2737,45 +2752,6 @@ button.dg-stats-metric {
   z-index: 100;
   pointer-events: auto;
   animation: dg-tooltip-in 0.12s ease-out;
-}
-
-.dg-header-tooltip {
-  max-width: min(380px, calc(100vw - 24px));
-  padding: 0;
-  gap: 0;
-  background: #f7fbff;
-  color: #182026;
-  border: 1px solid #8abbff;
-  border-left: 3px solid #137cbd;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  box-shadow: 0 8px 22px rgba(16, 22, 26, 0.18);
-  pointer-events: none;
-}
-
-.dg-header-tooltip-body {
-  min-width: 0;
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.dg-header-tooltip-label {
-  color: #137cbd;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0;
-  line-height: 1.2;
-  text-transform: uppercase;
-}
-
-.dg-header-tooltip-name {
-  color: #182026;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.35;
-  white-space: normal;
-  overflow-wrap: anywhere;
 }
 
 .dg-tooltip-body {
@@ -13085,10 +13061,12 @@ html.dark-theme #root {
       box-shadow: inset 0 -2px 0 @dark-accent;
     }
 
+    .dg-header-sort-btn,
     .sort-indicator {
       color: @dark-text-3;
     }
 
+    .dg-header-sort-btn,
     .dg-header-stats-btn {
       color: @dark-text-3;
 
@@ -13102,22 +13080,6 @@ html.dark-theme #root {
         box-shadow: 0 0 0 2px @dark-accent-bg;
       }
     }
-  }
-
-  .dg-header-tooltip {
-    background: @dark-bg-3;
-    color: @dark-text-1;
-    border-color: @dark-accent-border;
-    border-left-color: @dark-accent;
-    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
-  }
-
-  .dg-header-tooltip-label {
-    color: @dark-accent;
-  }
-
-  .dg-header-tooltip-name {
-    color: @dark-text-1;
   }
 
   .dg-row {

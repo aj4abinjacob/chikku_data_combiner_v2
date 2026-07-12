@@ -59,7 +59,7 @@ const HELP_TOPICS: HelpTopic[] = [
         items: [
           "Scroll through large files without loading every row into the interface at once.",
           "Click and drag to select cells, then use Cmd/Ctrl+C to copy the selection as tab-separated text.",
-          "Click a column header to sort. Shift-click adds another sort level.",
+          "Use the sort button in a column header to sort. Shift-click the button to add another sort level.",
           "Drag column headers to reorder them, or drag a header edge to resize it. Double-click the edge to auto-fit.",
         ],
       },
