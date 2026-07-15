@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, ButtonGroup, Icon } from "@blueprintjs/core";
+import { Popover2 } from "@blueprintjs/popover2";
 import { SoftSelect } from "./SoftSelect";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy, QcSession, INTERNAL_ROW_ID_COLUMN } from "../types";
@@ -84,6 +85,11 @@ interface DataGridProps {
   minDisplayDecimalPlaces?: number;
   maxDisplayDecimalPlaces?: number;
   onDisplayDecimalPlacesChange?: (places: number) => void;
+  tableFontSize?: number;
+  minTableFontSize?: number;
+  maxTableFontSize?: number;
+  defaultTableFontSize?: number;
+  onTableFontSizeChange?: (fontSize: number) => void;
   qcSession?: QcSession | null;
   onQcCellChange?: (rowId: number, value: string | null) => void;
   rangeRefreshKey?: number;
@@ -118,6 +124,11 @@ export function DataGrid({
   displayDecimalPlaces = 4,
   minDisplayDecimalPlaces = 0,
   maxDisplayDecimalPlaces = 10,
+  tableFontSize = 13,
+  minTableFontSize = 11,
+  maxTableFontSize = 24,
+  defaultTableFontSize = 13,
+  onTableFontSizeChange,
   qcSession,
   onQcCellChange,
   rangeRefreshKey,
@@ -410,14 +421,19 @@ export function DataGrid({
 
   // Effective row count
   const effectiveRowCount = pivotMode && pivotFlatRows ? pivotFlatRows.length : totalRows;
+  const rowHeight = Math.max(ROW_HEIGHT, tableFontSize + 15);
 
   // Virtualizer
   const virtualizer = useVirtualizer({
     count: effectiveRowCount,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: () => rowHeight,
     overscan: 20,
   });
+
+  useEffect(() => {
+    virtualizer.measure();
+  }, [rowHeight, virtualizer]);
 
   // Notify chunk cache of visible range
   const rangeRef = useRef<{ start: number; end: number } | null>(null);
@@ -645,11 +661,11 @@ export function DataGrid({
       const CELL_PADDING = 24; // 12px left + 12px right
       const HEADER_EXTRA = 56; // room for sort, stats, and resize controls
       // Measure header text (bold)
-      ctx.font = 'bold 13px "SF Mono", Menlo, Monaco, monospace';
+      ctx.font = `bold ${tableFontSize}px "SF Mono", Menlo, Monaco, monospace`;
       let maxWidth = ctx.measureText(col).width + CELL_PADDING + HEADER_EXTRA;
 
       // Measure visible data cells
-      ctx.font = '13px "SF Mono", Menlo, Monaco, monospace';
+      ctx.font = `${tableFontSize}px "SF Mono", Menlo, Monaco, monospace`;
       const range = virtualizer.range;
       if (range) {
         for (let i = range.startIndex; i <= range.endIndex; i++) {
@@ -674,7 +690,7 @@ export function DataGrid({
       autoFittedCols.current.add(col);
       setColumnWidths((prev) => ({ ...prev, [col]: fitWidth }));
     },
-    [virtualizer, getRow, pivotMode, pivotFlatRows, columns, formatCellForColumn]
+    [virtualizer, getRow, pivotMode, pivotFlatRows, columns, formatCellForColumn, tableFontSize]
   );
 
   const handleHeaderStatsClick = useCallback(
@@ -1099,8 +1115,69 @@ export function DataGrid({
     return formatCellForColumn(value, col);
   };
 
+  const viewSettingsMenu = onTableFontSizeChange ? (
+    <Popover2
+      content={(
+        <div className="dg-view-settings" role="dialog" aria-label="Table view settings">
+          <div className="dg-view-settings-title">
+            <Icon icon="font" size={14} />
+            <span>Table text size</span>
+          </div>
+          <div className="dg-font-size-control" role="group" aria-label="Table text size">
+            <ButtonGroup>
+              <Button
+                icon="minus"
+                small
+                aria-label="Decrease table text size"
+                title="Decrease table text size"
+                disabled={tableFontSize <= minTableFontSize}
+                onClick={() => onTableFontSizeChange(tableFontSize - 1)}
+              />
+              <output className="dg-font-size-value" aria-live="polite">
+                {tableFontSize} px
+              </output>
+              <Button
+                icon="plus"
+                small
+                aria-label="Increase table text size"
+                title="Increase table text size"
+                disabled={tableFontSize >= maxTableFontSize}
+                onClick={() => onTableFontSizeChange(tableFontSize + 1)}
+              />
+            </ButtonGroup>
+            <Button
+              minimal
+              small
+              text="Reset"
+              disabled={tableFontSize === defaultTableFontSize}
+              onClick={() => onTableFontSizeChange(defaultTableFontSize)}
+            />
+          </div>
+          <p>Changes table headers and cell values. Your choice is remembered.</p>
+        </div>
+      )}
+      placement="bottom-start"
+      popoverClassName="dg-view-settings-popover"
+      minimal
+    >
+      <Button
+        icon="cog"
+        minimal
+        small
+        title="Table view settings"
+        aria-label="Table view settings"
+        aria-haspopup="dialog"
+      />
+    </Popover2>
+  ) : null;
+
   return (
-    <div className="data-grid-container" ref={containerRef} tabIndex={-1}>
+    <div
+      className="data-grid-container"
+      ref={containerRef}
+      tabIndex={-1}
+      style={{ "--table-font-size": `${tableFontSize}px` } as React.CSSProperties}
+    >
       <div className="data-grid-body">
         <div className="data-grid-scroll" ref={scrollRef}>
           <div style={{ width: totalWidth, minWidth: "100%" }}>
@@ -1149,6 +1226,11 @@ export function DataGrid({
                     )}
                   </span>
                 </span>
+                {viewSettingsMenu && (
+                  <span className="dg-view-settings-trigger dg-pivot-view-settings-trigger">
+                    {viewSettingsMenu}
+                  </span>
+                )}
                 <div
                   className="col-resize-handle"
                   onMouseDown={(e) => handleResizeStart(e, PIVOT_GROUP_COL_KEY)}
@@ -1156,7 +1238,11 @@ export function DataGrid({
                 />
               </div>
             ) : (
-              <div className="dg-cell dg-row-num-cell dg-header-num">#</div>
+              <div className={`dg-cell dg-row-num-cell dg-header-num${viewSettingsMenu ? " dg-view-settings-cell" : ""}`}>
+                {viewSettingsMenu ? (
+                  <span className="dg-view-settings-trigger">{viewSettingsMenu}</span>
+                ) : "#"}
+              </div>
             )}
             {displayColumns.map((col) => {
               const sortInfo = sortIndexMap.get(col);
@@ -1282,7 +1368,7 @@ export function DataGrid({
                         top: 0,
                         transform: `translateY(${virtualRow.start}px)`,
                         width: "100%",
-                        height: ROW_HEIGHT,
+                        height: rowHeight,
                       }}
                     >
                       {/* Dedicated Group column — click to expand/collapse */}
@@ -1353,7 +1439,7 @@ export function DataGrid({
                       top: 0,
                       transform: `translateY(${virtualRow.start}px)`,
                       width: "100%",
-                      height: ROW_HEIGHT,
+                      height: rowHeight,
                     }}
                   >
                     {/* Empty Group column for data rows */}
@@ -1408,7 +1494,7 @@ export function DataGrid({
                     top: 0,
                     transform: `translateY(${virtualRow.start}px)`,
                     width: "100%",
-                    height: ROW_HEIGHT,
+                    height: rowHeight,
                   }}
                 >
                   <div className="dg-cell dg-row-num-cell">

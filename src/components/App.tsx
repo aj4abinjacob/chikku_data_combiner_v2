@@ -28,6 +28,9 @@ const FILTER_PANEL_EXIT_MS = 180;
 const DEFAULT_DISPLAY_DECIMAL_PLACES = 4;
 const MIN_DISPLAY_DECIMAL_PLACES = 0;
 const MAX_DISPLAY_DECIMAL_PLACES = 10;
+const DEFAULT_TABLE_FONT_SIZE = 13;
+const MIN_TABLE_FONT_SIZE = 11;
+const MAX_TABLE_FONT_SIZE = 24;
 const SUPPORTED_DATA_EXTENSIONS = new Set(["csv", "tsv", "json", "jsonl", "ndjson", "md", "markdown", "parquet", "xlsx", "xls"]);
 
 function makeTableName(filePath: string): string {
@@ -108,6 +111,10 @@ function clampDisplayDecimalPlaces(value: number): number {
     MAX_DISPLAY_DECIMAL_PLACES,
     Math.max(MIN_DISPLAY_DECIMAL_PLACES, value)
   );
+}
+
+function clampTableFontSize(value: number): number {
+  return Math.min(MAX_TABLE_FONT_SIZE, Math.max(MIN_TABLE_FONT_SIZE, value));
 }
 
 function toStatNumber(value: any): number {
@@ -486,6 +493,16 @@ export function App(): React.ReactElement {
       }
     }
     return DEFAULT_DISPLAY_DECIMAL_PLACES;
+  });
+  const [tableFontSize, setTableFontSize] = useState(() => {
+    const storedValue = localStorage.getItem("tableFontSize");
+    if (storedValue !== null) {
+      const stored = Number(storedValue);
+      if (Number.isInteger(stored)) {
+        return clampTableFontSize(stored);
+      }
+    }
+    return DEFAULT_TABLE_FONT_SIZE;
   });
   const [filterPanelMounted, setFilterPanelMounted] = useState(false);
   const [fileDragState, setFileDragState] = useState<"idle" | "supported" | "unsupported">("idle");
@@ -1195,6 +1212,10 @@ export function App(): React.ReactElement {
   }, [displayDecimalPlaces]);
 
   useEffect(() => {
+    localStorage.setItem("tableFontSize", String(tableFontSize));
+  }, [tableFontSize]);
+
+  useEffect(() => {
     if (filterPanelOpen) {
       if (filterPanelExitTimerRef.current) {
         clearTimeout(filterPanelExitTimerRef.current);
@@ -1482,6 +1503,10 @@ export function App(): React.ReactElement {
 
   const handleDisplayDecimalPlacesChange = useCallback((places: number) => {
     setDisplayDecimalPlaces(clampDisplayDecimalPlaces(places));
+  }, []);
+
+  const handleTableFontSizeChange = useCallback((fontSize: number) => {
+    setTableFontSize(clampTableFontSize(fontSize));
   }, []);
 
   // ── Pivot View handlers ──
@@ -2807,6 +2832,11 @@ export function App(): React.ReactElement {
                     minDisplayDecimalPlaces={MIN_DISPLAY_DECIMAL_PLACES}
                     maxDisplayDecimalPlaces={MAX_DISPLAY_DECIMAL_PLACES}
                     onDisplayDecimalPlacesChange={handleDisplayDecimalPlacesChange}
+                    tableFontSize={tableFontSize}
+                    minTableFontSize={MIN_TABLE_FONT_SIZE}
+                    maxTableFontSize={MAX_TABLE_FONT_SIZE}
+                    defaultTableFontSize={DEFAULT_TABLE_FONT_SIZE}
+                    onTableFontSizeChange={handleTableFontSizeChange}
                     qcSession={pivotActive ? null : activeQcSession}
                     onQcCellChange={handleQcCellChange}
                     rangeRefreshKey={dataVersion}

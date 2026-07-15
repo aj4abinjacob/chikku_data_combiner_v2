@@ -1185,7 +1185,7 @@ html, body, #root {
   flex-direction: column;
   overflow: hidden;
   outline: none;
-  font-size: 13px;
+  font-size: var(--table-font-size, 13px);
   font-family: "SF Mono", "Menlo", "Monaco", monospace;
 }
 
@@ -1207,6 +1207,84 @@ html, body, #root {
   background: #fff;
   border-bottom: 1px solid #d8e1e8;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.dg-view-settings-popover .bp4-popover2-content {
+  padding: 0;
+}
+
+.dg-view-settings-cell {
+  justify-content: center;
+  padding: 0;
+}
+
+.dg-view-settings-trigger {
+  display: inline-flex;
+  align-items: center;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  .bp4-button {
+    min-width: 26px;
+    min-height: 26px;
+    padding: 0;
+    color: #5c7080;
+  }
+}
+
+.dg-pivot-view-settings-trigger {
+  flex: 0 0 auto;
+}
+
+.dg-view-settings {
+  width: 260px;
+  padding: 14px;
+  color: #30404d;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.dg-view-settings-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 700;
+
+  .bp4-icon {
+    color: #5c7080;
+  }
+}
+
+.dg-font-size-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+
+  .bp4-button {
+    min-width: 28px;
+    min-height: 28px;
+  }
+}
+
+.dg-font-size-value {
+  min-width: 58px;
+  border-top: 1px solid #d8e1e8;
+  border-bottom: 1px solid #d8e1e8;
+  background: #fff;
+  color: #30404d;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 26px;
+  text-align: center;
+}
+
+.dg-view-settings p {
+  margin: 10px 0 0;
+  color: #738694;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .dg-decimals-control {
@@ -1282,7 +1360,7 @@ html, body, #root {
   width: 50px;
   justify-content: flex-end;
   color: #5c7080;
-  font-size: 11px;
+  font-size: clamp(11px, calc(var(--table-font-size, 13px) - 2px), 22px);
 }
 
 .dg-header-num {
@@ -1695,7 +1773,7 @@ html, body, #root {
   background: #fff;
   color: #30404d;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 12px;
+  font-size: inherit;
   outline: none;
 
   &:focus {
@@ -13022,6 +13100,21 @@ html.dark-theme #root {
   .dg-view-toolbar {
     background: @dark-bg-1;
     border-bottom-color: @dark-border-1;
+  }
+
+  .dg-view-settings {
+    color: @dark-text-1;
+  }
+
+  .dg-view-settings-title .bp4-icon,
+  .dg-view-settings p {
+    color: @dark-text-3;
+  }
+
+  .dg-font-size-value {
+    border-color: @dark-border-1;
+    background: @dark-bg-2;
+    color: @dark-text-1;
   }
 
   .dg-decimals-label,
