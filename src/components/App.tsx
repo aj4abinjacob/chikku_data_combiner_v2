@@ -256,7 +256,7 @@ function filterReferencesColumn(group: FilterGroup, column: string): boolean {
   });
 }
 
-function addColumnFilter(group: FilterGroup, column: string, value: string | null): FilterGroup {
+function addColumnFilter(group: FilterGroup, column: string, value: string | null, columnType?: string): FilterGroup {
   const withoutColumn = removeColumnFilters(group, column);
   if (value === "__all__") return withoutColumn;
   return {
@@ -265,8 +265,8 @@ function addColumnFilter(group: FilterGroup, column: string, value: string | nul
     children: [
       ...withoutColumn.children,
       value === null
-        ? { column, operator: "IS NULL", value: "" }
-        : { column, operator: "=", value },
+        ? { column, operator: "IS NULL", value: "", columnType }
+        : { column, operator: "=", value, columnType },
     ],
   };
 }
@@ -636,11 +636,20 @@ export function App(): React.ReactElement {
   );
 
   // Chunk cache for lazy-loaded virtual scrolling (flat mode)
-  const { totalRows, getRow, ensureRange } = useChunkCache({
+  const {
+    totalRows,
+    getRow,
+    ensureRange,
+    status: chunkQueryStatus,
+    error: chunkQueryError,
+    retry: retryChunkQuery,
+    cacheGeneration,
+  } = useChunkCache({
     tableName: activeTable,
     viewState,
     enabled: viewState.visibleColumns.length > 0 && !pivotActive && !textWorkspaceActive && !comparisonActive,
     dataVersion,
+    columnTypes,
   });
 
   // Pivot cache (pivot mode)
@@ -653,6 +662,9 @@ export function App(): React.ReactElement {
     expandAll: pivotExpandAll,
     collapseAll: pivotCollapseAll,
     ensureRange: pivotEnsureRange,
+    error: pivotQueryError,
+    retry: retryPivotQuery,
+    cacheGeneration: pivotCacheGeneration,
   } = usePivotCache({
     tableName: activeTable,
     viewState,
@@ -1771,11 +1783,16 @@ export function App(): React.ReactElement {
       if (!activeQcSession) return;
       setViewState((prev) => ({
         ...prev,
-        filters: addColumnFilter(prev.filters, activeQcSession.columnName, value),
+        filters: addColumnFilter(
+          prev.filters,
+          activeQcSession.columnName,
+          value,
+          schema.find((column) => column.column_name === activeQcSession.columnName)?.column_type
+        ),
       }));
       setResetKey((k) => k + 1);
     },
-    [activeQcSession]
+    [activeQcSession, schema]
   );
 
   // ── Saved Views callbacks ──
@@ -2839,7 +2856,12 @@ export function App(): React.ReactElement {
                     onTableFontSizeChange={handleTableFontSizeChange}
                     qcSession={pivotActive ? null : activeQcSession}
                     onQcCellChange={handleQcCellChange}
-                    rangeRefreshKey={dataVersion}
+                    rangeRefreshKey={pivotActive ? pivotCacheGeneration : cacheGeneration}
+                    queryStatus={pivotActive ? (pivotLoading ? "loading" : "ready") : chunkQueryStatus}
+                    queryError={pivotActive
+                      ? (pivotQueryError ? { scope: "pivot", message: pivotQueryError } : null)
+                      : chunkQueryError}
+                    onQueryRetry={pivotActive ? retryPivotQuery : retryChunkQuery}
                   />
                   {filterPanelMounted && (
                     <FilterPanel

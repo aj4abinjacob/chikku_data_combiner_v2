@@ -17,6 +17,10 @@ fn escape_sql_literal(s: &str) -> String {
     s.replace('\'', "''")
 }
 
+fn quote_identifier(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct LoadOptions {
@@ -42,33 +46,8 @@ pub enum LoadResult {
     },
 }
 
-fn null_empty_strings(conn: &duckdb::Connection, table: &str) -> AppResult<Vec<Value>> {
-    let schema = db::query(conn, &format!(r#"DESCRIBE "{}""#, table))?;
-    let mut cols: Vec<String> = Vec::new();
-    for row in &schema {
-        let name = row.get("column_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let ty = row.get("column_type").and_then(|v| v.as_str()).unwrap_or("");
-        let upper = ty.to_ascii_uppercase();
-        if upper.starts_with("VARCHAR")
-            || upper.starts_with("TEXT")
-            || upper.starts_with("STRING")
-            || upper.starts_with("CHAR")
-        {
-            cols.push(name);
-        }
-    }
-    if cols.is_empty() {
-        return Ok(schema);
-    }
-    let clauses: Vec<String> = cols
-        .iter()
-        .map(|c| format!(r#""{c}" = CASE WHEN TRIM("{c}") = '' THEN NULL ELSE "{c}" END"#))
-        .collect();
-    db::exec(
-        conn,
-        &format!(r#"UPDATE "{}" SET {}"#, table, clauses.join(", ")),
-    )?;
-    Ok(schema)
+fn describe_table(conn: &duckdb::Connection, table: &str) -> AppResult<Vec<Value>> {
+    db::query(conn, &format!("DESCRIBE {}", quote_identifier(table)))
 }
 
 #[tauri::command]
@@ -103,7 +82,7 @@ pub fn load_file(
                 let res = db::exec(
                     &conn,
                     &format!(
-                        r#"CREATE OR REPLACE TABLE "{}" AS SELECT * FROM read_csv_auto('{}')"#,
+                        r#"CREATE OR REPLACE TABLE "{}" AS SELECT * FROM read_csv_auto('{}', allow_quoted_nulls = false)"#,
                         safe, escaped_tmp
                     ),
                 );
@@ -129,7 +108,7 @@ pub fn load_file(
                 )?;
             }
             _ => {
-                let mut params: Vec<String> = Vec::new();
+                let mut params: Vec<String> = vec!["allow_quoted_nulls = false".into()];
                 if let Some(d) = &opts.csv_delimiter {
                     params.push(format!("delim = '{}'", escape_sql_literal(d)));
                 }
@@ -150,7 +129,7 @@ pub fn load_file(
                 )?;
             }
         }
-        null_empty_strings(&conn, &safe)
+        describe_table(&conn, &safe)
     })();
 
     let schema = match load_result {
@@ -175,7 +154,7 @@ pub fn load_file(
     };
     let count_rows = db::query(
         &conn,
-        &format!(r#"SELECT COUNT(*) AS count FROM "{}""#, safe),
+        &format!("SELECT COUNT(*) AS count FROM {}", quote_identifier(&safe)),
     )?;
     let row_count = count_rows
         .first()
@@ -221,7 +200,7 @@ pub fn describe(
 ) -> AppResult<Vec<Value>> {
     let arc = db_state.get(window.label())?;
     let conn = arc.lock();
-    db::query(&conn, &format!(r#"DESCRIBE "{}""#, table_name))
+    describe_table(&conn, &table_name)
 }
 
 #[tauri::command]
@@ -401,6 +380,51 @@ fn uuid_like() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     format!("{}_{}", t.as_secs(), t.subsec_nanos())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn describing_imported_data_preserves_empty_strings_and_reserved_names() {
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        db::exec(
+            &conn,
+            r#"CREATE TABLE "imported""table"("quoted""column" VARCHAR, "__chikku_internal_rowid" VARCHAR);
+               INSERT INTO "imported""table" VALUES ('', 'user data')"#,
+        )
+        .unwrap();
+
+        describe_table(&conn, "imported\"table").unwrap();
+        let rows = db::query(
+            &conn,
+            r#"SELECT "quoted""column", "__chikku_internal_rowid" FROM "imported""table""#,
+        )
+        .unwrap();
+        assert_eq!(rows[0]["quoted\"column"], "");
+        assert_eq!(rows[0]["__chikku_internal_rowid"], "user data");
+    }
+
+    #[test]
+    fn csv_import_distinguishes_quoted_empty_text_from_missing_values() {
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        let path = std::env::temp_dir().join(format!("chikku_empty_{}.csv", uuid_like()));
+        std::fs::write(&path, "missing,empty\n,\"\"\n").unwrap();
+        let escaped_path = escape_sql_literal(&path.to_string_lossy());
+
+        db::exec(
+            &conn,
+            &format!(
+                "CREATE TABLE imported AS SELECT * FROM read_csv_auto('{escaped_path}', allow_quoted_nulls = false)"
+            ),
+        )
+        .unwrap();
+        let _ = std::fs::remove_file(path);
+        let rows = db::query(&conn, "SELECT missing, empty FROM imported").unwrap();
+        assert_eq!(rows[0]["missing"], Value::Null);
+        assert_eq!(rows[0]["empty"], "");
+    }
 }
 
 #[cfg(target_os = "macos")]

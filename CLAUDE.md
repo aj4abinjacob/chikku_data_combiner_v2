@@ -20,6 +20,7 @@ npm run tauri:renderer:build  # Build renderer only
 npm run tauri:renderer:watch  # Run renderer dev server
 npm run tauri:dev             # Launch Tauri shell with webpack-dev-server
 npm run tauri:build           # Package Tauri app
+npm run test:regressions      # Compile TS and run focused Node regression tests
 npm run release:check -- vX.Y.Z # Validate a release tag before creating it
 ```
 
@@ -52,6 +53,7 @@ Multi-window model:
 - Each window owns an in-memory DuckDB session, closed on `WindowEvent::Destroyed`.
 - File-open events (`RunEvent::Opened` on macOS, `tauri-plugin-single-instance` argv callback on Linux/Windows) spawn a new app window and queue the paths via `PendingFiles`.
 - Renderer drains the queue on mount by calling `take_pending_files`.
+- `db.rs` serializes DuckDB values into JSON-safe canonical values: temporal values use ISO text, integers outside JavaScript's safe range and exact decimals use strings, and nested/list/map values stay structured. Grid SQL casts transport types such as wide DECIMAL and TIME WITH TIME ZONE to text where the Rust adapter cannot preserve them directly.
 
 Webpack builds a web-target renderer to `dist-tauri/`. Tauri dev runs webpack-dev-server on port 5181.
 
@@ -85,10 +87,10 @@ Tauri 2, Rust, React 18, TypeScript 5 (strict, ES2020, CommonJS), DuckDB (in-mem
 Three sections: Tables, Columns, Operations. Table management, column visibility/search, sort/group controls, and operation buttons for data operations, aggregate, pivot table, lookup merge, comparison, date conversion, and export.
 
 ### DataGrid.tsx — Virtualized Data Grid
-Virtual scrolling via `@tanstack/react-virtual`. Div-based layout. Dual-mode: flat (chunk cache) and pivot (tree with group/data rows). Cell selection, copy (TSV), multi-sort, column resize/reorder. Native text selection is disabled on grid cells (including the WebKit-prefixed rule) so clipboard copying stays cell-based. `ROW_HEIGHT = 28`.
+Virtual scrolling via `@tanstack/react-virtual`. Div-based layout. Dual-mode: flat (chunk cache) and pivot (tree with group/data rows). Chunk generations reject stale responses, clear stale counts/loading markers on query changes, and expose failed count/chunk/pivot queries in the grid with a retry action. Cell selection, copy (TSV), multi-sort, column resize/reorder. Native text selection is disabled on grid cells (including the WebKit-prefixed rule) so clipboard copying stays cell-based. `ROW_HEIGHT = 28`.
 
 ### FilterPanel.tsx — Bottom Panel
-Resizable (80-500px). Three tabs. Recursive AND/OR filter groups. Operators include CONTAINS (regex), IN (value picker). Draft state model with immutable updates. Filters tab has side-by-side filter builder and compact views panel.
+Resizable (80-500px). Three tabs. Recursive AND/OR filter groups. Operators include CONTAINS (regex) and type-aware IN/NOT IN value pickers. Picker state stores raw values separately from labels, supports server-side search beyond the first 1,000 values, and builds typed DuckDB literals. Draft state model with immutable updates. Filters tab has side-by-side filter builder and compact views panel.
 
 ### ColumnOpsPanel.tsx — Column Ops Tab
 Three-column layout: config, preview, history. Operations include trim, uppercase, lowercase, find/replace, regex extract, set value, prefix/suffix, extract numbers, clear to NULL. Target modes support replacing, writing to a new column, or writing to an existing column. Live preview is debounced.

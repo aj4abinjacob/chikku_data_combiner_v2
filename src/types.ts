@@ -103,6 +103,7 @@ export interface ColumnStats {
 }
 
 export const INTERNAL_ROW_ID_COLUMN = "__chikku_internal_rowid";
+export const INTERNAL_ROW_ID_VALUE = Symbol("chikku-internal-rowid");
 
 export type QcColumnMode = "boolean" | "options";
 export type QcOptionSortMode = "alpha" | "numeric" | "entered";
@@ -216,6 +217,13 @@ export interface FilterCondition {
   column: string;
   operator: FilterOperator;
   value: string;
+  values?: FilterListValue[];
+  columnType?: string;
+}
+
+export interface FilterListValue {
+  raw: string;
+  label: string;
 }
 
 export interface FilterGroup {

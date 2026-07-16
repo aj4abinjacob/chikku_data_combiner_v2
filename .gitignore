@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-tauri/
+.test-dist/
 build/
 *.tsbuildinfo
 .DS_Store

@@ -104,11 +104,12 @@ function renderFilterPills(group: FilterGroup): React.ReactNode[] {
     } else {
       const needsValue = child.operator !== "IS NULL" && child.operator !== "IS NOT NULL" && child.operator !== "IS TRUE" && child.operator !== "IS FALSE";
       const isColumnValue = isColumnComparisonOperator(child.operator);
+      const displayValue = child.values?.map((value) => value.label).join(", ") ?? child.value;
       nodes.push(
         <span key={`cond-${i}`}>
           <span className="views-inline-detail-col">{child.column}</span>
           {" "}{child.operator.toLowerCase()}
-          {needsValue && <> <span className={isColumnValue ? "views-inline-detail-col" : "views-inline-detail-val"}>{child.value}</span></>}
+          {needsValue && <> <span className={isColumnValue ? "views-inline-detail-col" : "views-inline-detail-val"}>{displayValue}</span></>}
         </span>
       );
     }

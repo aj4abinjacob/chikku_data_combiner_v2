@@ -5,12 +5,15 @@ import {
   buildPivotGrandTotalQuery,
   buildPivotDataChunkQuery,
 } from "../utils/sqlBuilder";
+import { compareExactNumericValues } from "../utils/numericCompare";
+import { pivotPathKey } from "../utils/pivotPath";
 
 const CHUNK_SIZE = 1000;
 const NUMERIC_RE = /^(TINYINT|SMALLINT|INTEGER|INT|BIGINT|HUGEINT|FLOAT|REAL|DOUBLE|DECIMAL|NUMERIC)/i;
 
 interface GroupNode {
   key: string;
+  path: { column: string; value: any }[];
   column: string;
   value: any;
   count: number;
@@ -39,12 +42,18 @@ interface UsePivotCacheReturn {
   expandAll: () => void;
   collapseAll: () => void;
   ensureRange: (start: number, end: number) => void;
+  error: string | null;
+  retry: () => void;
+  cacheGeneration: number;
 }
 
 function makeGroupKey(parentPath: { column: string; value: any }[], column: string, value: any): string {
-  const parts = parentPath.map((p) => `${p.column}=${p.value}`);
-  parts.push(`${column}=${value}`);
-  return parts.join("|");
+  return pivotPathKey([...parentPath, { column, value }]);
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 export function usePivotCache({
@@ -57,6 +66,8 @@ export function usePivotCache({
   const [rootNodes, setRootNodes] = useState<GroupNode[]>([]);
   const [grandTotals, setGrandTotals] = useState<Record<string, any> | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryVersion, setRetryVersion] = useState(0);
   const [, setTick] = useState(0);
   const tick = useCallback(() => setTick((t) => t + 1), []);
 
@@ -76,14 +87,14 @@ export function usePivotCache({
   const getAggConfigs = useCallback(
     (aggFn: string) => {
       const UNIVERSAL_FNS = new Set(["COUNT", "COUNT_DISTINCT", "COUNT_NULL", "MIN", "MAX", "LIST"]);
-      const configs: { column: string; fn: string }[] = [];
+      const configs: { column: string; fn: string; columnType?: string }[] = [];
       for (const col of schema) {
         if (NUMERIC_RE.test(col.column_type) || UNIVERSAL_FNS.has(aggFn)) {
           // Numeric columns support all agg functions; all columns support COUNT/MIN/MAX/LIST
-          configs.push({ column: col.column_name, fn: aggFn });
+          configs.push({ column: col.column_name, fn: aggFn, columnType: col.column_type });
         } else {
           // Non-numeric columns fall back to COUNT_DISTINCT for numeric-only aggs
-          configs.push({ column: col.column_name, fn: "COUNT_DISTINCT" });
+          configs.push({ column: col.column_name, fn: "COUNT_DISTINCT", columnType: col.column_type });
         }
       }
       return configs;
@@ -116,8 +127,17 @@ export function usePivotCache({
   // Structural cache key (excludes sort — sort changes are handled separately)
   const filtersKey = JSON.stringify(viewState.filters);
   const groupColumnsKey = JSON.stringify(groupColumns);
-  const visibleColumnsKey = [...viewState.visibleColumns].sort().join(",");
-  const cacheKey = `${tableName}|${enabled}|${groupColumnsKey}|${filtersKey}|${visibleColumnsKey}|${defaultAggFn}|${dataVersion}`;
+  const visibleColumnsKey = JSON.stringify([...viewState.visibleColumns].sort());
+  const cacheKey = JSON.stringify([
+    tableName,
+    enabled,
+    groupColumnsKey,
+    filtersKey,
+    visibleColumnsKey,
+    defaultAggFn,
+    dataVersion,
+    retryVersion,
+  ]);
   const prevCacheKeyRef = useRef("");
 
   // Reset on structural cache key change
@@ -126,6 +146,7 @@ export function usePivotCache({
     rootNodesRef.current = [];
     setRootNodes([]);
     setGrandTotals(null);
+    setError(null);
     generationRef.current += 1;
   }
 
@@ -137,6 +158,7 @@ export function usePivotCache({
 
   if (combinedSortKey !== prevSortKeyRef.current) {
     prevSortKeyRef.current = combinedSortKey;
+    setError(null);
 
     if (rootNodesRef.current.length > 0) {
       generationRef.current += 1;
@@ -151,29 +173,30 @@ export function usePivotCache({
             return groupSortDir === "ASC" ? cmp : -cmp;
           });
         } else if (groupSortMode === "alpha") {
-          // Sort alphabetically by group value
+          const groupType = schema.find((column) => column.column_name === nodes[0]?.column)?.column_type;
           nodes.sort((a, b) => {
             const va = a.value;
             const vb = b.value;
             if (va == null && vb == null) return 0;
             if (va == null) return 1;
             if (vb == null) return -1;
-            const cmp = typeof va === "number" && typeof vb === "number"
-              ? va - vb
+            const cmp = NUMERIC_RE.test(groupType ?? "")
+              ? compareExactNumericValues(va, vb)
               : String(va).localeCompare(String(vb));
             return groupSortDir === "ASC" ? cmp : -cmp;
           });
         } else if (aggSort) {
           // Sort by aggregate value (from data column header click)
           const { aggKey, direction: aggDir } = aggSort;
+          const aggregateType = schema.find((column) => column.column_name === aggSort.column)?.column_type;
           nodes.sort((a, b) => {
             const va = a.aggregates[aggKey];
             const vb = b.aggregates[aggKey];
             if (va == null && vb == null) return 0;
             if (va == null) return 1;
             if (vb == null) return -1;
-            const cmp = typeof va === "number" && typeof vb === "number"
-              ? va - vb
+            const cmp = NUMERIC_RE.test(aggregateType ?? "")
+              ? compareExactNumericValues(va, vb)
               : String(va).localeCompare(String(vb));
             return aggDir === "ASC" ? cmp : -cmp;
           });
@@ -213,6 +236,7 @@ export function usePivotCache({
 
     const fetchRoot = async () => {
       setLoading(true);
+      setError(null);
       try {
         const firstGroup = groupColumns[0];
         const effectiveDir = getEffectiveGroupDir(firstGroup);
@@ -241,6 +265,7 @@ export function usePivotCache({
           }
           return {
             key: makeGroupKey([], firstGroup.column, value),
+            path: [{ column: firstGroup.column, value }],
             column: firstGroup.column,
             value,
             count: Number(row.__count),
@@ -265,6 +290,7 @@ export function usePivotCache({
         }
       } catch (err) {
         console.error("Pivot root fetch error:", err);
+        if (generationRef.current === gen) setError(errorMessage(err));
       } finally {
         if (generationRef.current === gen) setLoading(false);
       }
@@ -295,17 +321,7 @@ export function usePivotCache({
 
       const gen = generationRef.current;
       const depthIndex = groupColumns.findIndex((gc) => gc.column === node.column);
-      const parentPath = [
-        ...node.key.split("|").map((part) => {
-          const eqIdx = part.indexOf("=");
-          return {
-            column: part.substring(0, eqIdx),
-            value: part.substring(eqIdx + 1) === "null" || part.substring(eqIdx + 1) === "undefined"
-              ? null
-              : part.substring(eqIdx + 1),
-          };
-        }),
-      ];
+      const parentPath = node.path;
 
       const aggConfigs = getAggConfigs(defaultAggFn);
 
@@ -339,6 +355,7 @@ export function usePivotCache({
             }
             return {
               key: makeGroupKey(parentPath, nextGroup.column, value),
+              path: [...parentPath, { column: nextGroup.column, value }],
               column: nextGroup.column,
               value,
               count: Number(row.__count),
@@ -355,6 +372,7 @@ export function usePivotCache({
           setRootNodes([...rootNodesRef.current]);
         } catch (err) {
           console.error("Pivot sub-group fetch error:", err);
+          if (generationRef.current === gen) setError(errorMessage(err));
         }
       } else {
         // Leaf level — load data rows count
@@ -374,15 +392,7 @@ export function usePivotCache({
       const gen = generationRef.current;
       node.dataLoading.add(chunkIndex);
 
-      const parentPath = node.key.split("|").map((part) => {
-        const eqIdx = part.indexOf("=");
-        return {
-          column: part.substring(0, eqIdx),
-          value: part.substring(eqIdx + 1) === "null" || part.substring(eqIdx + 1) === "undefined"
-            ? null
-            : part.substring(eqIdx + 1),
-        };
-      });
+      const parentPath = node.path;
 
       try {
         const sql = buildPivotDataChunkQuery(
@@ -392,7 +402,8 @@ export function usePivotCache({
           viewState.filters,
           viewState.sortColumns,
           CHUNK_SIZE,
-          chunkIndex
+          chunkIndex,
+          new Map(schema.map((column) => [column.column_name, column.column_type]))
         );
         const rows = await window.api.query(sql);
         if (generationRef.current !== gen) return;
@@ -403,9 +414,11 @@ export function usePivotCache({
       } catch (err) {
         console.error("Pivot data chunk fetch error:", err);
         node.dataLoading.delete(chunkIndex);
+        if (generationRef.current === gen) setError(errorMessage(err));
+        tick();
       }
     },
-    [tableName, viewState.visibleColumns, viewState.filters, viewState.sortColumns, tick]
+    [tableName, viewState.visibleColumns, viewState.filters, viewState.sortColumns, schema, tick]
   );
 
   // Toggle expand/collapse a group
@@ -457,6 +470,10 @@ export function usePivotCache({
     };
     collapseNodes(rootNodesRef.current);
     setRootNodes([...rootNodesRef.current]);
+  }, []);
+
+  const retry = useCallback(() => {
+    setRetryVersion((version) => version + 1);
   }, []);
 
   // Flatten tree into PivotFlatRow[]
@@ -516,12 +533,13 @@ export function usePivotCache({
         const row = flatRows[i];
         if (row.type === "data" && row.data === null) {
           // Find the parent group node
-          const parentKey = row.parentPath.map((p) => `${p.column}=${p.value}`).join("|");
+          const parentKey = pivotPathKey(row.parentPath);
           const node = findNode(parentKey);
           if (node) {
             // Determine which chunk this data row belongs to
             // We need to figure out the index within the group's data
-            const dataIndex = parseInt(row.key.split("|data:")[1], 10);
+            const dataMarker = row.key.lastIndexOf("|data:");
+            const dataIndex = parseInt(row.key.slice(dataMarker + 6), 10);
             const chunkIndex = Math.floor(dataIndex / CHUNK_SIZE);
             loadDataChunk(node, chunkIndex);
           }
@@ -540,5 +558,8 @@ export function usePivotCache({
     expandAll,
     collapseAll,
     ensureRange,
+    error,
+    retry,
+    cacheGeneration: generationRef.current,
   };
 }

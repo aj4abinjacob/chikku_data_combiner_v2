@@ -1194,7 +1194,57 @@ html, body, #root {
   min-height: 0;
   min-width: 0;
   display: flex;
+  position: relative;
   overflow: hidden;
+}
+
+.dg-query-state {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: min(560px, calc(100% - 48px));
+  padding: 14px 16px;
+  transform: translate(-50%, -50%);
+  border: 1px solid #d8e1e8;
+  border-radius: var(--surface-radius);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 3px 14px rgba(17, 20, 24, 0.12);
+  color: #394b59;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  > div {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  strong {
+    color: #182026;
+    font-size: 13px;
+  }
+
+  span {
+    overflow: hidden;
+    color: #5c7080;
+    font-size: 12px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+}
+
+.dg-query-error {
+  border-color: rgba(219, 55, 55, 0.35);
+  background: rgba(255, 247, 247, 0.98);
+
+  > .bp4-icon {
+    color: #c23030;
+  }
 }
 
 .dg-view-toolbar {
@@ -5744,6 +5794,21 @@ button.dg-stats-metric {
   color: #8a9ba8;
   font-size: 12px;
   text-align: center;
+}
+
+.in-value-dropdown-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  color: #c23030;
+  font-size: 11px;
+
+  span {
+    min-width: 0;
+    flex: 1;
+    overflow-wrap: anywhere;
+  }
 }
 
 .rowops-column-picker-content {
@@ -13098,6 +13163,29 @@ html.dark-theme #root {
     background: @dark-bg-1;
   }
 
+  .dg-query-state {
+    border-color: @dark-border-1;
+    background: fade(@dark-bg-2, 97%);
+    color: @dark-text-2;
+
+    strong {
+      color: @dark-text-1;
+    }
+
+    span {
+      color: @dark-text-3;
+    }
+  }
+
+  .dg-query-error {
+    border-color: @dark-error-border;
+    background: @dark-error-bg;
+
+    > .bp4-icon {
+      color: @dark-error;
+    }
+  }
+
   .dg-view-toolbar {
     background: @dark-bg-1;
     border-bottom-color: @dark-border-1;
@@ -14041,6 +14129,10 @@ html.dark-theme #root {
 
   .in-value-dropdown-empty {
     color: @dark-text-3;
+  }
+
+  .in-value-dropdown-error {
+    color: @dark-error;
   }
 
   .in-value-dropdown-list {

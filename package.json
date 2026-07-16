@@ -12,6 +12,7 @@
     "tauri:renderer:watch": "npm run tauri:assets && webpack serve --env tauri --mode development",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "test:regressions": "rm -rf .test-dist && tsc --outDir .test-dist --sourceMap false && node --test tests/*.test.cjs && rm -rf .test-dist",
     "release:check": "node scripts/validate-release-tag.mjs"
   },
   "keywords": [

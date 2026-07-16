@@ -3,7 +3,7 @@ import { Button, ButtonGroup, Icon } from "@blueprintjs/core";
 import { Popover2 } from "@blueprintjs/popover2";
 import { SoftSelect } from "./SoftSelect";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy, QcSession, INTERNAL_ROW_ID_COLUMN } from "../types";
+import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy, QcSession, INTERNAL_ROW_ID_VALUE } from "../types";
 
 const TOOLTIP_DELAY = 600; // ms before tooltip appears
 
@@ -93,6 +93,9 @@ interface DataGridProps {
   qcSession?: QcSession | null;
   onQcCellChange?: (rowId: number, value: string | null) => void;
   rangeRefreshKey?: number;
+  queryStatus?: "idle" | "loading" | "ready" | "error";
+  queryError?: { scope: "count" | "chunk" | "pivot"; message: string } | null;
+  onQueryRetry?: () => void;
 }
 
 export function DataGrid({
@@ -132,6 +135,9 @@ export function DataGrid({
   qcSession,
   onQcCellChange,
   rangeRefreshKey,
+  queryStatus,
+  queryError,
+  onQueryRetry,
 }: DataGridProps): React.ReactElement {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const anchor = useRef<{ row: number; col: string } | null>(null);
@@ -439,7 +445,7 @@ export function DataGrid({
   const rangeRef = useRef<{ start: number; end: number } | null>(null);
 
   // Reset range tracking when columns change so ensureRange re-fires after schema update
-  const columnsKey = columns.join(",");
+  const columnsKey = JSON.stringify(columns);
   useEffect(() => {
     rangeRef.current = null;
   }, [columnsKey]);
@@ -1003,7 +1009,7 @@ export function DataGrid({
   };
 
   const getRowId = (row: any): number | null => {
-    const value = row?.[INTERNAL_ROW_ID_COLUMN];
+    const value = row?.[INTERNAL_ROW_ID_VALUE];
     const rowId = Number(value);
     return Number.isFinite(rowId) ? rowId : null;
   };
@@ -1415,7 +1421,7 @@ export function DataGrid({
                             onMouseEnter={(e) => {
                               handleCellMouseEnterDrag(virtualRow.index, col, e);
                               if (cellText && !dragSelecting.current)
-                                handleCellMouseEnter(e, String(rawValue));
+                                handleCellMouseEnter(e, cellText);
                             }}
                             onMouseLeave={handleCellMouseLeave}
                           >
@@ -1470,7 +1476,7 @@ export function DataGrid({
                           onMouseEnter={(e) => {
                             handleCellMouseEnterDrag(virtualRow.index, col, e);
                             if (loaded && !dragSelecting.current)
-                              handleCellMouseEnter(e, String(rowData[col] ?? ""));
+                              handleCellMouseEnter(e, cellText);
                           }}
                           onMouseLeave={handleCellMouseLeave}
                         >
@@ -1525,10 +1531,7 @@ export function DataGrid({
                         onMouseEnter={(e) => {
                           if (!isQcCell) handleCellMouseEnterDrag(virtualRow.index, col, e);
                           if (loaded && !dragSelecting.current && !isQcCell)
-                            handleCellMouseEnter(
-                              e,
-                              String(row[col] ?? "")
-                            );
+                            handleCellMouseEnter(e, cellText);
                         }}
                         onMouseLeave={handleCellMouseLeave}
                       >
@@ -1573,6 +1576,34 @@ export function DataGrid({
           )}
           </div>
         </div>
+        {queryError && (
+          <div className="dg-query-state dg-query-error" role="alert">
+            <Icon icon="warning-sign" size={20} />
+            <div>
+              <strong>{queryError.scope === "count"
+                ? "Unable to count rows"
+                : queryError.scope === "pivot"
+                  ? "Unable to load pivot data"
+                  : "Unable to load rows"}</strong>
+              <span>{queryError.message}</span>
+            </div>
+            {onQueryRetry && (
+              <Button icon="refresh" text="Retry" onClick={onQueryRetry} />
+            )}
+          </div>
+        )}
+        {!queryError && queryStatus === "loading" && totalRows === 0 && (
+          <div className="dg-query-state" aria-live="polite">
+            <Icon icon="refresh" size={18} />
+            <strong>Loading data…</strong>
+          </div>
+        )}
+        {!queryError && queryStatus === "ready" && totalRows === 0 && (
+          <div className="dg-query-state">
+            <Icon icon="filter-list" size={18} />
+            <strong>No rows match the current filters</strong>
+          </div>
+        )}
         {columnStatsPanel && (
           <ColumnStatsRail
             panel={columnStatsPanel}
@@ -2469,7 +2500,7 @@ function formatRawPreview(value: any): string {
   return Number.isInteger(numeric) ? numeric.toString() : numeric.toLocaleString("en-US", { maximumFractionDigits: 6 });
 }
 
-function formatCell(
+export function formatCell(
   value: any,
   decimalPlaces: number,
   numberStyle: NumberDisplayStyle = "standard",
@@ -2477,6 +2508,16 @@ function formatCell(
   forceNumeric = false
 ): string {
   if (value === null || value === undefined) return "";
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  if (forceNumeric && typeof value === "string" && isPrecisionSensitiveNumber(value)) {
+    return value;
+  }
   const numericValue = forceNumeric ? parseNumericValue(value) : (typeof value === "number" ? parseNumericValue(value) : null);
   if (numericValue !== null) {
     const rounded = roundForDisplay(numericValue, decimalPlaces, roundingMethod);
@@ -2502,6 +2543,17 @@ function formatCell(
     return Number.isInteger(numericValue) ? numericValue.toString() : rounded.toFixed(decimalPlaces);
   }
   return String(value);
+}
+
+function isPrecisionSensitiveNumber(value: string): boolean {
+  const trimmed = value.trim();
+  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)) return false;
+  const significantDigits = trimmed
+    .replace(/^[+-]/, "")
+    .replace(/[eE].*$/, "")
+    .replace(".", "")
+    .replace(/^0+/, "");
+  return significantDigits.length > 15;
 }
 
 // URL regex for detecting links in tooltip text

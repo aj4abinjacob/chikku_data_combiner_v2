@@ -12,6 +12,7 @@ import { Popover2 } from "@blueprintjs/popover2";
 import {
   ColumnInfo,
   FilterGroup,
+  FilterListValue,
   FilterNode,
   FilterOperator,
   isFilterGroup,
@@ -42,7 +43,8 @@ import {
   isAllowedNumberInputValue,
   showNumberInputExpectation,
 } from "../utils/numberInputWheel";
-import { buildFilterGroupClause, escapeIdent } from "../utils/sqlBuilder";
+import { buildDistinctFilterValuesQuery, buildFilterGroupClause, escapeIdent } from "../utils/sqlBuilder";
+import { mergeFilterListValues } from "../utils/filterValues";
 
 type ColumnKind = "text" | "number" | "date" | "boolean" | "comparison_status" | "unknown";
 type OperatorOption = { value: FilterOperator; label: string };
@@ -142,6 +144,7 @@ interface DraftFilterCondition {
   column: string;
   operator: FilterOperator;
   value: string;
+  values: FilterListValue[];
 }
 
 interface DraftFilterGroup {
@@ -255,25 +258,40 @@ function convertToDraft(group: FilterGroup): DraftFilterGroup {
         column: child.column,
         operator: child.operator,
         value: child.value,
+        values: child.values ?? (
+          child.operator === "IN" || child.operator === "NOT IN"
+            ? child.value
+                .split(",")
+                .map((value) => value.trim())
+                .filter((value) => value.length > 0)
+                .map((value) => ({ raw: value, label: value }))
+            : []
+        ),
       } as DraftFilterCondition;
     }),
   };
 }
 
-function convertFromDraft(group: DraftFilterGroup): FilterGroup {
+function convertFromDraft(group: DraftFilterGroup, columns: ColumnInfo[] = []): FilterGroup {
   const children: FilterNode[] = [];
   for (const child of group.children) {
     if (isDraftGroup(child)) {
-      const nested = convertFromDraft(child);
+      const nested = convertFromDraft(child, columns);
       // Keep groups even if empty — let SQL builder handle it
       children.push(nested);
     } else {
       // Only include conditions that have a column set and value (or no-value operator)
-      if (child.column && (NO_VALUE_OPS.has(child.operator) || child.value.trim() !== "")) {
+      const isListOperator = child.operator === "IN" || child.operator === "NOT IN";
+      if (
+        child.column
+        && (NO_VALUE_OPS.has(child.operator) || (isListOperator ? child.values.length > 0 : child.value.trim() !== ""))
+      ) {
         children.push({
           column: child.column,
           operator: child.operator,
           value: child.value,
+          values: isListOperator ? child.values : undefined,
+          columnType: columns.find((column) => column.column_name === child.column)?.column_type,
         });
       }
     }
@@ -346,8 +364,8 @@ function removeNodeById(
 interface InValuePickerProps {
   tableName: string;
   column: string;
-  selectedValues: string;
-  onChange: (value: string) => void;
+  selectedValues: FilterListValue[];
+  onChange: (value: FilterListValue[]) => void;
 }
 
 function InValuePicker({
@@ -357,9 +375,11 @@ function InValuePicker({
   onChange,
 }: InValuePickerProps): React.ReactElement {
   const [open, setOpen] = useState(false);
-  const [uniqueValues, setUniqueValues] = useState<string[]>([]);
+  const [uniqueValues, setUniqueValues] = useState<FilterListValue[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadVersion, setReloadVersion] = useState(0);
   const [listFilter, setListFilter] = useState<"all" | "selected" | "not-selected">("all");
   const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -397,54 +417,60 @@ function InValuePicker({
 
   useEffect(() => {
     if (!open || !tableName || !column) return;
+    let cancelled = false;
     setLoading(true);
-    const escapedCol = column.replace(/"/g, '""');
-    const escapedTable = tableName.replace(/"/g, '""');
-    window.api
-      .query(
-        `SELECT DISTINCT "${escapedCol}" AS val FROM "${escapedTable}" WHERE "${escapedCol}" IS NOT NULL ORDER BY "${escapedCol}" LIMIT 1000`
-      )
-      .then((rows) => {
-        setUniqueValues(rows.map((r) => String(r.val ?? "")));
-        setLoading(false);
-      })
-      .catch(() => {
-        setUniqueValues([]);
-        setLoading(false);
-      });
-  }, [open, tableName, column]);
+    setError(null);
+    const timer = window.setTimeout(() => {
+      window.api
+        .query(buildDistinctFilterValuesQuery(tableName, column, search))
+        .then((rows) => {
+          if (cancelled) return;
+          setUniqueValues(rows.map((row) => ({
+            raw: String(row.raw_value ?? ""),
+            label: String(row.display_label ?? row.raw_value ?? ""),
+          })));
+          setLoading(false);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setUniqueValues([]);
+          setError(err instanceof Error ? err.message : String(err));
+          setLoading(false);
+        });
+    }, 150);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, tableName, column, search, reloadVersion]);
 
-  const selected = new Set(
-    selectedValues
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-  );
+  const selected = new Map(selectedValues.map((value) => [value.raw, value]));
+  const availableValues = mergeFilterListValues(selectedValues, uniqueValues);
 
-  const toggle = (val: string) => {
-    const next = new Set(selected);
-    if (next.has(val)) next.delete(val);
-    else next.add(val);
-    onChange(Array.from(next).join(", "));
+  const toggle = (value: FilterListValue) => {
+    const next = new Map(selected);
+    if (next.has(value.raw)) next.delete(value.raw);
+    else next.set(value.raw, value);
+    onChange(Array.from(next.values()));
   };
 
   const selectAll = () => {
     const visible = search
-      ? uniqueValues.filter((v) =>
-          v.toLowerCase().includes(search.toLowerCase())
+      ? availableValues.filter((value) =>
+          value.label.toLowerCase().includes(search.toLowerCase())
         )
-      : uniqueValues;
-    const next = new Set(selected);
-    for (const v of visible) next.add(v);
-    onChange(Array.from(next).join(", "));
+      : availableValues;
+    const next = new Map(selected);
+    for (const value of visible) next.set(value.raw, value);
+    onChange(Array.from(next.values()));
   };
 
-  const clearAll = () => onChange("");
+  const clearAll = () => onChange([]);
 
-  const filtered = uniqueValues.filter((v) => {
-    if (search && !v.toLowerCase().includes(search.toLowerCase())) return false;
-    if (listFilter === "selected" && !selected.has(v)) return false;
-    if (listFilter === "not-selected" && selected.has(v)) return false;
+  const filtered = availableValues.filter((value) => {
+    if (search && !value.label.toLowerCase().includes(search.toLowerCase())) return false;
+    if (listFilter === "selected" && !selected.has(value.raw)) return false;
+    if (listFilter === "not-selected" && selected.has(value.raw)) return false;
     return true;
   });
 
@@ -487,7 +513,7 @@ function InValuePicker({
                 onClick={() => setListFilter(listFilter === "not-selected" ? "all" : "not-selected")}
               />
               <span className="in-value-dropdown-count">
-                {selected.size} / {uniqueValues.length}
+                {selected.size} / {availableValues.length}
               </span>
             </div>
           </div>
@@ -495,21 +521,29 @@ function InValuePicker({
             {loading && (
               <div className="in-value-dropdown-empty">Loading...</div>
             )}
-            {!loading && filtered.length === 0 && (
+            {!loading && error && (
+              <div className="in-value-dropdown-error">
+                <span>{error}</span>
+                <Button small minimal icon="refresh" text="Retry" onClick={() => setReloadVersion((value) => value + 1)} />
+              </div>
+            )}
+            {!loading && !error && filtered.length === 0 && (
               <div className="in-value-dropdown-empty">No values found</div>
             )}
-            {!loading &&
-              filtered.map((val) => (
+            {!loading && !error &&
+              filtered.map((value) => (
                 <label
-                  key={val}
+                  key={value.raw}
                   className="in-value-dropdown-item"
                 >
                   <Checkbox
-                    checked={selected.has(val)}
-                    onChange={() => toggle(val)}
+                    checked={selected.has(value.raw)}
+                    onChange={() => toggle(value)}
                     style={{ marginBottom: 0 }}
                   />
-                  <span className="in-value-dropdown-label" title={val}>{val}</span>
+                  <span className="in-value-dropdown-label" title={value.label}>
+                    {value.label === "" ? "(empty)" : value.label}
+                  </span>
                 </label>
               ))}
           </div>
@@ -640,7 +674,7 @@ function FilterConditionRow({
           const operator = isOperatorAvailableForColumn(val, columns, draft.operator)
             ? draft.operator
             : getDefaultOperator(val, columns);
-          onUpdate(draft.id, { column: val, operator, value: "" });
+          onUpdate(draft.id, { column: val, operator, value: "", values: [] });
         }}
         columns={columns}
         placeholder="Column..."
@@ -665,6 +699,10 @@ function FilterConditionRow({
               wasColumnComparison !== nextIsColumnComparison
                 ? ""
                 : draft.value,
+            values:
+              operator === "IN" || operator === "NOT IN"
+                ? []
+                : draft.values,
           });
         }}
       />
@@ -675,8 +713,11 @@ function FilterConditionRow({
         <InValuePicker
           tableName={activeTable}
           column={draft.column}
-          selectedValues={draft.value}
-          onChange={(value) => onUpdate(draft.id, { value })}
+          selectedValues={draft.values}
+          onChange={(values) => onUpdate(draft.id, {
+            values,
+            value: values.map((value) => value.label).join(", "),
+          })}
         />
       ) : isColumnComparison ? (
         <SearchableColumnSelect
@@ -693,6 +734,18 @@ function FilterConditionRow({
           className="filter-value-input"
           value={draft.value}
           onChange={(e) => {
+            if (draft.operator === "IN" || draft.operator === "NOT IN") {
+              const value = e.target.value;
+              onUpdate(draft.id, {
+                value,
+                values: value
+                  .split(",")
+                  .map((item) => item.trim())
+                  .filter((item) => item.length > 0)
+                  .map((item) => ({ raw: item, label: item })),
+              });
+              return;
+            }
             if (!isNumberValueInput || isAllowedNumberInputValue(e.target.value, { allowDecimal: true, allowNegative: true })) {
               onUpdate(draft.id, { value: e.target.value });
             } else {
@@ -807,6 +860,7 @@ function FilterGroupRenderer({
       column: col,
       operator: getDefaultOperator(col, columns),
       value: "",
+      values: [],
     };
   };
 
@@ -1104,6 +1158,7 @@ function findQcFilter(group: FilterGroup, column: string): DraftFilterCondition 
         column: child.column,
         operator: child.operator,
         value: child.value,
+        values: child.values ?? [],
       };
     }
   }
@@ -1912,7 +1967,7 @@ export function FilterPanel({
   };
 
   const applyFilters = () => {
-    onApplyFilters(convertFromDraft(draftRoot));
+    onApplyFilters(convertFromDraft(draftRoot, columns));
   };
 
   const handleSaveView = () => {
@@ -1924,7 +1979,7 @@ export function FilterPanel({
     setShowSaveInput(false);
   };
 
-  const draftFilters = convertFromDraft(draftRoot);
+  const draftFilters = convertFromDraft(draftRoot, columns);
   const isDirty =
     JSON.stringify(draftFilters) !== JSON.stringify(activeFilters);
 

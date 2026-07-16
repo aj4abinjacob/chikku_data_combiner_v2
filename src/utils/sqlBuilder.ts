@@ -1,4 +1,4 @@
-import { FilterCondition, FilterGroup, INTERNAL_ROW_ID_COLUMN, SortColumn, ViewState, isFilterGroup, PivotGroupColumn } from "../types";
+import { FilterCondition, FilterGroup, FilterListValue, INTERNAL_ROW_ID_COLUMN, SortColumn, ViewState, isFilterGroup, PivotGroupColumn } from "../types";
 
 /**
  * Escape a SQL identifier by doubling any embedded double quotes.
@@ -39,7 +39,42 @@ export function buildSelectQuery(
   return sql;
 }
 
-function buildFilterClause(filter: FilterCondition): string {
+function escapeStringLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function normalizedCastType(columnType?: string): string | null {
+  if (!columnType) return null;
+  const type = columnType.trim().replace(/\s+/g, " ").toUpperCase();
+  if (
+    /^(BOOLEAN|TINYINT|SMALLINT|INTEGER|INT|BIGINT|HUGEINT|UTINYINT|USMALLINT|UINTEGER|UBIGINT|FLOAT|REAL|DOUBLE|DATE|TIME|TIME WITH TIME ZONE|TIMESTAMP|TIMESTAMP WITH TIME ZONE|TIMESTAMP_S|TIMESTAMP_MS|TIMESTAMP_NS|INTERVAL|UUID|JSON|BLOB)$/.test(type)
+    || /^(DECIMAL|NUMERIC)\(\d+,\s*\d+\)$/.test(type)
+  ) {
+    return type;
+  }
+  return null;
+}
+
+function isTextType(columnType?: string): boolean {
+  return /^(VARCHAR|CHAR|BPCHAR|TEXT|STRING)(\(|$)/i.test(columnType?.trim() ?? "");
+}
+
+function typedLiteral(value: string, columnType?: string): string | null {
+  if (isTextType(columnType)) return escapeStringLiteral(value);
+  const castType = normalizedCastType(columnType);
+  return castType ? `CAST(${escapeStringLiteral(value)} AS ${castType})` : null;
+}
+
+function listFilterValues(filter: FilterCondition): FilterListValue[] {
+  if (filter.values) return filter.values;
+  return filter.value
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+    .map((value) => ({ raw: value, label: value }));
+}
+
+export function buildFilterClause(filter: FilterCondition): string {
   const col = escapeIdent(filter.column);
 
   if (filter.operator === "IS NULL") return `${col} IS NULL`;
@@ -60,7 +95,6 @@ function buildFilterClause(filter: FilterCondition): string {
       : `${left} IS DISTINCT FROM ${right}`;
   }
 
-  // Escape single quotes in value
   const val = filter.value.replace(/'/g, "''");
 
   if (filter.operator === "EQUALS IGNORE CASE") {
@@ -82,37 +116,55 @@ function buildFilterClause(filter: FilterCondition): string {
   }
 
   if (filter.operator === "IN" || filter.operator === "NOT IN") {
-    // Comma-separated list of values
-    const items = filter.value
-      .split(",")
-      .map((v) => v.trim().replace(/'/g, "''"))
-      .filter((v) => v.length > 0)
-      .map((v) => `'${v}'`);
+    const values = listFilterValues(filter);
+    const castType = normalizedCastType(filter.columnType);
+    const useTypedValues = isTextType(filter.columnType) || castType !== null;
+    const items = values.map((value) =>
+      useTypedValues
+        ? typedLiteral(value.raw, filter.columnType)!
+        : escapeStringLiteral(value.raw)
+    );
     if (items.length === 0) return filter.operator === "IN" ? "1=0" : "1=1";
-    return `${col} ${filter.operator} (${items.join(", ")})`;
+    const comparableColumn = useTypedValues ? col : `CAST(${col} AS VARCHAR)`;
+    return `${comparableColumn} ${filter.operator} (${items.join(", ")})`;
   }
 
   if (filter.operator === "STARTS WITH") {
-    return `CAST(${col} AS VARCHAR) LIKE '${val}%'`;
+    return `starts_with(CAST(${col} AS VARCHAR), '${val}')`;
   }
 
   if (filter.operator === "NOT STARTS WITH") {
-    return `CAST(${col} AS VARCHAR) NOT LIKE '${val}%'`;
+    return `NOT starts_with(CAST(${col} AS VARCHAR), '${val}')`;
   }
 
   if (filter.operator === "ENDS WITH") {
-    return `CAST(${col} AS VARCHAR) LIKE '%${val}'`;
+    return `ends_with(CAST(${col} AS VARCHAR), '${val}')`;
   }
 
   if (filter.operator === "NOT ENDS WITH") {
-    return `CAST(${col} AS VARCHAR) NOT LIKE '%${val}'`;
+    return `NOT ends_with(CAST(${col} AS VARCHAR), '${val}')`;
   }
 
   if (filter.operator === "LIKE" || filter.operator === "NOT LIKE") {
     return `${col} ${filter.operator} '${val}'`;
   }
 
-  return `${col} ${filter.operator} '${val}'`;
+  const literal = typedLiteral(filter.value, filter.columnType);
+  if (literal) return `${col} ${filter.operator} ${literal}`;
+  return `CAST(${col} AS VARCHAR) ${filter.operator} '${val}'`;
+}
+
+export function buildDistinctFilterValuesQuery(
+  tableName: string,
+  column: string,
+  search = ""
+): string {
+  const table = escapeIdent(tableName);
+  const col = escapeIdent(column);
+  const searchClause = search
+    ? ` AND contains(lower(CAST(${col} AS VARCHAR)), lower(${escapeStringLiteral(search)}))`
+    : "";
+  return `SELECT DISTINCT CAST(${col} AS VARCHAR) AS raw_value, CAST(${col} AS VARCHAR) AS display_label FROM ${table} WHERE ${col} IS NOT NULL${searchClause} ORDER BY raw_value LIMIT 1000`;
 }
 
 /**
@@ -215,14 +267,16 @@ export function buildChunkQuery(
   sortColumns: SortColumn[],
   chunkSize: number,
   chunkIndex: number,
-  includeInternalRowId = false
+  includeInternalRowId = false,
+  columnTypes?: Map<string, string>
 ): string {
   const visibleSelects =
     visibleColumns.length > 0
-      ? visibleColumns.map((c) => escapeIdent(c)).join(", ")
+      ? visibleColumns.map((c) => buildTransportColumnSelect(c, columnTypes?.get(c))).join(", ")
       : "*";
+  const internalRowIdAlias = getInternalRowIdAlias(visibleColumns);
   const columns = includeInternalRowId
-    ? `${visibleSelects}, rowid AS ${escapeIdent(INTERNAL_ROW_ID_COLUMN)}`
+    ? `${visibleSelects}, rowid AS ${escapeIdent(internalRowIdAlias)}`
     : visibleSelects;
 
   let sql = `SELECT ${columns} FROM ${escapeIdent(tableName)}`;
@@ -241,6 +295,20 @@ export function buildChunkQuery(
 
   sql += ` LIMIT ${chunkSize} OFFSET ${chunkIndex * chunkSize}`;
   return sql;
+}
+
+export function buildTransportColumnSelect(column: string, columnType?: string): string {
+  const ident = escapeIdent(column);
+  return /^(DECIMAL|NUMERIC)|^TIME WITH TIME ZONE$/i.test(columnType ?? "")
+    ? `CAST(${ident} AS VARCHAR) AS ${ident}`
+    : ident;
+}
+
+export function getInternalRowIdAlias(visibleColumns: string[]): string {
+  const used = new Set(visibleColumns);
+  let alias = INTERNAL_ROW_ID_COLUMN;
+  while (used.has(alias)) alias += "_";
+  return alias;
 }
 
 /**
@@ -278,8 +346,8 @@ export function buildColumnStatsSummaryQuery(
 
   if (includeNumericStats) {
     selects.push(
-      `AVG(${col}) AS avg_value`,
-      `MEDIAN(${col}) AS median_value`
+      `CAST(AVG(${col}) AS DOUBLE) AS avg_value`,
+      `CAST(MEDIAN(${col}) AS DOUBLE) AS median_value`
     );
   }
 
@@ -371,6 +439,20 @@ function buildParentPathClause(parentPath: { column: string; value: any }[]): st
     .join(" AND ");
 }
 
+type PivotAggregateConfig = { column: string; fn: string; columnType?: string };
+
+function buildPivotAggregateExpression(agg: PivotAggregateConfig): string {
+  const col = escapeIdent(agg.column);
+  if (agg.fn === "LIST") {
+    return `ARRAY_TO_STRING(LIST_SORT(LIST(DISTINCT CAST(${col} AS VARCHAR))), ', ')`;
+  }
+  if (agg.fn === "COUNT_DISTINCT") return `COUNT(DISTINCT ${col})`;
+  if (agg.fn === "COUNT_NULL") {
+    return `SUM(CASE WHEN ${col} IS NULL THEN 1 ELSE 0 END)`;
+  }
+  return `${agg.fn}(${col})`;
+}
+
 /**
  * Build a GROUP BY query for pivot view — fetches group values with aggregates.
  */
@@ -378,7 +460,7 @@ export function buildPivotGroupQuery(
   tableName: string,
   groupColumn: string,
   parentPath: { column: string; value: any }[],
-  aggConfigs: { column: string; fn: string }[],
+  aggConfigs: PivotAggregateConfig[],
   filters: FilterGroup,
   direction: "ASC" | "DESC",
   orderByAgg?: { column: string; fn: string; direction: "ASC" | "DESC" },
@@ -386,20 +468,18 @@ export function buildPivotGroupQuery(
   groupSortDirection?: "ASC" | "DESC"
 ): string {
   const gcol = escapeIdent(groupColumn);
-  const selects = [`${gcol}`, `COUNT(*) AS __count`];
+  const groupType = aggConfigs.find((agg) => agg.column === groupColumn)?.columnType;
+  const groupSelect = buildTransportColumnSelect(groupColumn, groupType);
+  const selects = [groupSelect, `COUNT(*) AS __count`];
 
   for (const agg of aggConfigs) {
-    const col = escapeIdent(agg.column);
     const alias = `"${agg.column.replace(/"/g, '""')}:${agg.fn}"`;
-    if (agg.fn === "LIST") {
-      selects.push(`ARRAY_TO_STRING(LIST_SORT(LIST(DISTINCT CAST(${col} AS VARCHAR))), ', ') AS ${alias}`);
-    } else if (agg.fn === "COUNT_DISTINCT") {
-      selects.push(`COUNT(DISTINCT ${col}) AS ${alias}`);
-    } else if (agg.fn === "COUNT_NULL") {
-      selects.push(`SUM(CASE WHEN ${col} IS NULL THEN 1 ELSE 0 END) AS ${alias}`);
-    } else {
-      selects.push(`${agg.fn}(${col}) AS ${alias}`);
-    }
+    const expression = buildPivotAggregateExpression(agg);
+    const transportExpression = /^(DECIMAL|NUMERIC)|^TIME WITH TIME ZONE$/i.test(agg.columnType ?? "")
+      && !["LIST", "COUNT_DISTINCT", "COUNT_NULL", "COUNT"].includes(agg.fn)
+      ? `CAST(${expression} AS VARCHAR)`
+      : expression;
+    selects.push(`${transportExpression} AS ${alias}`);
   }
 
   let sql = `SELECT ${selects.join(", ")} FROM ${escapeIdent(tableName)}`;
@@ -418,8 +498,13 @@ export function buildPivotGroupQuery(
   } else if (groupSortMode === "alpha") {
     sql += ` ORDER BY ${gcol} ${groupSortDirection ?? "ASC"}`;
   } else if (orderByAgg) {
-    const aggAlias = `"${orderByAgg.column.replace(/"/g, '""')}:${orderByAgg.fn}"`;
-    sql += ` ORDER BY ${aggAlias} ${orderByAgg.direction}`;
+    const aggregate = aggConfigs.find(
+      (agg) => agg.column === orderByAgg.column && agg.fn === orderByAgg.fn
+    );
+    const orderExpression = aggregate
+      ? buildPivotAggregateExpression(aggregate)
+      : `"${orderByAgg.column.replace(/"/g, '""')}:${orderByAgg.fn}"`;
+    sql += ` ORDER BY ${orderExpression} ${orderByAgg.direction}`;
   } else {
     sql += ` ORDER BY ${gcol} ${direction}`;
   }
@@ -432,23 +517,19 @@ export function buildPivotGroupQuery(
  */
 export function buildPivotGrandTotalQuery(
   tableName: string,
-  aggConfigs: { column: string; fn: string }[],
+  aggConfigs: PivotAggregateConfig[],
   filters: FilterGroup
 ): string {
   const selects = [`COUNT(*) AS __count`];
 
   for (const agg of aggConfigs) {
-    const col = escapeIdent(agg.column);
     const alias = `"${agg.column.replace(/"/g, '""')}:${agg.fn}"`;
-    if (agg.fn === "LIST") {
-      selects.push(`ARRAY_TO_STRING(LIST_SORT(LIST(DISTINCT CAST(${col} AS VARCHAR))), ', ') AS ${alias}`);
-    } else if (agg.fn === "COUNT_DISTINCT") {
-      selects.push(`COUNT(DISTINCT ${col}) AS ${alias}`);
-    } else if (agg.fn === "COUNT_NULL") {
-      selects.push(`SUM(CASE WHEN ${col} IS NULL THEN 1 ELSE 0 END) AS ${alias}`);
-    } else {
-      selects.push(`${agg.fn}(${col}) AS ${alias}`);
-    }
+    const expression = buildPivotAggregateExpression(agg);
+    const transportExpression = /^(DECIMAL|NUMERIC)|^TIME WITH TIME ZONE$/i.test(agg.columnType ?? "")
+      && !["LIST", "COUNT_DISTINCT", "COUNT_NULL", "COUNT"].includes(agg.fn)
+      ? `CAST(${expression} AS VARCHAR)`
+      : expression;
+    selects.push(`${transportExpression} AS ${alias}`);
   }
 
   let sql = `SELECT ${selects.join(", ")} FROM ${escapeIdent(tableName)}`;
@@ -469,11 +550,12 @@ export function buildPivotDataChunkQuery(
   filters: FilterGroup,
   sortColumns: SortColumn[],
   chunkSize: number,
-  chunkIndex: number
+  chunkIndex: number,
+  columnTypes?: Map<string, string>
 ): string {
   const columns =
     visibleColumns.length > 0
-      ? visibleColumns.map((c) => escapeIdent(c)).join(", ")
+      ? visibleColumns.map((c) => buildTransportColumnSelect(c, columnTypes?.get(c))).join(", ")
       : "*";
 
   let sql = `SELECT ${columns} FROM ${escapeIdent(tableName)}`;
