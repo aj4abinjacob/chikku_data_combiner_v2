@@ -85,7 +85,7 @@ Tauri 2, Rust, React 18, TypeScript 5 (strict, ES2020, CommonJS), DuckDB (in-mem
 Three sections: Tables, Columns, Operations. Table management, column visibility/search, sort/group controls, and operation buttons for data operations, aggregate, pivot table, lookup merge, comparison, date conversion, and export.
 
 ### DataGrid.tsx — Virtualized Data Grid
-Virtual scrolling via `@tanstack/react-virtual`. Div-based layout. Dual-mode: flat (chunk cache) and pivot (tree with group/data rows). Cell selection, copy (TSV), multi-sort, column resize/reorder. `ROW_HEIGHT = 28`.
+Virtual scrolling via `@tanstack/react-virtual`. Div-based layout. Dual-mode: flat (chunk cache) and pivot (tree with group/data rows). Cell selection, copy (TSV), multi-sort, column resize/reorder. Native text selection is disabled on grid cells (including the WebKit-prefixed rule) so clipboard copying stays cell-based. `ROW_HEIGHT = 28`.
 
 ### FilterPanel.tsx — Bottom Panel
 Resizable (80-500px). Three tabs. Recursive AND/OR filter groups. Operators include CONTAINS (regex), IN (value picker). Draft state model with immutable updates. Filters tab has side-by-side filter builder and compact views panel.
