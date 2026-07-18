@@ -1182,6 +1182,9 @@ export function App(): React.ReactElement {
 
     const handleDragDrop = (payload: DragDropEvent) => {
       if (payload.type === "enter") {
+        // Tauri can emit an enter event with no paths for HTML drag operations,
+        // such as reordering columns. Only show the file overlay for OS file drags.
+        if (payload.paths.length === 0) return;
         setFileDragState(uniqueSupportedFilePaths(payload.paths).length > 0 ? "supported" : "unsupported");
       } else if (payload.type === "drop") {
         setFileDragState("idle");

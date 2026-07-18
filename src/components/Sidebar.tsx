@@ -173,7 +173,7 @@ export function Sidebar({
   const fileContextMenuRef = React.useRef<HTMLDivElement>(null);
 
   // Drag-and-drop state
-  const dragIndexRef = React.useRef<number | null>(null);
+  const dragColumnRef = React.useRef<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ index: number; position: "top" | "bottom" } | null>(null);
   const documentWorkspaceActive = jsonWorkspaceActive || markdownWorkspaceActive;
   const workspaceLabel = markdownWorkspaceActive ? "Markdown" : "JSON";
@@ -316,17 +316,20 @@ export function Sidebar({
     return map;
   }, [pivotConfig]);
 
-  const handleDragStart = (e: React.DragEvent, index: number) => {
-    dragIndexRef.current = index;
+  const handleDragStart = (e: React.DragEvent, column: string) => {
+    e.stopPropagation();
+    dragColumnRef.current = column;
     e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", column);
     const target = e.currentTarget as HTMLElement;
     target.classList.add("dragging");
   };
 
-  const handleDragOver = (e: React.DragEvent, index: number) => {
+  const handleDragOver = (e: React.DragEvent, index: number, column: string) => {
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
-    if (dragIndexRef.current === null || dragIndexRef.current === index) {
+    if (dragColumnRef.current === null || dragColumnRef.current === column) {
       setDropTarget(null);
       return;
     }
@@ -342,24 +345,30 @@ export function Sidebar({
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const fromIndex = dragIndexRef.current;
-    if (fromIndex === null || !dropTarget) return;
+    e.stopPropagation();
+    const draggedColumn = dragColumnRef.current;
+    const targetColumn = dropTarget
+      ? filteredColumns[dropTarget.index]?.column_name
+      : null;
+    if (!draggedColumn || !targetColumn || !dropTarget) return;
 
     const newOrder = [...orderedColumns.map((c) => c.column_name)];
+    const fromIndex = newOrder.indexOf(draggedColumn);
+    if (fromIndex < 0) return;
     const [moved] = newOrder.splice(fromIndex, 1);
-    let toIndex = dropTarget.index;
-    if (fromIndex < toIndex) toIndex--;
+    let toIndex = newOrder.indexOf(targetColumn);
+    if (toIndex < 0) return;
     if (dropTarget.position === "bottom") toIndex++;
     newOrder.splice(toIndex, 0, moved);
 
     onReorderColumns(newOrder);
-    dragIndexRef.current = null;
+    dragColumnRef.current = null;
     setDropTarget(null);
   };
 
   const handleDragEnd = (e: React.DragEvent) => {
     (e.currentTarget as HTMLElement).classList.remove("dragging");
-    dragIndexRef.current = null;
+    dragColumnRef.current = null;
     setDropTarget(null);
   };
 
@@ -771,8 +780,8 @@ export function Sidebar({
                 }`}
                 title={`${col.column_name} (${col.column_type})`}
                 draggable
-                onDragStart={(e) => handleDragStart(e, index)}
-                onDragOver={(e) => handleDragOver(e, index)}
+                onDragStart={(e) => handleDragStart(e, col.column_name)}
+                onDragOver={(e) => handleDragOver(e, index, col.column_name)}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 onDragEnd={handleDragEnd}
