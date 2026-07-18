@@ -7,7 +7,7 @@
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
-    "tauri:assets": "mkdirp dist-tauri && recursive-copy -w html/index.html dist-tauri/index.html && recursive-copy -w html/icon.svg dist-tauri/icon.svg",
+    "tauri:assets": "mkdirp dist-tauri && recursive-copy -w html/index.html dist-tauri/index.html && recursive-copy -w src-tauri/icons/icon.png dist-tauri/icon.png",
     "tauri:renderer:build": "npm run tauri:assets && webpack --env tauri --mode production",
     "tauri:renderer:watch": "npm run tauri:assets && webpack serve --env tauri --mode development",
     "tauri:dev": "tauri dev",
