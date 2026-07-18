@@ -420,6 +420,11 @@ export function DataGrid({
   // ── Header drag-reorder state ──
   const [draggingColumn, setDraggingColumn] = useState<string | null>(null);
   const headerDragCol = useRef<string | null>(null);
+  const headerDropTargetRef = useRef<{
+    col: string;
+    position: "left" | "right";
+  } | null>(null);
+  const headerDragCleanupRef = useRef<(() => void) | null>(null);
   const [headerDropTarget, setHeaderDropTarget] = useState<{
     col: string;
     position: "left" | "right";
@@ -538,92 +543,107 @@ export function DataGrid({
   }, []);
 
   // ── Header drag-reorder handlers ──
-  const handleHeaderDragStart = useCallback(
-    (e: React.DragEvent, col: string) => {
-      if (isDragging.current || !onReorderColumns) {
-        e.preventDefault();
+  const handleHeaderPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLElement>, col: string) => {
+      if (
+        e.button !== 0 ||
+        isDragging.current ||
+        !onReorderColumns ||
+        (e.target as HTMLElement).closest("button, .col-resize-handle")
+      ) {
         return;
       }
+
+      e.preventDefault();
       e.stopPropagation();
+      headerDragCleanupRef.current?.();
       headerDragCol.current = col;
       setDraggingColumn(col);
       setTooltip(null);
       setCopied(false);
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", col);
       document.body.style.cursor = "grabbing";
+      document.body.style.userSelect = "none";
+      e.currentTarget.setPointerCapture(e.pointerId);
+
+      const setCurrentDropTarget = (
+        next: { col: string; position: "left" | "right" } | null
+      ) => {
+        headerDropTargetRef.current = next;
+        setHeaderDropTarget((prev) =>
+          prev?.col === next?.col && prev?.position === next?.position ? prev : next
+        );
+      };
+
+      const handlePointerMove = (event: PointerEvent) => {
+        if (event.pointerId !== e.pointerId) return;
+        event.preventDefault();
+
+        const target = document
+          .elementFromPoint(event.clientX, event.clientY)
+          ?.closest<HTMLElement>("[data-grid-column]");
+        if (!target || !scrollRef.current?.contains(target)) {
+          setCurrentDropTarget(null);
+          return;
+        }
+
+        const targetColumn = target.dataset.gridColumn;
+        if (!targetColumn || targetColumn === headerDragCol.current) {
+          setCurrentDropTarget(null);
+          return;
+        }
+
+        const rect = target.getBoundingClientRect();
+        setCurrentDropTarget({
+          col: targetColumn,
+          position: event.clientX < rect.left + rect.width / 2 ? "left" : "right",
+        });
+      };
+
+      const cleanup = () => {
+        document.removeEventListener("pointermove", handlePointerMove);
+        document.removeEventListener("pointerup", handlePointerUp);
+        document.removeEventListener("pointercancel", handlePointerCancel);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        headerDragCol.current = null;
+        headerDropTargetRef.current = null;
+        headerDragCleanupRef.current = null;
+        setDraggingColumn(null);
+        setHeaderDropTarget(null);
+      };
+
+      const handlePointerUp = (event: PointerEvent) => {
+        if (event.pointerId !== e.pointerId) return;
+        const fromCol = headerDragCol.current;
+        const target = headerDropTargetRef.current;
+        cleanup();
+        if (!fromCol || !target) return;
+
+        const newOrder = [...displayColumns];
+        const fromIndex = newOrder.indexOf(fromCol);
+        if (fromIndex < 0) return;
+        newOrder.splice(fromIndex, 1);
+        let toIndex = newOrder.indexOf(target.col);
+        if (toIndex < 0) return;
+        if (target.position === "right") toIndex++;
+        if (fromIndex === toIndex) return;
+        newOrder.splice(toIndex, 0, fromCol);
+        onReorderColumns(newOrder);
+      };
+
+      const handlePointerCancel = (event: PointerEvent) => {
+        if (event.pointerId === e.pointerId) cleanup();
+      };
+
+      document.addEventListener("pointermove", handlePointerMove);
+      document.addEventListener("pointerup", handlePointerUp);
+      document.addEventListener("pointercancel", handlePointerCancel);
+      headerDragCleanupRef.current = cleanup;
     },
-    [onReorderColumns]
+    [displayColumns, onReorderColumns]
   );
 
-  const handleHeaderDragOver = useCallback(
-    (e: React.DragEvent, col: string) => {
-      if (!onReorderColumns) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      if (!headerDragCol.current || headerDragCol.current === col) {
-        setHeaderDropTarget((prev) => (prev === null ? prev : null));
-        return;
-      }
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const midX = rect.left + rect.width / 2;
-      const position = e.clientX < midX ? "left" : "right";
-      setHeaderDropTarget((prev) =>
-        prev?.col === col && prev.position === position ? prev : { col, position }
-      );
-    },
-    [onReorderColumns]
-  );
-
-  const handleHeaderDragLeave = useCallback(() => {
-    setHeaderDropTarget(null);
-  }, []);
-
-  const finishHeaderDrag = useCallback(() => {
-    headerDragCol.current = null;
-    setDraggingColumn(null);
-    setHeaderDropTarget(null);
-    document.body.style.cursor = "";
-  }, []);
-
-  const handleHeaderDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const fromCol = headerDragCol.current;
-      if (!fromCol || !headerDropTarget || !onReorderColumns) {
-        finishHeaderDrag();
-        return;
-      }
-
-      const newOrder = [...displayColumns];
-      const fromIndex = newOrder.indexOf(fromCol);
-      if (fromIndex < 0) {
-        finishHeaderDrag();
-        return;
-      }
-      newOrder.splice(fromIndex, 1);
-      let toIndex = newOrder.indexOf(headerDropTarget.col);
-      if (toIndex < 0) {
-        finishHeaderDrag();
-        return;
-      }
-      if (headerDropTarget.position === "right") toIndex++;
-      if (fromIndex === toIndex) {
-        finishHeaderDrag();
-        return;
-      }
-      newOrder.splice(toIndex, 0, fromCol);
-
-      onReorderColumns(newOrder);
-      finishHeaderDrag();
-    },
-    [displayColumns, finishHeaderDrag, headerDropTarget, onReorderColumns]
-  );
-
-  const handleHeaderDragEnd = useCallback(() => {
-    finishHeaderDrag();
-  }, [finishHeaderDrag]);
+  useEffect(() => () => headerDragCleanupRef.current?.(), []);
 
   const handleResizeStart = useCallback(
     (e: React.MouseEvent, col: string) => {
@@ -1271,12 +1291,8 @@ export function DataGrid({
                     .join(" ")}
                   style={{ width: columnWidths[col] ?? DEFAULT_COLUMN_WIDTH }}
                   aria-label={`Column header: ${col}`}
-                  draggable={!pivotMode && !!onReorderColumns}
-                  onDragStart={(e) => handleHeaderDragStart(e, col)}
-                  onDragOver={(e) => handleHeaderDragOver(e, col)}
-                  onDragLeave={handleHeaderDragLeave}
-                  onDrop={handleHeaderDrop}
-                  onDragEnd={handleHeaderDragEnd}
+                  data-grid-column={col}
+                  onPointerDown={(e) => handleHeaderPointerDown(e, col)}
                 >
                   <span
                     className="dg-header-text"
