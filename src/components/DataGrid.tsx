@@ -3,7 +3,7 @@ import { Button, ButtonGroup, Icon } from "@blueprintjs/core";
 import { Popover2 } from "@blueprintjs/popover2";
 import { SoftSelect } from "./SoftSelect";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy, QcSession, INTERNAL_ROW_ID_VALUE } from "../types";
+import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, PivotAggFunction, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy, QcSession, INTERNAL_ROW_ID_VALUE } from "../types";
 
 const TOOLTIP_DELAY = 600; // ms before tooltip appears
 
@@ -12,6 +12,21 @@ const DEFAULT_COLUMN_WIDTH = 150;
 const MIN_COLUMN_WIDTH = 50;
 const PIVOT_GROUP_COL_WIDTH = 250;
 const PIVOT_GROUP_COL_KEY = "__pivot_group__";
+
+// Aggregate functions that work on any column type (others fall back to
+// COUNT_DISTINCT for non-numeric columns — must match usePivotCache).
+const UNIVERSAL_AGG_FNS = new Set(["COUNT", "COUNT_DISTINCT", "COUNT_NULL", "MIN", "MAX", "LIST"]);
+const AGG_LABELS: Record<string, string> = {
+  LIST: "list",
+  SUM: "sum",
+  COUNT: "count",
+  COUNT_DISTINCT: "count distinct",
+  COUNT_NULL: "nulls",
+  AVG: "avg",
+  MIN: "min",
+  MAX: "max",
+  MEDIAN: "median",
+};
 
 function cellKey(row: number, col: string): string {
   return `${row}:${col}`;
@@ -70,6 +85,7 @@ interface DataGridProps {
   onToggleExpand?: (rowKey: string) => void;
   grandTotals?: Record<string, any> | null;
   showGrandTotal?: boolean;
+  pivotAggFunction?: PivotAggFunction;
   numericColumns?: Set<string>;
   columnTypes?: Map<string, string>;
   onGetColumnStats?: (column: string) => Promise<ColumnStats>;
@@ -113,6 +129,7 @@ export function DataGrid({
   onToggleExpand,
   grandTotals,
   showGrandTotal,
+  pivotAggFunction,
   numericColumns,
   columnTypes,
   onGetColumnStats,
@@ -178,6 +195,18 @@ export function DataGrid({
       return isNumericColumnType(columnTypes?.get(column) ?? "");
     },
     [columnTypes, numericColumns]
+  );
+
+  // Effective aggregate label for a value column in pivot mode. Non-numeric
+  // columns fall back to COUNT_DISTINCT for numeric-only aggregates (mirrors
+  // usePivotCache) so the header reflects what the cells actually contain.
+  const pivotAggLabelFor = useCallback(
+    (column: string): string => {
+      const fn = pivotAggFunction ?? "COUNT";
+      const eff = isColumnNumeric(column) || UNIVERSAL_AGG_FNS.has(fn) ? fn : "COUNT_DISTINCT";
+      return AGG_LABELS[eff] ?? eff.toLowerCase();
+    },
+    [pivotAggFunction, isColumnNumeric]
   );
 
   const getColumnFormat = useCallback(
@@ -1008,8 +1037,8 @@ export function DataGrid({
   if (pivotMode && (!pivotGroupColumns || pivotGroupColumns.length === 0)) {
     return (
       <div className="welcome">
-        <p>Click a column header to group by that column</p>
-        <p className="dg-pivot-empty-hint">Shift+click to add more group levels</p>
+        <p>Pick a column to group by using the green group control beside it in the sidebar</p>
+        <p className="dg-pivot-empty-hint">Shift+click the group control to add more group levels</p>
       </div>
     );
   }
@@ -1294,6 +1323,14 @@ export function DataGrid({
                   data-grid-column={col}
                   onPointerDown={(e) => handleHeaderPointerDown(e, col)}
                 >
+                  {pivotMode && (
+                    <span
+                      className="dg-pivot-agg-badge"
+                      title={`Cells show ${pivotAggLabelFor(col)} of ${col}`}
+                    >
+                      {pivotAggLabelFor(col)}
+                    </span>
+                  )}
                   <span
                     className="dg-header-text"
                     onMouseEnter={(e) => {
@@ -1562,14 +1599,16 @@ export function DataGrid({
 
           {/* Grand total row — at the bottom, after virtual rows */}
           {pivotMode && showGrandTotal && grandTotals && (
-            <div className="dg-pivot-grand-total-row">
-              {/* Group column: Total label */}
+            <div className="dg-pivot-grand-total-row" style={{ height: rowHeight }}>
+              {/* Group column: Grand Total label */}
               <div
                 className="dg-cell dg-pivot-group-cell"
                 style={{ width: groupColWidth, paddingLeft: 16 }}
               >
+                {/* Spacer matching the group chevron so "Grand Total" aligns with group values above */}
+                <span style={{ width: 14, flexShrink: 0 }} aria-hidden="true" />
                 <span className="dg-pivot-group-value">
-                  Total
+                  Grand Total
                 </span>
                 <span className="dg-pivot-group-count">
                   ({formatCell(grandTotals.__count, displayDecimalPlaces)})

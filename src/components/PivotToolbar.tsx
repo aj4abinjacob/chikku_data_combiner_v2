@@ -4,15 +4,15 @@ import { SoftSelect } from "./SoftSelect";
 import { PivotViewConfig, PivotAggFunction } from "../types";
 
 const AGG_OPTIONS: { value: PivotAggFunction; label: string }[] = [
-  { value: "LIST", label: "LIST VALUES" },
-  { value: "SUM", label: "SUM" },
-  { value: "COUNT", label: "COUNT" },
-  { value: "COUNT_DISTINCT", label: "COUNT DISTINCT" },
-  { value: "COUNT_NULL", label: "COUNT NULL" },
-  { value: "AVG", label: "AVG" },
-  { value: "MIN", label: "MIN" },
-  { value: "MAX", label: "MAX" },
-  { value: "MEDIAN", label: "MEDIAN" },
+  { value: "COUNT", label: "Count" },
+  { value: "SUM", label: "Sum" },
+  { value: "AVG", label: "Average" },
+  { value: "MIN", label: "Min" },
+  { value: "MAX", label: "Max" },
+  { value: "MEDIAN", label: "Median" },
+  { value: "COUNT_DISTINCT", label: "Count distinct" },
+  { value: "COUNT_NULL", label: "Count of NULLs" },
+  { value: "LIST", label: "List values (concat)" },
 ];
 
 interface PivotToolbarProps {
@@ -39,10 +39,10 @@ export function PivotToolbar({
         minimal
         small
         onClick={onExitPivot}
-        title="Exit pivot view"
+        title="Exit group view"
         className="pivot-toolbar-exit"
       />
-      <span className="pivot-toolbar-label">Pivot View</span>
+      <span className="pivot-toolbar-label">Group View</span>
       {pivotConfig.groupColumns.length > 0 && (
         <div className="pivot-toolbar-breadcrumb">
           {pivotConfig.groupColumns.map((gc, i) => (
@@ -82,12 +82,16 @@ export function PivotToolbar({
         onClick={onToggleGrandTotal}
         title="Toggle grand total row"
       />
+      <span className="pivot-toolbar-agg-label" title="Aggregate applied to every value column">
+        Aggregate
+      </span>
       <SoftSelect
         value={pivotConfig.defaultAggFunction}
         onChange={(e) => onDefaultAggChange(e.target.value as PivotAggFunction)}
         options={AGG_OPTIONS}
         minimal
         className="pivot-toolbar-agg-select"
+        title="Aggregate applied to every value column"
       />
     </div>
   );

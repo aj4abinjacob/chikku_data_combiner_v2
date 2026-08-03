@@ -77,7 +77,7 @@ export function usePivotCache({
 
   const pivotConfig = viewState.pivotConfig;
   const groupColumns = pivotConfig?.groupColumns ?? [];
-  const defaultAggFn = pivotConfig?.defaultAggFunction ?? "LIST";
+  const defaultAggFn = pivotConfig?.defaultAggFunction ?? "COUNT";
   const groupSortMode = pivotConfig?.groupSortMode ?? null;
   const groupSortDir = pivotConfig?.groupSortDirection ?? "ASC";
 

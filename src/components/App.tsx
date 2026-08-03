@@ -1529,7 +1529,7 @@ export function App(): React.ReactElement {
   const handlePivotGroup = useCallback((column: string, addLevel: boolean) => {
     setViewState((prev) => {
       // Auto-create pivotConfig if it doesn't exist
-      const config = prev.pivotConfig ?? { groupColumns: [] as { column: string; direction: "ASC" | "DESC" }[], showGrandTotal: true, defaultAggFunction: "LIST" as const };
+      const config = prev.pivotConfig ?? { groupColumns: [] as { column: string; direction: "ASC" | "DESC" }[], showGrandTotal: true, defaultAggFunction: "COUNT" as const };
 
       const existing = config.groupColumns.findIndex((gc) => gc.column === column);
 
@@ -2837,6 +2837,7 @@ export function App(): React.ReactElement {
                     onToggleExpand={pivotActive ? pivotToggleExpand : undefined}
                     grandTotals={pivotActive ? pivotGrandTotals : undefined}
                     showGrandTotal={pivotActive ? viewState.pivotConfig?.showGrandTotal : undefined}
+                    pivotAggFunction={pivotActive ? viewState.pivotConfig?.defaultAggFunction : undefined}
                     numericColumns={pivotActive ? numericColumns : undefined}
                     columnTypes={columnTypes}
                     onGetColumnStats={pivotActive ? undefined : handleGetColumnStats}

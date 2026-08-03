@@ -8,10 +8,10 @@ import {
   Callout,
   Icon,
 } from "@blueprintjs/core";
-import { SoftSelect } from "./SoftSelect";
 import { ColumnInfo } from "../types";
 import { PreviewTableDialog } from "./PreviewTableDialog";
 import { ColumnCheckList } from "./ColumnCheckList";
+import { SearchableColumnSelect } from "./SearchableColumnSelect";
 
 const NUMERIC_RE =
   /^(TINYINT|SMALLINT|INTEGER|INT|BIGINT|HUGEINT|FLOAT|REAL|DOUBLE|DECIMAL|NUMERIC)/i;
@@ -29,6 +29,19 @@ const AGG_FUNCTIONS = [
 ] as const;
 
 type AggFunc = (typeof AGG_FUNCTIONS)[number];
+
+/** Analyst-friendly display labels (SQL kept in AGG_FUNCTIONS values) */
+const AGG_LABELS: Record<AggFunc, string> = {
+  SUM: "Sum",
+  COUNT: "Count",
+  "COUNT NULL": "Count of NULLs",
+  AVG: "Average",
+  MIN: "Min",
+  MAX: "Max",
+  MEDIAN: "Median",
+  STDDEV: "Std dev",
+  FIRST: "First (any row)",
+};
 
 /** Functions that work on non-numeric columns */
 const NON_NUMERIC_FUNCTIONS: Set<AggFunc> = new Set([
@@ -155,10 +168,11 @@ export function PivotDialog({
     };
   }, [pivotColumn, activeTable]);
 
-  const allColNames = schema.map((c) => c.column_name);
-
   // Columns available for pivot (exclude row fields)
-  const pivotColumnOptions = allColNames.filter((c) => !rowFields.has(c));
+  const pivotColumnSchema = useMemo(
+    () => schema.filter((c) => !rowFields.has(c.column_name)),
+    [schema, rowFields]
+  );
 
   const handleRowFieldsChange = useCallback((next: Set<string>) => {
     setRowFields(next);
@@ -292,6 +306,10 @@ export function PivotDialog({
       }),
     [aggFunction, schema, valueFieldList]
   );
+  const droppedValueFields = useMemo(
+    () => valueFieldList.filter((col) => !validValueFields.includes(col)),
+    [valueFieldList, validValueFields]
+  );
   const estimatedPivotColumns =
     pivotDistinctCount !== null
       ? rowFields.size + Math.max(1, validValueFields.length) * pivotDistinctCount
@@ -334,7 +352,7 @@ export function PivotDialog({
           <div className="aggregate-section workbench-section">
             <div className="aggregate-section-header workbench-step-header">
               <span className="workbench-step-title">
-                <span className="workbench-step-badge">3</span>
+                <span className="workbench-step-badge">2</span>
                 Aggregate Function
               </span>
             </div>
@@ -356,12 +374,12 @@ export function PivotDialog({
                     tabIndex={selected ? 0 : -1}
                     onClick={() => handleAggFunctionSelect(fn)}
                     onKeyDown={(event) => handleAggFunctionKeyDown(event, index)}
-                    title={fn}
+                    title={AGG_LABELS[fn]}
                   >
                     <span className="pivot-agg-function-check" aria-hidden="true">
                       {selected && <Icon icon="tick" iconSize={12} />}
                     </span>
-                    <span className="pivot-agg-function-label">{fn}</span>
+                    <span className="pivot-agg-function-label">{AGG_LABELS[fn]}</span>
                   </button>
                 );
               })}
@@ -374,26 +392,24 @@ export function PivotDialog({
           <div className="aggregate-section workbench-section">
             <div className="aggregate-section-header workbench-step-header">
               <span className="workbench-step-title">
-                <span className="workbench-step-badge">2</span>
+                <span className="workbench-step-badge">3</span>
                 Pivot Column
                 <span className="workbench-required-label">required</span>
               </span>
             </div>
-            <SoftSelect
+            <SearchableColumnSelect
               value={pivotColumn}
-              onChange={(e) => {
-                setPivotColumn(e.target.value);
+              onChange={(val) => {
+                setPivotColumn(val);
                 setResults(null);
               }}
+              columns={pivotColumnSchema}
+              placeholder="— Select a column —"
+              allowEmpty
+              emptyLabel="— Select a column —"
+              showType
               fill
-            >
-              <option value="">— Select a column —</option>
-              {pivotColumnOptions.map((col) => (
-                <option key={col} value={col}>
-                  {col}
-                </option>
-              ))}
-            </SoftSelect>
+            />
 
             {/* Distinct values preview */}
             {pivotColumn && (
@@ -469,6 +485,13 @@ export function PivotDialog({
               emptyMeans="invalid"
               maxHeight={246}
             />
+            {droppedValueFields.length > 0 && (
+              <Callout intent={Intent.WARNING} icon="warning-sign" style={{ marginTop: 8 }}>
+                {droppedValueFields.length} field{droppedValueFields.length !== 1 ? "s" : ""} ignored for{" "}
+                {AGG_LABELS[aggFunction]} (non-numeric): {droppedValueFields.join(", ")}. Pick a
+                numeric column or use Count / Min / Max / First.
+              </Callout>
+            )}
           </div>
 
           <div className="workbench-preview-card pivot-summary-card">
@@ -479,7 +502,7 @@ export function PivotDialog({
                 <strong>{rowFields.size > 0 ? "Grouped" : "1 row"}</strong>
               </div>
               <div>
-                <span>Pivot columns</span>
+                <span>Distinct pivot values</span>
                 <strong>{pivotDistinctCount !== null ? pivotDistinctCount.toLocaleString() : "—"}</strong>
               </div>
               <div>
@@ -499,7 +522,7 @@ export function PivotDialog({
                 <span className="workbench-chip workbench-chip-muted">+{rowFieldList.length - 3} rows</span>
               )}
               {valueFieldList.slice(0, 3).map((field) => (
-                <span key={field} className="workbench-chip workbench-chip-accent">{aggFunction}({field})</span>
+                <span key={field} className="workbench-chip workbench-chip-accent">{AGG_LABELS[aggFunction]} · {field}</span>
               ))}
             </div>
           </div>
@@ -540,6 +563,7 @@ export function PivotDialog({
               icon="th-derived"
               onClick={handleCreateTable}
               disabled={!results || results.length === 0}
+              title={!results || results.length === 0 ? "Run the pivot first to enable" : undefined}
             />
           </>
         }

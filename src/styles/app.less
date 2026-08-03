@@ -11438,10 +11438,14 @@ button.dg-stats-metric {
   align-items: center;
   gap: 4px;
   margin-left: 4px;
+  min-width: 0;
+  overflow: hidden;
+  flex-shrink: 1;
 }
 
 .pivot-breadcrumb-sep {
   color: #8a9ba8;
+  flex-shrink: 0;
 }
 
 .pivot-breadcrumb-item {
@@ -11454,20 +11458,32 @@ button.dg-stats-metric {
   font-size: 11px;
   color: #0d8050;
   font-weight: 500;
+  max-width: 160px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pivot-toolbar-spacer {
   flex: 1;
+  min-width: 12px;
+}
+
+.pivot-toolbar-agg-label {
+  font-size: 11px;
+  color: #5c7080;
+  flex-shrink: 0;
 }
 
 .pivot-toolbar-agg-select {
   font-size: 11px;
-  max-width: 90px;
+  max-width: 160px;
+  flex-shrink: 0;
 }
 
 // Pivot group header cell
 .dg-pivot-group-header {
-  min-width: 100px;
   font-weight: 600;
   color: #394b59;
   position: relative;
@@ -11597,7 +11613,23 @@ button.dg-stats-metric {
 // When group is expanded, slightly muted since real data is visible below
 .dg-pivot-agg-faded {
   font-weight: 600;
-  opacity: 0.5;
+  opacity: 0.62;
+}
+
+// Aggregate-function badge shown before value-column names in group-view headers
+.dg-pivot-agg-badge {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: var(--control-radius);
+  background: rgba(13, 128, 80, 0.12);
+  color: #0d8050;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  line-height: 15px;
+  white-space: nowrap;
+  margin-right: 4px;
 }
 
 // Empty group column cell for data rows
@@ -11608,7 +11640,7 @@ button.dg-stats-metric {
 .dg-pivot-grand-total-row {
   display: flex;
   align-items: center;
-  height: 28px;
+  min-height: 28px;
   background: #ebf1f5;
   font-weight: 700;
   border-top: 2px solid #394b59;
@@ -14847,6 +14879,15 @@ html.dark-theme #root {
 
   .pivot-breadcrumb-item {
     background: @dark-success-bg;
+  }
+
+  .dg-pivot-agg-badge {
+    background: @dark-success-bg;
+    color: @dark-success;
+  }
+
+  .pivot-toolbar-agg-label {
+    color: @dark-text-3;
   }
 
   .pivot-distinct-preview {

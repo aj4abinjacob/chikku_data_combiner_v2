@@ -160,8 +160,8 @@ const HELP_TOPICS: HelpTopic[] = [
         body: "Choose Pivot to turn distinct category values into columns and aggregate their records. The result appears as a new pivot table.",
       },
       {
-        title: "Interactive grouping",
-        body: "For an expandable grouped view, use the green group controls beside columns. The pivot toolbar can expand or collapse groups, show grand totals, change the default aggregation, and exit the grouped view.",
+        title: "Group View (interactive grouping)",
+        body: "For an expandable grouped rollup, use the green group controls beside columns in the sidebar. The Group View toolbar can expand or collapse groups, show a grand total, and change the aggregate applied to every value column (Count by default). Each value-column header shows which aggregate its cells contain.",
       },
     ],
   },
