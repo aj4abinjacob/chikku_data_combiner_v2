@@ -975,6 +975,36 @@ html, body, #root {
     }
   }
 
+  .column-drag-ghost {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 220px;
+    padding: 3px 8px;
+    background: #137cbd;
+    color: #fff;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(16, 22, 26, 0.35);
+    pointer-events: none;
+    opacity: 0;
+
+    .bp4-icon {
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+
   .column-item {
     display: flex;
     align-items: center;
@@ -1011,10 +1041,13 @@ html, body, #root {
     }
 
     .drag-handle {
+      display: flex;
+      align-items: center;
       cursor: grab;
       opacity: 0.32;
       flex-shrink: 0;
       color: #5c7080;
+      touch-action: none;
 
       &:active {
         cursor: grabbing;
@@ -1026,7 +1059,11 @@ html, body, #root {
     }
 
     &.dragging {
-      opacity: 0.4;
+      opacity: 0.45;
+      background: #e1effa;
+      box-shadow: 0 0 0 1px #137cbd inset;
+      border-radius: 3px;
+      cursor: grabbing;
     }
 
     &.drag-over-top {

@@ -174,7 +174,13 @@ export function Sidebar({
 
   // Drag-and-drop state
   const dragColumnRef = React.useRef<string | null>(null);
+  const dropTargetRef = React.useRef<{ index: number; position: "top" | "bottom" } | null>(null);
+  const dragCleanupRef = React.useRef<(() => void) | null>(null);
+  const dragGhostRef = React.useRef<HTMLDivElement>(null);
+  const columnsScrollRef = React.useRef<HTMLDivElement>(null);
   const [dropTarget, setDropTarget] = useState<{ index: number; position: "top" | "bottom" } | null>(null);
+  const [draggingColumn, setDraggingColumn] = useState<string | null>(null);
+  React.useEffect(() => () => dragCleanupRef.current?.(), []);
   const documentWorkspaceActive = jsonWorkspaceActive || markdownWorkspaceActive;
   const workspaceLabel = markdownWorkspaceActive ? "Markdown" : "JSON";
   const combinableTables = useMemo(() => tables.filter((table) => !isTextWorkspaceTable(table)), [tables]);
@@ -316,60 +322,144 @@ export function Sidebar({
     return map;
   }, [pivotConfig]);
 
-  const handleDragStart = (e: React.DragEvent, column: string) => {
-    e.stopPropagation();
-    dragColumnRef.current = column;
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", column);
-    const target = e.currentTarget as HTMLElement;
-    target.classList.add("dragging");
-  };
-
-  const handleDragOver = (e: React.DragEvent, index: number, column: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = "move";
-    if (dragColumnRef.current === null || dragColumnRef.current === column) {
-      setDropTarget(null);
+  // Column reorder uses pointer events (not HTML5 drag-and-drop): under Tauri
+  // the OS-level drag-drop handler swallows the webview's native drop events,
+  // so HTML5 DnD never lands. Mirrors DataGrid's header reorder.
+  const handleColumnPointerDown = (e: React.PointerEvent, column: string) => {
+    if (
+      e.button !== 0 ||
+      (e.target as HTMLElement).closest(
+        ".column-visibility-checkbox, .column-pivot-indicator, .column-sort-indicator, input, button"
+      )
+    ) {
       return;
     }
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const midY = rect.top + rect.height / 2;
-    const position = e.clientY < midY ? "top" : "bottom";
-    setDropTarget({ index, position });
-  };
-
-  const handleDragLeave = () => {
-    setDropTarget(null);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const draggedColumn = dragColumnRef.current;
-    const targetColumn = dropTarget
-      ? filteredColumns[dropTarget.index]?.column_name
-      : null;
-    if (!draggedColumn || !targetColumn || !dropTarget) return;
+    dragCleanupRef.current?.();
+    dragColumnRef.current = column;
+    setDraggingColumn(column);
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+    e.currentTarget.setPointerCapture(e.pointerId);
 
-    const newOrder = [...orderedColumns.map((c) => c.column_name)];
-    const fromIndex = newOrder.indexOf(draggedColumn);
-    if (fromIndex < 0) return;
-    const [moved] = newOrder.splice(fromIndex, 1);
-    let toIndex = newOrder.indexOf(targetColumn);
-    if (toIndex < 0) return;
-    if (dropTarget.position === "bottom") toIndex++;
-    newOrder.splice(toIndex, 0, moved);
+    let lastX = 0;
+    let lastY = 0;
+    let autoScrollRaf: number | null = null;
+    const EDGE = 40; // px hot zone at top/bottom edge
+    const MAX_SPEED = 14; // px per frame at the edge
 
-    onReorderColumns(newOrder);
-    dragColumnRef.current = null;
-    setDropTarget(null);
-  };
+    const setCurrentDropTarget = (
+      next: { index: number; position: "top" | "bottom" } | null
+    ) => {
+      dropTargetRef.current = next;
+      setDropTarget((prev) =>
+        prev?.index === next?.index && prev?.position === next?.position ? prev : next
+      );
+    };
 
-  const handleDragEnd = (e: React.DragEvent) => {
-    (e.currentTarget as HTMLElement).classList.remove("dragging");
-    dragColumnRef.current = null;
-    setDropTarget(null);
+    const updateDropTarget = (clientX: number, clientY: number) => {
+      const el = document
+        .elementFromPoint(clientX, clientY)
+        ?.closest<HTMLElement>("[data-sidebar-column]");
+      const targetColumn = el?.dataset.sidebarColumn;
+      if (!el || !targetColumn || targetColumn === dragColumnRef.current) {
+        setCurrentDropTarget(null);
+        return;
+      }
+      const index = Number(el.dataset.sidebarColumnIndex);
+      if (Number.isNaN(index)) {
+        setCurrentDropTarget(null);
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      setCurrentDropTarget({ index, position: clientY < midY ? "top" : "bottom" });
+    };
+
+    const autoScrollStep = () => {
+      autoScrollRaf = null;
+      const sc = columnsScrollRef.current;
+      if (!sc || dragColumnRef.current === null) return;
+      const rect = sc.getBoundingClientRect();
+      let dy = 0;
+      if (lastY < rect.top + EDGE) {
+        dy = -Math.max(1, Math.round(((rect.top + EDGE - lastY) / EDGE) * MAX_SPEED));
+      } else if (lastY > rect.bottom - EDGE) {
+        dy = Math.max(1, Math.round(((lastY - (rect.bottom - EDGE)) / EDGE) * MAX_SPEED));
+      }
+      if (dy === 0) return;
+      const before = sc.scrollTop;
+      sc.scrollTop = before + dy;
+      if (sc.scrollTop !== before) updateDropTarget(lastX, lastY);
+      autoScrollRaf = requestAnimationFrame(autoScrollStep);
+    };
+
+    const maybeStartAutoScroll = () => {
+      const sc = columnsScrollRef.current;
+      if (!sc || autoScrollRaf !== null) return;
+      const rect = sc.getBoundingClientRect();
+      if (lastY < rect.top + EDGE || lastY > rect.bottom - EDGE) {
+        autoScrollRaf = requestAnimationFrame(autoScrollStep);
+      }
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (event.pointerId !== e.pointerId) return;
+      event.preventDefault();
+      lastX = event.clientX;
+      lastY = event.clientY;
+      if (dragGhostRef.current) {
+        dragGhostRef.current.style.transform = `translate(${lastX + 14}px, ${lastY + 8}px)`;
+        dragGhostRef.current.style.opacity = "1";
+      }
+      updateDropTarget(lastX, lastY);
+      maybeStartAutoScroll();
+    };
+
+    const cleanup = () => {
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerup", handlePointerUp);
+      document.removeEventListener("pointercancel", handlePointerCancel);
+      if (autoScrollRaf !== null) cancelAnimationFrame(autoScrollRaf);
+      autoScrollRaf = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      dragColumnRef.current = null;
+      dropTargetRef.current = null;
+      dragCleanupRef.current = null;
+      setDropTarget(null);
+      setDraggingColumn(null);
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (event.pointerId !== e.pointerId) return;
+      const draggedColumn = dragColumnRef.current;
+      const target = dropTargetRef.current;
+      cleanup();
+      if (!draggedColumn || !target) return;
+      const targetColumn = filteredColumns[target.index]?.column_name;
+      if (!targetColumn) return;
+
+      const newOrder = [...orderedColumns.map((c) => c.column_name)];
+      const fromIndex = newOrder.indexOf(draggedColumn);
+      if (fromIndex < 0) return;
+      const [moved] = newOrder.splice(fromIndex, 1);
+      let toIndex = newOrder.indexOf(targetColumn);
+      if (toIndex < 0) return;
+      if (target.position === "bottom") toIndex++;
+      newOrder.splice(toIndex, 0, moved);
+      onReorderColumns(newOrder);
+    };
+
+    const handlePointerCancel = (event: PointerEvent) => {
+      if (event.pointerId === e.pointerId) cleanup();
+    };
+
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", handlePointerUp);
+    document.addEventListener("pointercancel", handlePointerCancel);
+    dragCleanupRef.current = cleanup;
   };
 
   const allColumnNames = orderedColumns.map((c) => c.column_name);
@@ -414,6 +504,12 @@ export function Sidebar({
 
   return (
     <div ref={sidebarRef} className={`sidebar${documentWorkspaceActive ? " sidebar-document" : ""}${jsonWorkspaceActive ? " sidebar-json" : ""}`}>
+      {draggingColumn && (
+        <div ref={dragGhostRef} className="column-drag-ghost">
+          <Icon icon="drag-handle-vertical" size={10} />
+          <span>{draggingColumn}</span>
+        </div>
+      )}
       {/* Loaded files */}
       <div className="sidebar-section sidebar-section-tables">
         <div className="sidebar-section-header">
@@ -709,7 +805,7 @@ export function Sidebar({
 
       {/* Column visibility */}
       {!documentWorkspaceActive && schema.length > 0 && (
-        <div className="sidebar-section sidebar-section-columns">
+        <div className="sidebar-section sidebar-section-columns" ref={columnsScrollRef}>
           <div className="column-header-row">
             <div className="sidebar-heading-block">
               <h4>Columns</h4>
@@ -774,23 +870,20 @@ export function Sidebar({
               <div
                 key={col.column_name}
                 className={`column-item${isVisible ? "" : " column-hidden"}${
+                  draggingColumn === col.column_name ? " dragging" : ""
+                }${
                   dropTarget?.index === index
                     ? ` drag-over-${dropTarget.position}`
                     : ""
                 }`}
                 title={`${col.column_name} (${col.column_type})`}
-                draggable
-                onDragStart={(e) => handleDragStart(e, col.column_name)}
-                onDragOver={(e) => handleDragOver(e, index, col.column_name)}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onDragEnd={handleDragEnd}
+                data-sidebar-column={col.column_name}
+                data-sidebar-column-index={index}
+                onPointerDown={(e) => handleColumnPointerDown(e, col.column_name)}
               >
-                <Icon
-                  icon="drag-handle-vertical"
-                  size={10}
-                  className="drag-handle"
-                />
+                <span className="drag-handle">
+                  <Icon icon="drag-handle-vertical" size={10} />
+                </span>
                 <Checkbox
                   checked={isVisible}
                   onChange={() => onToggleColumn(col.column_name)}
