@@ -9762,11 +9762,13 @@ button.dg-stats-metric {
   border: 1px solid #d8e1e8;
   border-radius: var(--surface-radius);
   background: #fff;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   max-height: 280px;
 
   table {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
     font-size: 12px;
 
@@ -9781,6 +9783,10 @@ button.dg-stats-metric {
       position: sticky;
       top: 0;
       white-space: nowrap;
+
+      // Fixed layout: pin Format + Confidence, let Group/Sample flex.
+      &:nth-last-child(2) { width: 190px; } // Format
+      &:last-child { width: 90px; }         // Confidence
     }
 
     td {
@@ -9834,7 +9840,8 @@ button.dg-stats-metric {
 }
 
 .date-conv-format-select {
-  min-width: 130px;
+  width: 100%;
+  min-width: 0;
 
   .bp4-html-select select {
     font-size: 12px;
@@ -9843,8 +9850,8 @@ button.dg-stats-metric {
 }
 
 .date-conv-format-input {
-  min-width: 130px;
-  max-width: 180px;
+  width: 100%;
+  min-width: 0;
 
   .bp4-input {
     font-size: 12px;
