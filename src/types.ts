@@ -120,6 +120,8 @@ export interface QcSession {
   options: string[];
   optionSortMode: QcOptionSortMode;
   valuesByRowId: Record<string, string>;
+  notesColumnName: string | null;
+  notesByRowId: Record<string, string>;
 }
 
 export interface QcCreateConfig {
@@ -129,6 +131,8 @@ export interface QcCreateConfig {
   falseValue: string;
   options: string[];
   optionSortMode: QcOptionSortMode;
+  notesEnabled: boolean;
+  notesColumnName: string;
 }
 
 export interface LoadedTable {

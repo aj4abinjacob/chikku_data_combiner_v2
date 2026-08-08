@@ -1066,6 +1066,15 @@ function suggestQcColumnName(columns: ColumnInfo[]): string {
   return `qc_status_${i}`;
 }
 
+function suggestQcNotesColumnName(columns: ColumnInfo[], qcColumnName: string): string {
+  const existing = new Set(columns.map((column) => column.column_name));
+  const base = `${(qcColumnName || "qc_status").trim() || "qc_status"}_notes`;
+  if (!existing.has(base)) return base;
+  let i = 2;
+  while (existing.has(`${base}_${i}`)) i++;
+  return `${base}_${i}`;
+}
+
 const DEFAULT_QC_OPTIONS = "Pass\nFail\nReview";
 
 function parseQcOptions(text: string): string[] {
@@ -1218,9 +1227,14 @@ function QcPanel({
   const [optionDraft, setOptionDraft] = useState("");
   const [optionSearch, setOptionSearch] = useState("");
   const [sortMode, setSortMode] = useState<QcOptionSortMode>("alpha");
+  const [notesEnabled, setNotesEnabled] = useState(false);
+  const [notesColumnName, setNotesColumnName] = useState("");
+  const [notesNameTouched, setNotesNameTouched] = useState(false);
   const [working, setWorking] = useState<"create" | "reset" | "done" | null>(null);
   const [message, setMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null);
   const [progress, setProgress] = useState<{ reviewed: number; total: number; valueCounts: Record<string, number> } | null>(null);
+
+  const suggestedNotesName = suggestQcNotesColumnName(columns, columnName);
 
   useEffect(() => {
     setColumnName((prev) => {
@@ -1228,6 +1242,11 @@ function QcPanel({
       return suggestedName;
     });
   }, [columns, suggestedName]);
+
+  useEffect(() => {
+    if (notesNameTouched) return;
+    setNotesColumnName(suggestedNotesName);
+  }, [notesNameTouched, suggestedNotesName]);
 
   const markedCount = session ? Object.keys(session.valuesByRowId).length : 0;
   const parsedOptions = parseQcOptions(optionsText);
@@ -1337,6 +1356,8 @@ function QcPanel({
         falseValue,
         options: parsedOptions,
         optionSortMode: sortMode,
+        notesEnabled,
+        notesColumnName,
       });
       setMessage({ tone: "success", text: "QC column ready" });
     } catch (err) {
@@ -1479,6 +1500,34 @@ function QcPanel({
                 Dropdown options are managed in the values panel.
               </div>
             )}
+          </div>
+
+          <div className="qc-notes-option">
+            <Checkbox
+              checked={session ? !!session.notesColumnName : notesEnabled}
+              disabled={!!session || !canCreate}
+              label="Add notes column"
+              className="qc-notes-checkbox"
+              onChange={(e) => {
+                setNotesEnabled((e.target as HTMLInputElement).checked);
+                setMessage(null);
+              }}
+            />
+            {(session ? !!session.notesColumnName : notesEnabled) && (
+              <InputGroup
+                value={session?.notesColumnName ?? notesColumnName}
+                onChange={(e) => {
+                  setNotesColumnName(e.target.value);
+                  setNotesNameTouched(true);
+                  setMessage(null);
+                }}
+                placeholder={suggestedNotesName}
+                small
+                disabled={!!session || !canCreate}
+                aria-label="Notes column name"
+              />
+            )}
+            <em>Free-text note per row, edited inline in the grid</em>
           </div>
 
           <div className="qc-create-footer">

@@ -175,7 +175,7 @@ const HELP_TOPICS: HelpTopic[] = [
     sections: [
       {
         title: "QC workflow",
-        body: "Open the bottom workbench and choose QC. Create a boolean or option-based review column, assign a result directly in the grid, use quick filters to focus on unreviewed rows or a result, then mark the session done.",
+        body: "Open the bottom workbench and choose QC. Create a boolean or option-based review column, optionally add a notes column for free-text comments typed inline in the grid, assign a result directly in the grid, use quick filters to focus on unreviewed rows or a result, then mark the session done. Reset all clears both the result and the notes.",
       },
       {
         title: "Operation History",

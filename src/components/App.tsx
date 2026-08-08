@@ -284,6 +284,21 @@ function buildQcBatchUpdateSql(tableName: string, session: QcSession): string | 
   return `UPDATE ${escapeIdent(tableName)} SET ${escapeIdent(session.columnName)} = CASE ${cases} ELSE ${escapeIdent(session.columnName)} END WHERE rowid IN (${rowIds})`;
 }
 
+function buildQcNotesBatchUpdateSql(tableName: string, session: QcSession): string | null {
+  const notesColumn = session.notesColumnName;
+  if (!notesColumn) return null;
+  const entries = Object.entries(session.notesByRowId)
+    .map(([rowId, value]) => ({ rowId: Number(rowId), value }))
+    .filter((entry) => Number.isFinite(entry.rowId) && entry.value !== "");
+  if (entries.length === 0) return null;
+
+  const cases = entries
+    .map((entry) => `WHEN rowid = ${entry.rowId} THEN ${sqlLiteral(entry.value, "text")}`)
+    .join(" ");
+  const rowIds = entries.map((entry) => String(entry.rowId)).join(", ");
+  return `UPDATE ${escapeIdent(tableName)} SET ${escapeIdent(notesColumn)} = CASE ${cases} ELSE ${escapeIdent(notesColumn)} END WHERE rowid IN (${rowIds})`;
+}
+
 function mapFilterColumns(
   group: FilterGroup,
   mapColumn: (column: string) => string | null
@@ -759,7 +774,12 @@ export function App(): React.ReactElement {
         for (const [tableName, session] of Object.entries(prev)) {
           const table = nextTablesByName.get(tableName);
           if (table && table.schema.some((column) => column.column_name === session.columnName)) {
-            next[tableName] = session;
+            const notesColumnPresent = session.notesColumnName
+              ? table.schema.some((column) => column.column_name === session.notesColumnName)
+              : false;
+            next[tableName] = notesColumnPresent || !session.notesColumnName
+              ? session
+              : { ...session, notesColumnName: null, notesByRowId: {} };
           }
         }
         return next;
@@ -1433,10 +1453,14 @@ export function App(): React.ReactElement {
         if (prev.visibleColumns.includes(colName)) {
           return { ...prev, visibleColumns: prev.visibleColumns.filter((c) => c !== colName) };
         }
-        // Re-show at its position in columnOrder, not appended at the end
+        // Re-show at its position in columnOrder, not appended at the end.
+        // Fall back to schema order when columnOrder is empty (matches sidebar fallback).
         const nextVisible = new Set([...prev.visibleColumns, colName]);
-        const visible = prev.columnOrder.filter((c) => nextVisible.has(c));
-        // Keep any visible column missing from columnOrder (defensive)
+        const orderSource = prev.columnOrder.length > 0
+          ? prev.columnOrder
+          : schema.map((c) => c.column_name);
+        const visible = orderSource.filter((c) => nextVisible.has(c));
+        // Keep any visible column missing from orderSource (defensive)
         const placed = new Set(visible);
         for (const c of prev.visibleColumns) {
           if (!placed.has(c)) visible.push(c);
@@ -1446,7 +1470,7 @@ export function App(): React.ReactElement {
       });
       setResetKey((k) => k + 1);
     },
-    []
+    [schema]
   );
 
   // Column reorder from sidebar drag (reorders all columns)
@@ -1655,11 +1679,35 @@ export function App(): React.ReactElement {
         throw new Error("Add at least one QC option");
       }
 
+      const notesColumnName = config.notesEnabled ? config.notesColumnName.trim() : "";
+      if (config.notesEnabled) {
+        if (!notesColumnName) throw new Error("Enter a notes column name");
+        if (notesColumnName === columnName) {
+          throw new Error("Notes column name must differ from the QC column name");
+        }
+        if (schema.some((col) => col.column_name === notesColumnName)) {
+          throw new Error(`Column "${notesColumnName}" already exists`);
+        }
+      }
+
       const valueType = inferQcValueType(config, options);
       const columnType = valueType === "number" ? "DOUBLE" : "VARCHAR";
       const sql = `ALTER TABLE ${escapeIdent(activeTable)} ADD COLUMN ${escapeIdent(columnName)} ${columnType}`;
 
       await window.api.exec(sql);
+
+      const sqlStatements = [sql];
+      if (notesColumnName) {
+        const notesSql = `ALTER TABLE ${escapeIdent(activeTable)} ADD COLUMN ${escapeIdent(notesColumnName)} VARCHAR`;
+        try {
+          await window.api.exec(notesSql);
+          sqlStatements.push(notesSql);
+        } catch (err) {
+          // Roll the QC column back so the panel stays in a consistent state
+          await window.api.exec(`ALTER TABLE ${escapeIdent(activeTable)} DROP COLUMN ${escapeIdent(columnName)}`).catch(() => {});
+          throw err;
+        }
+      }
 
       const session: QcSession = {
         columnName,
@@ -1672,10 +1720,19 @@ export function App(): React.ReactElement {
         options,
         optionSortMode: config.optionSortMode,
         valuesByRowId: {},
+        notesColumnName: notesColumnName || null,
+        notesByRowId: {},
       };
 
       setQcSessions((prev) => ({ ...prev, [activeTable]: session }));
-      recordHistoryEntry(activeTable, "data_op", `Create QC column "${columnName}"`, [sql]);
+      recordHistoryEntry(
+        activeTable,
+        "data_op",
+        notesColumnName
+          ? `Create QC column "${columnName}" with notes "${notesColumnName}"`
+          : `Create QC column "${columnName}"`,
+        sqlStatements
+      );
 
       const newSchema = await window.api.describe(activeTable);
       setSchema(newSchema);
@@ -1686,10 +1743,17 @@ export function App(): React.ReactElement {
             : table
         )
       );
+      const addedColumns = notesColumnName ? [columnName, notesColumnName] : [columnName];
       setViewState((prev) => ({
         ...prev,
-        visibleColumns: prev.visibleColumns.includes(columnName) ? prev.visibleColumns : [...prev.visibleColumns, columnName],
-        columnOrder: prev.columnOrder.includes(columnName) ? prev.columnOrder : [...prev.columnOrder, columnName],
+        visibleColumns: addedColumns.reduce(
+          (acc, col) => (acc.includes(col) ? acc : [...acc, col]),
+          prev.visibleColumns
+        ),
+        columnOrder: addedColumns.reduce(
+          (acc, col) => (acc.includes(col) ? acc : [...acc, col]),
+          prev.columnOrder
+        ),
       }));
       setSchemaVersion((v) => v + 1);
       setDataVersion((v) => v + 1);
@@ -1752,17 +1816,72 @@ export function App(): React.ReactElement {
     [activeTable, activeQcSession, viewState.filters]
   );
 
+  const handleQcNoteChange = useCallback(
+    async (rowId: number, value: string | null) => {
+      if (!activeTable || !activeQcSession || activeQcSession.done) return;
+      const notesColumn = activeQcSession.notesColumnName;
+      if (!notesColumn) return;
+      const nextValue = value === null || value === "" ? null : value;
+      const tableName = activeTable;
+      const previousValue = activeQcSession.notesByRowId[String(rowId)];
+      const hadPreviousValue = previousValue !== undefined;
+      const notesFilterActive = filterReferencesColumn(viewState.filters, notesColumn);
+
+      setQcSessions((prev) => {
+        const session = prev[tableName];
+        if (!session || session.done) return prev;
+        // Keep cleared notes staged as "" so the grid does not fall back to the cached row value
+        const notesByRowId = { ...session.notesByRowId, [String(rowId)]: nextValue ?? "" };
+        return {
+          ...prev,
+          [tableName]: { ...session, notesByRowId },
+        };
+      });
+
+      const sql = `UPDATE ${escapeIdent(tableName)} SET ${escapeIdent(notesColumn)} = ${sqlLiteral(nextValue, "text")} WHERE rowid = ${rowId}`;
+      try {
+        await window.api.exec(sql);
+      } catch (err) {
+        console.error("QC note update failed:", err);
+        setQcSessions((prev) => {
+          const session = prev[tableName];
+          if (!session || session.done) return prev;
+          const notesByRowId = { ...session.notesByRowId };
+          if (hadPreviousValue) {
+            notesByRowId[String(rowId)] = previousValue;
+          } else {
+            delete notesByRowId[String(rowId)];
+          }
+          return {
+            ...prev,
+            [tableName]: { ...session, notesByRowId },
+          };
+        });
+        return;
+      }
+
+      if (notesFilterActive) {
+        setDataVersion((v) => v + 1);
+      }
+    },
+    [activeTable, activeQcSession, viewState.filters]
+  );
+
   const handleQcResetAll = useCallback(
     async () => {
       if (!activeTable || !activeQcSession || activeQcSession.done) return;
-      const sql = `UPDATE ${escapeIdent(activeTable)} SET ${escapeIdent(activeQcSession.columnName)} = NULL`;
+      const setParts = [`${escapeIdent(activeQcSession.columnName)} = NULL`];
+      if (activeQcSession.notesColumnName) {
+        setParts.push(`${escapeIdent(activeQcSession.notesColumnName)} = NULL`);
+      }
+      const sql = `UPDATE ${escapeIdent(activeTable)} SET ${setParts.join(", ")}`;
       await window.api.exec(sql);
       setQcSessions((prev) => {
         const session = prev[activeTable];
         if (!session || session.done) return prev;
         return {
           ...prev,
-          [activeTable]: { ...session, valuesByRowId: {} },
+          [activeTable]: { ...session, valuesByRowId: {}, notesByRowId: {} },
         };
       });
       setDataVersion((v) => v + 1);
@@ -1774,6 +1893,7 @@ export function App(): React.ReactElement {
     async () => {
       if (!activeTable || !activeQcSession || activeQcSession.done) return;
       const batchSql = buildQcBatchUpdateSql(activeTable, activeQcSession);
+      const notesBatchSql = buildQcNotesBatchUpdateSql(activeTable, activeQcSession);
       setQcSessions((prev) => {
         const session = prev[activeTable];
         if (!session || session.done) return prev;
@@ -1782,8 +1902,9 @@ export function App(): React.ReactElement {
           [activeTable]: { ...session, done: true },
         };
       });
-      if (batchSql) {
-        recordHistoryEntry(activeTable, "data_op", `Complete QC for "${activeQcSession.columnName}"`, [batchSql]);
+      const batchStatements = [batchSql, notesBatchSql].filter((sql): sql is string => !!sql);
+      if (batchStatements.length > 0) {
+        recordHistoryEntry(activeTable, "data_op", `Complete QC for "${activeQcSession.columnName}"`, batchStatements);
       }
       setDataVersion((v) => v + 1);
     },
@@ -2869,6 +2990,7 @@ export function App(): React.ReactElement {
                     onTableFontSizeChange={handleTableFontSizeChange}
                     qcSession={pivotActive ? null : activeQcSession}
                     onQcCellChange={handleQcCellChange}
+                    onQcNoteChange={handleQcNoteChange}
                     rangeRefreshKey={pivotActive ? pivotCacheGeneration : cacheGeneration}
                     queryStatus={pivotActive ? (pivotLoading ? "loading" : "ready") : chunkQueryStatus}
                     queryError={pivotActive

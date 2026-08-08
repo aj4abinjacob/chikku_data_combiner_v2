@@ -108,6 +108,7 @@ interface DataGridProps {
   onTableFontSizeChange?: (fontSize: number) => void;
   qcSession?: QcSession | null;
   onQcCellChange?: (rowId: number, value: string | null) => void;
+  onQcNoteChange?: (rowId: number, value: string | null) => void;
   rangeRefreshKey?: number;
   queryStatus?: "idle" | "loading" | "ready" | "error";
   queryError?: { scope: "count" | "chunk" | "pivot"; message: string } | null;
@@ -151,6 +152,7 @@ export function DataGrid({
   onTableFontSizeChange,
   qcSession,
   onQcCellChange,
+  onQcNoteChange,
   rangeRefreshKey,
   queryStatus,
   queryError,
@@ -1047,6 +1049,7 @@ export function DataGrid({
   const maxGroupDepth = pivotGroupColumns ? pivotGroupColumns.length - 1 : 0;
   const activeStatsColumn = columnStatsPanel?.column ?? null;
   const activeQcColumn = qcSession && !qcSession.done && !pivotMode ? qcSession.columnName : null;
+  const activeQcNotesColumn = qcSession && !qcSession.done && !pivotMode ? qcSession.notesColumnName : null;
 
   const getQcCellValue = (row: any, rowId: number | null): string | null => {
     if (!qcSession) return null;
@@ -1150,6 +1153,30 @@ export function DataGrid({
           </option>
         ))}
       </select>
+    );
+  };
+
+  const getQcNoteValue = (row: any, rowId: number | null): string => {
+    if (!qcSession?.notesColumnName) return "";
+    if (rowId !== null) {
+      const stagedNote = qcSession.notesByRowId[String(rowId)];
+      if (stagedNote !== undefined) return stagedNote;
+    }
+    const raw = row?.[qcSession.notesColumnName];
+    return raw === null || raw === undefined ? "" : String(raw);
+  };
+
+  const renderQcNoteCellContent = (row: any): React.ReactNode => {
+    if (!qcSession?.notesColumnName || !onQcNoteChange) return "";
+    const rowId = getRowId(row);
+    if (rowId === null) return "";
+    return (
+      <QcNoteCell
+        key={rowId}
+        value={getQcNoteValue(row, rowId)}
+        columnName={qcSession.notesColumnName}
+        onCommit={(value) => onQcNoteChange(rowId, value)}
+      />
     );
   };
 
@@ -1311,7 +1338,7 @@ export function DataGrid({
                     hasStatsControl ? "has-stats-control" : "",
                     draggingColumn === col ? "column-dragging" : "",
                     activeStatsColumn === col ? "column-inspected" : "",
-                    activeQcColumn === col ? "qc-column-active" : "",
+                    activeQcColumn === col || activeQcNotesColumn === col ? "qc-column-active" : "",
                     headerDropTarget?.col === col
                       ? `header-drop-${headerDropTarget.position}`
                       : "",
@@ -1561,13 +1588,16 @@ export function DataGrid({
                   </div>
                   {columns.map((col) => {
                     const isQcCell = !!activeQcColumn && col === activeQcColumn;
-                    const cellText = loaded && !isQcCell ? formatCellForColumn(row[col], col) : loaded ? "" : "...";
+                    const isQcNoteCell = !!activeQcNotesColumn && col === activeQcNotesColumn;
+                    const isQcEditableCell = isQcCell || isQcNoteCell;
+                    const cellText = loaded && !isQcEditableCell ? formatCellForColumn(row[col], col) : loaded ? "" : "...";
                     return (
                       <div
                         key={col}
                           className={[
                             "dg-cell",
-                            isQcCell ? "dg-qc-cell" : "",
+                            isQcEditableCell ? "dg-qc-cell" : "",
+                            isQcNoteCell ? "dg-qc-note-cell" : "",
                             selected.has(cellKey(virtualRow.index, col))
                               ? "cell-selected"
                               : "",
@@ -1579,16 +1609,20 @@ export function DataGrid({
                           .join(" ")}
                         style={{ width: columnWidths[col] ?? DEFAULT_COLUMN_WIDTH }}
                         onMouseDown={(e) => {
-                          if (!isQcCell) handleCellMouseDown(virtualRow.index, col, e);
+                          if (!isQcEditableCell) handleCellMouseDown(virtualRow.index, col, e);
                         }}
                         onMouseEnter={(e) => {
-                          if (!isQcCell) handleCellMouseEnterDrag(virtualRow.index, col, e);
-                          if (loaded && !dragSelecting.current && !isQcCell)
+                          if (!isQcEditableCell) handleCellMouseEnterDrag(virtualRow.index, col, e);
+                          if (loaded && !dragSelecting.current && !isQcEditableCell)
                             handleCellMouseEnter(e, cellText);
                         }}
                         onMouseLeave={handleCellMouseLeave}
                       >
-                        {isQcCell && loaded ? renderQcCellContent(row) : cellText}
+                        {isQcCell && loaded
+                          ? renderQcCellContent(row)
+                          : isQcNoteCell && loaded
+                            ? renderQcNoteCellContent(row)
+                            : cellText}
                       </div>
                     );
                   })}
@@ -2491,6 +2525,56 @@ function StatsKeyValue({
 
 function formatStatNumber(value: number): string {
   return value.toLocaleString();
+}
+
+function QcNoteCell({
+  value,
+  columnName,
+  onCommit,
+}: {
+  value: string;
+  columnName: string;
+  onCommit: (value: string | null) => void;
+}): React.ReactElement {
+  const [draft, setDraft] = useState(value);
+  const committedRef = useRef(value);
+
+  useEffect(() => {
+    if (value === committedRef.current) return;
+    committedRef.current = value;
+    setDraft(value);
+  }, [value]);
+
+  const commit = () => {
+    if (draft === committedRef.current) return;
+    committedRef.current = draft;
+    onCommit(draft === "" ? null : draft);
+  };
+
+  return (
+    <input
+      type="text"
+      className="dg-qc-note-input"
+      value={draft}
+      placeholder="Add note"
+      title={draft}
+      aria-label={`Note ${columnName}`}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          commit();
+          e.currentTarget.blur();
+        } else if (e.key === "Escape") {
+          setDraft(committedRef.current);
+          e.currentTarget.blur();
+        }
+      }}
+    />
+  );
 }
 
 function normalizeQcValue(value: any): string | null {
