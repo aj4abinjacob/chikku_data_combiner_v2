@@ -1430,9 +1430,18 @@ export function App(): React.ReactElement {
   const toggleColumn = useCallback(
     (colName: string) => {
       setViewState((prev) => {
-        const visible = prev.visibleColumns.includes(colName)
-          ? prev.visibleColumns.filter((c) => c !== colName)
-          : [...prev.visibleColumns, colName];
+        if (prev.visibleColumns.includes(colName)) {
+          return { ...prev, visibleColumns: prev.visibleColumns.filter((c) => c !== colName) };
+        }
+        // Re-show at its position in columnOrder, not appended at the end
+        const nextVisible = new Set([...prev.visibleColumns, colName]);
+        const visible = prev.columnOrder.filter((c) => nextVisible.has(c));
+        // Keep any visible column missing from columnOrder (defensive)
+        const placed = new Set(visible);
+        for (const c of prev.visibleColumns) {
+          if (!placed.has(c)) visible.push(c);
+        }
+        if (!placed.has(colName) && !visible.includes(colName)) visible.push(colName);
         return { ...prev, visibleColumns: visible };
       });
       setResetKey((k) => k + 1);
