@@ -1892,7 +1892,7 @@ export function FilterPanel({
   );
   const [panelHeight, setPanelHeight] = useState(DEFAULT_PANEL_HEIGHT);
   const [activeTab, setActiveTab] = useState<"filters" | "qc" | "colops" | "rowops">("filters");
-  const activeMinPanelHeight = activeTab === "qc" ? getQcPanelHeight() : MIN_PANEL_HEIGHT;
+  const activeMinPanelHeight = MIN_PANEL_HEIGHT;
   const [splitPercent, setSplitPercent] = useState(68);
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [viewsPaneOpen, setViewsPaneOpen] = useState(savedViews.length > 0);
