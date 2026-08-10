@@ -135,7 +135,16 @@ const NO_VALUE_OPS = new Set<FilterOperator>([
 const MIN_PANEL_HEIGHT = 80;
 const MAX_PANEL_HEIGHT = 500;
 const DEFAULT_PANEL_HEIGHT = 260;
-const QC_PANEL_HEIGHT = 330;
+const MIN_QC_PANEL_HEIGHT = 320;
+const QC_PANEL_VIEWPORT_RATIO = 0.48;
+
+function getQcPanelHeight(): number {
+  if (typeof window === "undefined") return MIN_QC_PANEL_HEIGHT;
+  return Math.min(
+    MAX_PANEL_HEIGHT,
+    Math.max(MIN_QC_PANEL_HEIGHT, Math.round(window.innerHeight * QC_PANEL_VIEWPORT_RATIO))
+  );
+}
 
 // ── Draft types with IDs for React keys ──
 
@@ -1883,7 +1892,7 @@ export function FilterPanel({
   );
   const [panelHeight, setPanelHeight] = useState(DEFAULT_PANEL_HEIGHT);
   const [activeTab, setActiveTab] = useState<"filters" | "qc" | "colops" | "rowops">("filters");
-  const activeMinPanelHeight = activeTab === "qc" ? QC_PANEL_HEIGHT : MIN_PANEL_HEIGHT;
+  const activeMinPanelHeight = activeTab === "qc" ? getQcPanelHeight() : MIN_PANEL_HEIGHT;
   const [splitPercent, setSplitPercent] = useState(68);
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [viewsPaneOpen, setViewsPaneOpen] = useState(savedViews.length > 0);
@@ -1915,9 +1924,11 @@ export function FilterPanel({
   }, [savedViews.length]);
 
   useEffect(() => {
-    if (activeTab === "qc") {
-      setPanelHeight(QC_PANEL_HEIGHT);
-    }
+    if (activeTab !== "qc") return;
+    const syncQcPanelHeight = () => setPanelHeight(getQcPanelHeight());
+    syncQcPanelHeight();
+    window.addEventListener("resize", syncQcPanelHeight);
+    return () => window.removeEventListener("resize", syncQcPanelHeight);
   }, [activeTab]);
 
   // ── Resize drag handlers ──
