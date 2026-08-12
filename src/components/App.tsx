@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Button, Icon, Intent, Tag } from "@blueprintjs/core";
+import { Button, Classes, Dialog, Icon, Intent, Tag } from "@blueprintjs/core";
 import { getCurrentWindow, type DragDropEvent } from "@tauri-apps/api/window";
 import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions, ColumnStats, ColumnStatsUniqueValue, ComparisonViewConfig, DocumentWorkspaceFileActions, QcCreateConfig, QcOptionSortMode, QcSession, QcValueType } from "../types";
 import { Sidebar } from "./Sidebar";
@@ -393,12 +393,16 @@ function QcSessionBar({
   onQuickFilter,
   onResetAll,
   onMarkDone,
+  onResume,
+  onStartNew,
 }: {
   session: QcSession;
   totalRows: number;
   onQuickFilter: (value: string | null | "__all__") => void;
   onResetAll: () => Promise<void>;
   onMarkDone: () => Promise<void>;
+  onResume: () => void;
+  onStartNew: () => void;
 }): React.ReactElement {
   const values = Object.values(session.valuesByRowId).filter((value) => value !== "");
   const markedCount = values.length;
@@ -445,21 +449,29 @@ function QcSessionBar({
       </div>
 
       <div className="qc-session-actions">
-        <Button
-          small
-          icon="undo"
-          text="Reset"
-          disabled={session.done || markedCount === 0}
-          onClick={() => { void onResetAll(); }}
-        />
-        <Button
-          small
-          intent={Intent.PRIMARY}
-          icon="tick"
-          text={session.done ? "Done" : "Mark QC Done"}
-          disabled={session.done}
-          onClick={() => { void onMarkDone(); }}
-        />
+        {session.done ? (
+          <>
+            <Button small icon="edit" text="Resume QC" onClick={onResume} />
+            <Button small intent={Intent.PRIMARY} icon="add" text="New QC" onClick={onStartNew} />
+          </>
+        ) : (
+          <>
+            <Button
+              small
+              icon="undo"
+              text="Reset"
+              disabled={markedCount === 0}
+              onClick={() => { void onResetAll(); }}
+            />
+            <Button
+              small
+              intent={Intent.PRIMARY}
+              icon="tick"
+              text="Mark QC Done"
+              onClick={() => { void onMarkDone(); }}
+            />
+          </>
+        )}
       </div>
     </div>
   );
@@ -470,6 +482,7 @@ export function App(): React.ReactElement {
   const [activeTable, setActiveTable] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [qcPanelRequestKey, setQcPanelRequestKey] = useState(0);
   const [combineDialogOpen, setCombineDialogOpen] = useState(false);
   const [combineTableNames, setCombineTableNames] = useState<string[]>([]);
   const [schema, setSchema] = useState<ColumnInfo[]>([]);
@@ -523,6 +536,9 @@ export function App(): React.ReactElement {
   const [fileDragState, setFileDragState] = useState<"idle" | "supported" | "unsupported">("idle");
   const [documentFileActions, setDocumentFileActions] = useState<DocumentWorkspaceFileActions | null>(null);
   const [qcSessions, setQcSessions] = useState<Record<string, QcSession>>({});
+  const [qcDirtyTables, setQcDirtyTables] = useState<Set<string>>(() => new Set());
+  const [qcQuitPromptOpen, setQcQuitPromptOpen] = useState(false);
+  const [closeAfterQcExport, setCloseAfterQcExport] = useState(false);
   const filterPanelExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Use refs so IPC callbacks always see latest state
@@ -536,6 +552,22 @@ export function App(): React.ReactElement {
   colOpsStepsRef.current = colOpsSteps;
   const rowOpsStepsRef = useRef(rowOpsSteps);
   rowOpsStepsRef.current = rowOpsSteps;
+  const qcDirtyTablesRef = useRef(qcDirtyTables);
+  qcDirtyTablesRef.current = qcDirtyTables;
+  const quitEntireAppRef = useRef(false);
+  const allowWindowCloseRef = useRef(false);
+  const closeAfterQcExportRef = useRef(closeAfterQcExport);
+  closeAfterQcExportRef.current = closeAfterQcExport;
+
+  const markQcTableDirty = useCallback((tableName: string) => {
+    setQcDirtyTables((prev) => {
+      if (prev.has(tableName)) return prev;
+      const next = new Set(prev);
+      next.add(tableName);
+      qcDirtyTablesRef.current = next;
+      return next;
+    });
+  }, []);
 
   const comparisonActive = !!comparisonConfig && comparisonConfig.baseTable === activeTable;
 
@@ -767,6 +799,13 @@ export function App(): React.ReactElement {
       }
 
       setTables(newTables);
+      setQcDirtyTables((prev) => {
+        const next = replace
+          ? new Set<string>()
+          : new Set(Array.from(prev).filter((tableName) => newTables.some((table) => table.tableName === tableName)));
+        qcDirtyTablesRef.current = next;
+        return next;
+      });
       setQcSessions((prev) => {
         const nextTablesByName = new Map(newTables.map((table) => [table.tableName, table]));
         if (replace) return {};
@@ -1192,7 +1231,53 @@ export function App(): React.ReactElement {
       setDarkMode(isDark);
       localStorage.setItem("theme", isDark ? "dark" : "light");
     });
+    window.api.onRequestQuit(() => {
+      quitEntireAppRef.current = true;
+      if (qcDirtyTablesRef.current.size === 0) {
+        void window.api.setQcDirty(false).then(() => window.api.requestAppQuit());
+        return;
+      }
+      setQcQuitPromptOpen(true);
+    });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    void window.api
+      .setQcDirty(qcDirtyTables.size > 0)
+      .catch((err) => console.warn("Failed to sync QC save state", err));
+  }, [qcDirtyTables]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    getCurrentWindow()
+      .onCloseRequested((event) => {
+        if (allowWindowCloseRef.current) {
+          allowWindowCloseRef.current = false;
+          return;
+        }
+        if (qcDirtyTablesRef.current.size === 0) return;
+        event.preventDefault();
+        quitEntireAppRef.current = false;
+        setQcQuitPromptOpen(true);
+      })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+        } else {
+          unlisten = cleanup;
+        }
+      })
+      .catch((err) => console.warn("Failed to register close handler", err));
+
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -1395,6 +1480,13 @@ export function App(): React.ReactElement {
     setQcSessions((prev) => {
       const { [tableName]: _removed, ...rest } = prev;
       return rest;
+    });
+    setQcDirtyTables((prev) => {
+      if (!prev.has(tableName)) return prev;
+      const next = new Set(prev);
+      next.delete(tableName);
+      qcDirtyTablesRef.current = next;
+      return next;
     });
   }, []);
 
@@ -1655,6 +1747,10 @@ export function App(): React.ReactElement {
     setResetKey((k) => k + 1);
   }, []);
 
+  const handleQcFocusHandled = useCallback(() => {
+    setQcPanelRequestKey(0);
+  }, []);
+
   // ── QC handlers ──
 
   const handleQcCreate = useCallback(
@@ -1725,6 +1821,7 @@ export function App(): React.ReactElement {
       };
 
       setQcSessions((prev) => ({ ...prev, [activeTable]: session }));
+      markQcTableDirty(activeTable);
       recordHistoryEntry(
         activeTable,
         "data_op",
@@ -1759,7 +1856,7 @@ export function App(): React.ReactElement {
       setDataVersion((v) => v + 1);
       setResetKey((k) => k + 1);
     },
-    [activeTable, recordHistoryEntry, schema]
+    [activeTable, markQcTableDirty, recordHistoryEntry, schema]
   );
 
   const handleQcCellChange = useCallback(
@@ -1790,6 +1887,7 @@ export function App(): React.ReactElement {
       const sql = `UPDATE ${escapeIdent(tableName)} SET ${escapeIdent(sessionAtClick.columnName)} = ${sqlLiteral(nextValue, sessionAtClick.valueType)} WHERE rowid = ${rowId}`;
       try {
         await window.api.exec(sql);
+        markQcTableDirty(tableName);
       } catch (err) {
         console.error("QC cell update failed:", err);
         setQcSessions((prev) => {
@@ -1813,7 +1911,7 @@ export function App(): React.ReactElement {
         setDataVersion((v) => v + 1);
       }
     },
-    [activeTable, activeQcSession, viewState.filters]
+    [activeTable, activeQcSession, markQcTableDirty, viewState.filters]
   );
 
   const handleQcNoteChange = useCallback(
@@ -1841,6 +1939,7 @@ export function App(): React.ReactElement {
       const sql = `UPDATE ${escapeIdent(tableName)} SET ${escapeIdent(notesColumn)} = ${sqlLiteral(nextValue, "text")} WHERE rowid = ${rowId}`;
       try {
         await window.api.exec(sql);
+        markQcTableDirty(tableName);
       } catch (err) {
         console.error("QC note update failed:", err);
         setQcSessions((prev) => {
@@ -1864,7 +1963,7 @@ export function App(): React.ReactElement {
         setDataVersion((v) => v + 1);
       }
     },
-    [activeTable, activeQcSession, viewState.filters]
+    [activeTable, activeQcSession, markQcTableDirty, viewState.filters]
   );
 
   const handleQcResetAll = useCallback(
@@ -1876,6 +1975,7 @@ export function App(): React.ReactElement {
       }
       const sql = `UPDATE ${escapeIdent(activeTable)} SET ${setParts.join(", ")}`;
       await window.api.exec(sql);
+      markQcTableDirty(activeTable);
       setQcSessions((prev) => {
         const session = prev[activeTable];
         if (!session || session.done) return prev;
@@ -1886,7 +1986,7 @@ export function App(): React.ReactElement {
       });
       setDataVersion((v) => v + 1);
     },
-    [activeTable, activeQcSession]
+    [activeTable, activeQcSession, markQcTableDirty]
   );
 
   const handleQcMarkDone = useCallback(
@@ -1910,6 +2010,36 @@ export function App(): React.ReactElement {
     },
     [activeTable, activeQcSession, recordHistoryEntry]
   );
+
+  const handleQcResume = useCallback(() => {
+    if (!activeTable || !activeQcSession?.done) return;
+    setQcSessions((prev) => {
+      const session = prev[activeTable];
+      if (!session?.done) return prev;
+      return {
+        ...prev,
+        [activeTable]: { ...session, done: false },
+      };
+    });
+  }, [activeTable, activeQcSession]);
+
+  const handleQcStartNew = useCallback(() => {
+    if (!activeTable || !activeQcSession?.done) return;
+    const completedColumn = activeQcSession.columnName;
+    setQcSessions((prev) => {
+      const session = prev[activeTable];
+      if (!session?.done) return prev;
+      const { [activeTable]: _completed, ...rest } = prev;
+      return rest;
+    });
+    setViewState((prev) => ({
+      ...prev,
+      filters: removeColumnFilters(prev.filters, completedColumn),
+    }));
+    setQcPanelRequestKey((key) => key + 1);
+    setFilterPanelOpen(true);
+    setResetKey((key) => key + 1);
+  }, [activeTable, activeQcSession]);
 
   const handleQcQuickFilter = useCallback(
     (value: string | null | "__all__") => {
@@ -2764,7 +2894,92 @@ export function App(): React.ReactElement {
     console.log(`History import: ${merged} table(s) merged, ${skipped} skipped (tables not found)`);
   }, []);
 
+  const finishQcClose = useCallback(async () => {
+    if (quitEntireAppRef.current) {
+      await window.api.requestAppQuit();
+      return;
+    }
+    allowWindowCloseRef.current = true;
+    await getCurrentWindow().close();
+  }, []);
+
+  const handleDiscardQcAndClose = useCallback(async () => {
+    const cleared = new Set<string>();
+    qcDirtyTablesRef.current = cleared;
+    setQcDirtyTables(cleared);
+    setQcQuitPromptOpen(false);
+    await window.api.setQcDirty(false);
+    await finishQcClose();
+  }, [finishQcClose]);
+
+  const handleSaveQcBeforeClose = useCallback(() => {
+    const nextTable = Array.from(qcDirtyTablesRef.current)[0];
+    if (!nextTable) {
+      setQcQuitPromptOpen(false);
+      void finishQcClose();
+      return;
+    }
+
+    if (activeTableRef.current !== nextTable) {
+      setActiveTable(nextTable);
+      setComparisonConfig(null);
+      setFilterPanelOpen(false);
+      setViewState((prev) => ({
+        ...prev,
+        filters: { logic: "AND", children: [] },
+        visibleColumns: [],
+        columnOrder: [],
+        sortColumns: [],
+        pivotConfig: null,
+      }));
+      setResetKey((key) => key + 1);
+    }
+
+    closeAfterQcExportRef.current = true;
+    setCloseAfterQcExport(true);
+    setQcQuitPromptOpen(false);
+    setExportDialogOpen(true);
+  }, [finishQcClose]);
+
+  const handleQcExported = useCallback(async (tableNames: string[], fullData: boolean) => {
+    if (!fullData) return;
+
+    const remaining = new Set(qcDirtyTablesRef.current);
+    for (const tableName of tableNames) remaining.delete(tableName);
+    qcDirtyTablesRef.current = remaining;
+    setQcDirtyTables(remaining);
+
+    if (!closeAfterQcExportRef.current) return;
+    closeAfterQcExportRef.current = false;
+    setCloseAfterQcExport(false);
+
+    if (remaining.size > 0) {
+      setQcQuitPromptOpen(true);
+      return;
+    }
+
+    await window.api.setQcDirty(false);
+    await finishQcClose();
+  }, [finishQcClose]);
+
+  const handleExportDialogClose = useCallback(() => {
+    setExportDialogOpen(false);
+    if (!closeAfterQcExportRef.current) return;
+    closeAfterQcExportRef.current = false;
+    setCloseAfterQcExport(false);
+    quitEntireAppRef.current = false;
+  }, []);
+
+  const handleCancelQcQuit = useCallback(() => {
+    setQcQuitPromptOpen(false);
+    quitEntireAppRef.current = false;
+  }, []);
+
   const hasData = tables.length > 0;
+  const dirtyQcFileNames = Array.from(qcDirtyTables)
+    .map((tableName) => tables.find((table) => table.tableName === tableName))
+    .filter((table): table is LoadedTable => !!table)
+    .map(getDisplayFileName);
   const activeDisplayFileName = activeLoadedTable ? getDisplayFileName(activeLoadedTable) : null;
   const fileDragClass = fileDragState === "idle" ? "" : ` file-drag-${fileDragState}`;
   const usesMacTitlebarOverlay = isTauri()
@@ -2950,6 +3165,8 @@ export function App(): React.ReactElement {
                       onQuickFilter={handleQcQuickFilter}
                       onResetAll={handleQcResetAll}
                       onMarkDone={handleQcMarkDone}
+                      onResume={handleQcResume}
+                      onStartNew={handleQcStartNew}
                     />
                   )}
                   <DataGrid
@@ -3032,9 +3249,13 @@ export function App(): React.ReactElement {
                       onClose={() => setFilterPanelOpen(false)}
                       motionState={filterPanelOpen ? "open" : "closing"}
                       qcSession={activeQcSession}
+                      qcFocusRequest={qcPanelRequestKey}
+                      onQcFocusHandled={handleQcFocusHandled}
                       onQcCreate={handleQcCreate}
                       onQcResetAll={handleQcResetAll}
                       onQcMarkDone={handleQcMarkDone}
+                      onQcResume={handleQcResume}
+                      onQcStartNew={handleQcStartNew}
                       onQcQuickFilter={handleQcQuickFilter}
                     />
                   )}
@@ -3137,12 +3358,36 @@ export function App(): React.ReactElement {
       />
       <ExportDialog
         isOpen={exportDialogOpen}
-        onClose={() => setExportDialogOpen(false)}
+        onClose={handleExportDialogClose}
+        onExported={handleQcExported}
         tables={sqlBackedTables}
         activeTable={sqlBackedTables.some((table) => table.tableName === activeTable) ? activeTable : null}
         viewState={viewState}
         schema={schema}
+        forceFullData={closeAfterQcExport}
       />
+      <Dialog
+        isOpen={qcQuitPromptOpen}
+        onClose={handleCancelQcQuit}
+        title="Save QC changes?"
+        style={{ width: 460 }}
+      >
+        <div className={Classes.DIALOG_BODY}>
+          <p>
+            {dirtyQcFileNames.length === 1
+              ? `Your QC changes to “${dirtyQcFileNames[0]}” have not been saved to a file.`
+              : `${dirtyQcFileNames.length} files have QC changes that have not been saved.`}
+          </p>
+          <p>Save before {quitEntireAppRef.current ? "quitting" : "closing this window"}?</p>
+        </div>
+        <div className={Classes.DIALOG_FOOTER}>
+          <div className={Classes.DIALOG_FOOTER_ACTIONS}>
+            <Button text="Cancel" onClick={handleCancelQcQuit} />
+            <Button text="Don’t Save" intent={Intent.DANGER} onClick={() => { void handleDiscardQcAndClose(); }} />
+            <Button text="Save File…" intent={Intent.PRIMARY} icon="floppy-disk" onClick={handleSaveQcBeforeClose} />
+          </div>
+        </div>
+      </Dialog>
       <HistoryDialog
         isOpen={historyDialogOpen}
         onClose={() => setHistoryDialogOpen(false)}

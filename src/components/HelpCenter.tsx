@@ -175,7 +175,7 @@ const HELP_TOPICS: HelpTopic[] = [
     sections: [
       {
         title: "QC workflow",
-        body: "Open the bottom workbench and choose QC. Create a boolean or option-based review column, optionally add a notes column for free-text comments typed inline in the grid, assign a result directly in the grid, use quick filters to focus on unreviewed rows or a result, then mark the session done. Reset all clears both the result and the notes.",
+        body: "Open the bottom workbench and choose QC. Create a boolean or option-based review column, optionally add a notes column for free-text comments typed inline in the grid, assign a result directly in the grid, use quick filters to focus on unreviewed rows or a result, then mark the session done. A completed session can be resumed or left in place while you start a new QC column. Reset all clears both the result and the notes.",
       },
       {
         title: "Operation History",
@@ -260,7 +260,7 @@ const HELP_TOPICS: HelpTopic[] = [
       },
       {
         title: "Close the loop",
-        body: "Before closing a tabular session, export any results you want to keep. For JSON and Markdown, save or export when the sidebar shows Unsaved changes.",
+        body: "QC changes are kept in the working table until you export them. If you close a window or quit with unsaved QC, Chikku Parser asks whether to save the complete file, discard the changes, or cancel. For JSON and Markdown, save or export when the sidebar shows Unsaved changes.",
       },
     ],
   },

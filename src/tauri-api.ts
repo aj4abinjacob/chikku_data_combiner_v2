@@ -191,6 +191,14 @@ function installTauriApi() {
       listen<boolean>("set-dark-mode", (e) => callback(e.payload));
     },
 
+    onRequestQuit: (callback: () => void) => {
+      listen("request-quit", () => callback());
+    },
+
+    setQcDirty: (dirty: boolean) => invoke("set_qc_dirty", { dirty }),
+
+    requestAppQuit: () => invoke("request_app_quit"),
+
     syncTheme: (_isDark: boolean) => {
       // Native menu sync is not wired in this scaffold pass; intentionally no-op.
     },

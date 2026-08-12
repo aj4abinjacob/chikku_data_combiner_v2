@@ -11,9 +11,11 @@ use app_updates::*;
 use commands::*;
 use db::DbState;
 use menu::MenuState;
+use parking_lot::Mutex;
 use patterns::PatternState;
+use std::collections::HashSet;
 use std::time::Duration;
-use tauri::{Manager, RunEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, Window};
 use window_mgr::{
     filter_supported, spawn_window, spawn_windows_for_files, take_pending_files, PendingFiles,
 };
@@ -22,6 +24,26 @@ fn args_to_files(argv: &[String]) -> Vec<String> {
     // First arg is the app path itself; subsequent args may be files.
     let candidates: Vec<&str> = argv.iter().skip(1).map(|s| s.as_str()).collect();
     filter_supported(candidates)
+}
+
+#[derive(Default)]
+struct QcQuitState {
+    dirty_windows: Mutex<HashSet<String>>,
+}
+
+#[tauri::command]
+fn set_qc_dirty(window: Window, state: State<'_, QcQuitState>, dirty: bool) {
+    let mut dirty_windows = state.dirty_windows.lock();
+    if dirty {
+        dirty_windows.insert(window.label().to_string());
+    } else {
+        dirty_windows.remove(window.label());
+    }
+}
+
+#[tauri::command]
+fn request_app_quit(app: AppHandle) {
+    app.exit(0);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -54,6 +76,7 @@ pub fn run() {
         .manage(PatternState::default())
         .manage(PendingFiles::default())
         .manage(MenuState::default())
+        .manage(QcQuitState::default())
         .invoke_handler(tauri::generate_handler![
             load_file,
             query,
@@ -84,6 +107,8 @@ pub fn run() {
             release_update_notice,
             install_update,
             restart_app,
+            set_qc_dirty,
+            request_app_quit,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -119,12 +144,35 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         #[cfg(target_os = "macos")]
-        if let RunEvent::Opened { urls } = event {
-            handle_opened_urls(app_handle, urls);
+        if let RunEvent::Opened { urls } = &event {
+            handle_opened_urls(app_handle, urls.clone());
         }
 
-        #[cfg(not(target_os = "macos"))]
-        let _ = (app_handle, event);
+        if let RunEvent::ExitRequested { api, .. } = &event {
+            let state: State<'_, QcQuitState> = app_handle.state();
+            let dirty_window = {
+                let mut dirty_windows = state.dirty_windows.lock();
+                dirty_windows.retain(|label| app_handle.get_webview_window(label).is_some());
+                dirty_windows
+                    .iter()
+                    .find(|label| {
+                        app_handle
+                            .get_webview_window(label)
+                            .and_then(|window| window.is_focused().ok())
+                            .unwrap_or(false)
+                    })
+                    .cloned()
+                    .or_else(|| dirty_windows.iter().next().cloned())
+            };
+
+            if let Some(label) = dirty_window {
+                api.prevent_exit();
+                if let Some(window) = app_handle.get_webview_window(&label) {
+                    let _ = window.emit("request-quit", ());
+                    let _ = window.set_focus();
+                }
+            }
+        }
     });
 }
 

@@ -16,10 +16,12 @@ import { ColumnCheckList } from "./ColumnCheckList";
 interface ExportDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  onExported?: (tableNames: string[], fullData: boolean) => void | Promise<void>;
   tables: LoadedTable[];
   activeTable: string | null;
   viewState: ViewState;
   schema: { column_name: string }[];
+  forceFullData?: boolean;
 }
 
 type TableMode = "active" | "select";
@@ -32,16 +34,19 @@ function escapeIdent(name: string): string {
 export function ExportDialog({
   isOpen,
   onClose,
+  onExported,
   tables,
   activeTable,
   viewState,
   schema,
+  forceFullData = false,
 }: ExportDialogProps): React.ReactElement {
   const [format, setFormat] = useState<FileFormat>("csv");
   const [tableMode, setTableMode] = useState<TableMode>("active");
   const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<ViewMode>("current");
   const [exporting, setExporting] = useState(false);
+  const effectiveTableMode: TableMode = forceFullData ? "active" : tableMode;
 
   // Determine if the active table has any view modifications
   const hasViewModifications = useMemo(() => {
@@ -58,11 +63,11 @@ export function ExportDialog({
 
   // Which tables will be exported
   const exportTables = useMemo(() => {
-    if (tableMode === "active") {
+    if (effectiveTableMode === "active") {
       return tables.filter((t) => t.tableName === activeTable);
     }
     return tables.filter((t) => selectedTables.has(t.tableName));
-  }, [tableMode, tables, activeTable, selectedTables]);
+  }, [effectiveTableMode, tables, activeTable, selectedTables]);
 
   // Excel limit warnings
   const excelRowWarning = useMemo(() => {
@@ -92,7 +97,7 @@ export function ExportDialog({
 
       // Build SQL for a single table
       const buildTableSql = (t: LoadedTable): string => {
-        if (tableMode === "active" && viewMode === "current" && t.tableName === activeTable && hasViewModifications) {
+        if (!forceFullData && effectiveTableMode === "active" && viewMode === "current" && t.tableName === activeTable && hasViewModifications) {
           return buildSelectQuery(t.tableName, viewState);
         }
         return `SELECT * FROM ${escapeIdent(t.tableName)}`;
@@ -117,6 +122,10 @@ export function ExportDialog({
         await window.api.exportFile(sql, savePath, format);
       }
 
+      await onExported?.(
+        exportTables.map((table) => table.tableName),
+        forceFullData || effectiveTableMode === "select" || viewMode === "full" || !hasViewModifications
+      );
       onClose();
     } catch (err) {
       console.error("Export error:", err);
@@ -129,7 +138,7 @@ export function ExportDialog({
     <Dialog
       isOpen={isOpen}
       onClose={onClose}
-      title="Export Data"
+      title={forceFullData ? "Save QC File" : "Export Data"}
       style={{ width: 720 }}
     >
       <div className={Classes.DIALOG_BODY}>
@@ -155,14 +164,14 @@ export function ExportDialog({
           <div className="aggregate-section-header">Files</div>
           <RadioGroup
             onChange={(e) => setTableMode((e.target as HTMLInputElement).value as TableMode)}
-            selectedValue={tableMode}
+            selectedValue={effectiveTableMode}
             inline
           >
-            <Radio label="Active file only" value="active" />
-            <Radio label="Select files" value="select" />
+            <Radio label="Active file only" value="active" disabled={forceFullData} />
+            <Radio label="Select files" value="select" disabled={forceFullData} />
           </RadioGroup>
 
-          {tableMode === "select" && (
+          {effectiveTableMode === "select" && (
             <ColumnCheckList
               items={tables.map((t) => ({
                 name: t.tableName,
@@ -177,7 +186,7 @@ export function ExportDialog({
         </div>
 
         {/* Section 3: View Options */}
-        {tableMode === "active" && hasViewModifications && (
+        {!forceFullData && effectiveTableMode === "active" && hasViewModifications && (
           <div className="aggregate-section" style={{ marginBottom: 16 }}>
             <div className="aggregate-section-header">View Options</div>
             <RadioGroup
@@ -210,7 +219,7 @@ export function ExportDialog({
           <Button text="Cancel" onClick={onClose} disabled={exporting} />
           <Button
             intent={Intent.PRIMARY}
-            text={exporting ? "Exporting..." : "Export"}
+            text={exporting ? (forceFullData ? "Saving..." : "Exporting...") : (forceFullData ? "Save" : "Export")}
             icon={exporting ? <Spinner size={16} /> : "export"}
             onClick={handleExport}
             disabled={!canExport}

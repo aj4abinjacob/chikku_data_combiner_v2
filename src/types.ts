@@ -36,6 +36,9 @@ export interface DbApi {
   onExportCSV: (callback: () => void) => void;
   onCheckForUpdates: (callback: () => void) => void;
   onSetDarkMode: (callback: (isDark: boolean) => void) => void;
+  onRequestQuit: (callback: () => void) => void;
+  setQcDirty: (dirty: boolean) => Promise<void>;
+  requestAppQuit: () => Promise<void>;
   syncTheme: (isDark: boolean) => void;
   getAppVersion: () => Promise<string>;
   checkForUpdate: () => Promise<AppUpdateInfo | null>;

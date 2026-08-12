@@ -1213,6 +1213,8 @@ function QcPanel({
   onCreate,
   onResetAll,
   onMarkDone,
+  onResume,
+  onStartNew,
   onQuickFilter,
   visible,
 }: {
@@ -1224,6 +1226,8 @@ function QcPanel({
   onCreate?: (config: QcCreateConfig) => Promise<void>;
   onResetAll?: () => Promise<void>;
   onMarkDone?: () => Promise<void>;
+  onResume?: () => void;
+  onStartNew?: () => void;
   onQuickFilter?: (value: string | null | "__all__") => void;
   visible: boolean;
 }): React.ReactElement | null {
@@ -1776,23 +1780,51 @@ function QcPanel({
 
           {session && (
             <div className="qc-progress-actions">
-              <Button
-                small
-                icon="undo"
-                text="Reset"
-                disabled={session.done || reviewedRows === 0 || !!working}
-                loading={working === "reset"}
-                onClick={handleResetAll}
-              />
-              <Button
-                small
-                intent={Intent.PRIMARY}
-                icon="tick"
-                text={session.done ? "Done" : "Mark Done"}
-                disabled={session.done || !!working}
-                loading={working === "done"}
-                onClick={handleMarkDone}
-              />
+              {session.done ? (
+                <>
+                  <Button
+                    small
+                    icon="edit"
+                    text="Resume QC"
+                    disabled={!onResume}
+                    onClick={() => {
+                      setMessage(null);
+                      onResume?.();
+                    }}
+                  />
+                  <Button
+                    small
+                    intent={Intent.PRIMARY}
+                    icon="add"
+                    text="Start New QC"
+                    disabled={!onStartNew}
+                    onClick={() => {
+                      setMessage(null);
+                      onStartNew?.();
+                    }}
+                  />
+                </>
+              ) : (
+                <>
+                  <Button
+                    small
+                    icon="undo"
+                    text="Reset"
+                    disabled={reviewedRows === 0 || !!working}
+                    loading={working === "reset"}
+                    onClick={handleResetAll}
+                  />
+                  <Button
+                    small
+                    intent={Intent.PRIMARY}
+                    icon="tick"
+                    text="Mark Done"
+                    disabled={!!working}
+                    loading={working === "done"}
+                    onClick={handleMarkDone}
+                  />
+                </>
+              )}
             </div>
           )}
         </div>
@@ -1838,9 +1870,13 @@ interface FilterPanelProps {
   onRenameView: (viewId: string, newName: string) => void;
   onClose: () => void;
   qcSession?: QcSession | null;
+  qcFocusRequest?: number;
+  onQcFocusHandled?: () => void;
   onQcCreate?: (config: QcCreateConfig) => Promise<void>;
   onQcResetAll?: () => Promise<void>;
   onQcMarkDone?: () => Promise<void>;
+  onQcResume?: () => void;
+  onQcStartNew?: () => void;
   onQcQuickFilter?: (value: string | null | "__all__") => void;
   motionState?: "open" | "closing";
   filtersOnly?: boolean;
@@ -1877,9 +1913,13 @@ export function FilterPanel({
   onRenameView,
   onClose,
   qcSession,
+  qcFocusRequest = 0,
+  onQcFocusHandled,
   onQcCreate,
   onQcResetAll,
   onQcMarkDone,
+  onQcResume,
+  onQcStartNew,
   onQcQuickFilter,
   motionState = "open",
   filtersOnly = false,
@@ -1930,6 +1970,12 @@ export function FilterPanel({
     window.addEventListener("resize", syncQcPanelHeight);
     return () => window.removeEventListener("resize", syncQcPanelHeight);
   }, [activeTab]);
+
+  useEffect(() => {
+    if (qcFocusRequest <= 0) return;
+    setActiveTab("qc");
+    onQcFocusHandled?.();
+  }, [onQcFocusHandled, qcFocusRequest]);
 
   // ── Resize drag handlers ──
   const onMouseDown = useCallback(
@@ -2300,6 +2346,8 @@ export function FilterPanel({
             onCreate={onQcCreate}
             onResetAll={onQcResetAll}
             onMarkDone={onQcMarkDone}
+            onResume={onQcResume}
+            onStartNew={onQcStartNew}
             onQuickFilter={onQcQuickFilter}
             visible={activeTab === "qc"}
           />
