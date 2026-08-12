@@ -9,7 +9,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
-import type { AppUpdateInfo, DbApi, UpdateDownloadEvent } from "./types";
+import type { AppUpdateInfo, DbApi, LinkPreviewMetadata, UpdateDownloadEvent } from "./types";
 
 interface RegexPattern {
   id: string;
@@ -136,6 +136,9 @@ function installTauriApi() {
     openExternal: async (url: string) => {
       if (/^https?:\/\//i.test(url)) await openExternal(url);
     },
+
+    fetchLinkPreview: (url: string) =>
+      invoke<LinkPreviewMetadata>("fetch_link_preview", { url }),
 
     writeJsonFile: (filePath: string, data: unknown) =>
       invoke("write_json_file", { filePath, data }),

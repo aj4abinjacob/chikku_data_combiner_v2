@@ -9,9 +9,6 @@ const BLOCKED_HOSTNAME_SUFFIXES = [
   ".home.arpa",
   ".onion",
 ];
-const GOOGLE_EDITOR_PATH = /^\/(spreadsheets|document|presentation)\/(?:u\/\d+\/)?d\/([A-Za-z0-9_-]+)\/(?:edit|view|preview|htmlview)\/?$/;
-const GOOGLE_SHEET_GID = /^\d{1,20}$/;
-
 export interface LinkPreviewTarget {
   url: string;
   hostname: string;
@@ -35,25 +32,10 @@ function isBlockedIpv4(hostname: string): boolean {
     || first >= 224;
 }
 
-function getEmbeddableUrl(url: URL): URL {
-  if (url.origin !== "https://docs.google.com") return url;
-
-  const match = GOOGLE_EDITOR_PATH.exec(url.pathname);
-  if (!match) return url;
-
-  const previewUrl = new URL(`/${match[1]}/d/${match[2]}/preview`, url.origin);
-  if (match[1] === "spreadsheets") {
-    const fragmentGid = new URLSearchParams(url.hash.slice(1)).get("gid");
-    const gid = [url.searchParams.get("gid"), fragmentGid]
-      .find((candidate): candidate is string => !!candidate && GOOGLE_SHEET_GID.test(candidate));
-    if (gid) previewUrl.searchParams.set("gid", gid);
-  }
-  return previewUrl;
-}
-
 /**
- * Allows public HTTPS pages to be tried in the sandboxed hover preview while
- * rejecting URLs that could target the local machine or private network.
+ * Performs a fast renderer-side check before asking the native metadata fetcher.
+ * The backend repeats validation and pins DNS to public addresses before making
+ * any request; this helper is only a UX gate, not the security boundary.
  */
 export function getLinkPreviewTarget(value: string): LinkPreviewTarget | null {
   if (
@@ -92,5 +74,5 @@ export function getLinkPreviewTarget(value: string): LinkPreviewTarget | null {
     return null;
   }
 
-  return { url: getEmbeddableUrl(url).href, hostname };
+  return { url: url.href, hostname };
 }

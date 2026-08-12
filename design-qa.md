@@ -35,3 +35,21 @@ patches made since previous QA pass:
 - Added `react-markdown` and `remark-gfm`.
 
 final result: passed
+
+## Rich URL preview QA — 2026-08-12
+
+**Findings**
+- Directly hovering a previewable HTTPS URL cell opens the rich card; the intermediate text tooltip is not shown.
+- The native card matches the supplied Google Sheets reference in hierarchy, spacing, rounded thumbnail, title/domain treatment, description, and shadow.
+- The Google Sheets-only “Replace URL with its title?” action was intentionally omitted because Chikku is previewing data rather than editing a Sheets smart chip.
+- Oversized HTML is safely truncated before metadata parsing; images retain strict byte and dimension limits.
+
+source visual truth path: `/var/folders/b6/l8g48kl177q4dqk3xh4l4n7c0000gn/T/codex-clipboard-e909c4d5-c286-4d5e-997f-f1fe7f48b041.png`
+
+implementation screenshot path: `dist-tauri/qa-assets/chikku-direct-clicked.png`
+
+side-by-side comparison path: `dist-tauri/qa-assets/chikku-direct-comparison.png`
+
+state: product URL cell hovered directly, with live title, domain, product image, and description visible.
+
+final result: passed

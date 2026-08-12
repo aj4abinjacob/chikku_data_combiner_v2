@@ -4,7 +4,7 @@ import { Button, ButtonGroup, Icon } from "@blueprintjs/core";
 import { Popover2 } from "@blueprintjs/popover2";
 import { SoftSelect } from "./SoftSelect";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, PivotAggFunction, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy, QcSession, INTERNAL_ROW_ID_VALUE } from "../types";
+import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, PivotAggFunction, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy, QcSession, INTERNAL_ROW_ID_VALUE, LinkPreviewMetadata } from "../types";
 import { getLinkPreviewTarget } from "../utils/linkPreview";
 
 const TOOLTIP_DELAY = 600; // ms before tooltip appears
@@ -172,6 +172,7 @@ export function DataGrid({
     y: number;
     cellHeight: number;
   } | null>(null);
+  const [cellLinkPreview, setCellLinkPreview] = useState<LinkPreviewState | null>(null);
   const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tooltipDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tooltipHovered = useRef(false);
@@ -359,6 +360,7 @@ export function DataGrid({
       // Don't dismiss if user is hovering the tooltip or has text selected in it
       if (tooltipHovered.current || hasTooltipSelection()) return;
       setTooltip(null);
+      setCellLinkPreview(null);
       setCopied(false);
     }, delay);
   }, [clearDismissTimer, hasTooltipSelection]);
@@ -369,13 +371,25 @@ export function DataGrid({
       // Cancel any pending dismiss when entering a new cell
       clearDismissTimer();
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const previewTarget = getLinkPreviewTarget(value);
+      setCellLinkPreview(null);
       tooltipTimer.current = setTimeout(() => {
-        setTooltip({
-          text: value,
-          x: rect.left,
-          y: rect.top,
-          cellHeight: rect.height,
-        });
+        tooltipTimer.current = null;
+        if (previewTarget) {
+          setTooltip(null);
+          setCellLinkPreview({
+            ...previewTarget,
+            ...getLinkPreviewPosition(rect),
+          });
+        } else {
+          setCellLinkPreview(null);
+          setTooltip({
+            text: value,
+            x: rect.left,
+            y: rect.top,
+            cellHeight: rect.height,
+          });
+        }
       }, TOOLTIP_DELAY);
     },
     [clearDismissTimer]
@@ -593,6 +607,7 @@ export function DataGrid({
       headerDragCol.current = col;
       setDraggingColumn(col);
       setTooltip(null);
+      setCellLinkPreview(null);
       setCopied(false);
       document.body.style.cursor = "grabbing";
       document.body.style.userSelect = "none";
@@ -758,6 +773,7 @@ export function DataGrid({
       e.stopPropagation();
       if (!onGetColumnStats || pivotMode) return;
       setTooltip(null);
+      setCellLinkPreview(null);
       setCopied(false);
       setPreviewColumnFormat(null);
       requestColumnStats(col);
@@ -1743,6 +1759,10 @@ export function DataGrid({
           </button>
         </div>
       )}
+      {cellLinkPreview && createPortal(
+        <LinkPreviewCard preview={cellLinkPreview} />,
+        document.body
+      )}
     </div>
   );
 }
@@ -2700,16 +2720,137 @@ function isPrecisionSensitiveNumber(value: string): boolean {
 // URL regex for detecting links in tooltip text
 const URL_RE = /https?:\/\/[^\s<>"'`,;)}\]]+/g;
 
-const LINK_PREVIEW_WIDTH = 480;
-const LINK_PREVIEW_HEIGHT = 320;
+const LINK_PREVIEW_WIDTH = 344;
+const LINK_PREVIEW_HEIGHT = 354;
 const LINK_PREVIEW_MARGIN = 8;
 const LINK_PREVIEW_GAP = 10;
 
 interface LinkPreviewState {
-  src: string;
+  url: string;
   hostname: string;
   left: number;
   top: number;
+}
+
+type LinkPreviewLoadState =
+  | { status: "loading" }
+  | { status: "ready"; metadata: LinkPreviewMetadata }
+  | { status: "unavailable" };
+
+const LINK_PREVIEW_CACHE_LIMIT = 20;
+const linkPreviewCache = new Map<string, Promise<LinkPreviewMetadata>>();
+
+function requestLinkPreview(url: string): Promise<LinkPreviewMetadata> {
+  const cached = linkPreviewCache.get(url);
+  if (cached) return cached;
+  if (linkPreviewCache.size >= LINK_PREVIEW_CACHE_LIMIT) {
+    const oldestKey = linkPreviewCache.keys().next().value;
+    if (oldestKey) linkPreviewCache.delete(oldestKey);
+  }
+  const request = window.api.fetchLinkPreview(url);
+  linkPreviewCache.set(url, request);
+  void request.catch(() => {
+    window.setTimeout(() => {
+      if (linkPreviewCache.get(url) === request) linkPreviewCache.delete(url);
+    }, 30_000);
+  });
+  return request;
+}
+
+function getLinkPreviewPosition(rect: DOMRect): Pick<LinkPreviewState, "left" | "top"> {
+  const availableWidth = Math.min(LINK_PREVIEW_WIDTH, window.innerWidth - LINK_PREVIEW_MARGIN * 2);
+  const availableHeight = Math.min(LINK_PREVIEW_HEIGHT, window.innerHeight - LINK_PREVIEW_MARGIN * 2);
+  const preferredLeft = rect.right + LINK_PREVIEW_GAP;
+  const fallbackLeft = rect.left - availableWidth - LINK_PREVIEW_GAP;
+  const left = preferredLeft + availableWidth <= window.innerWidth - LINK_PREVIEW_MARGIN
+    ? preferredLeft
+    : Math.max(LINK_PREVIEW_MARGIN, fallbackLeft);
+  const top = Math.min(
+    Math.max(LINK_PREVIEW_MARGIN, rect.top - 36),
+    Math.max(LINK_PREVIEW_MARGIN, window.innerHeight - availableHeight - LINK_PREVIEW_MARGIN)
+  );
+  return { left, top };
+}
+
+function LinkPreviewCard({ preview }: { preview: LinkPreviewState }): React.ReactElement {
+  const [loadState, setLoadState] = useState<LinkPreviewLoadState>({ status: "loading" });
+
+  useEffect(() => {
+    let active = true;
+    setLoadState({ status: "loading" });
+    requestLinkPreview(preview.url)
+      .then((metadata) => {
+        if (active) setLoadState({ status: "ready", metadata });
+      })
+      .catch(() => {
+        if (active) setLoadState({ status: "unavailable" });
+      });
+    return () => {
+      active = false;
+    };
+  }, [preview.url]);
+
+  const metadata = loadState.status === "ready" ? loadState.metadata : null;
+  const hostname = metadata?.hostname || preview.hostname;
+  const hasImage = !!metadata?.imageDataUrl;
+
+  return (
+    <div
+      className={`dg-link-preview${hasImage ? " has-image" : ""}`}
+      style={{ left: preview.left, top: preview.top }}
+      role="tooltip"
+      aria-label={`Link preview for ${hostname}`}
+    >
+      <div className="dg-link-preview-heading">
+        <span className="dg-link-preview-favicon">
+          {metadata?.faviconDataUrl ? (
+            <img src={metadata.faviconDataUrl} alt="" />
+          ) : (
+            <Icon icon="link" size={14} />
+          )}
+        </span>
+        <span className="dg-link-preview-identity">
+          <span className="dg-link-preview-title">
+            {metadata?.title || (loadState.status === "loading" ? "Loading preview…" : hostname)}
+          </span>
+          <span className="dg-link-preview-hostname">{hostname}</span>
+        </span>
+        <span className="dg-link-preview-safe" title="Fetched without page scripts or cookies">
+          <Icon icon="shield" size={13} />
+        </span>
+      </div>
+
+      {loadState.status === "loading" && (
+        <div className="dg-link-preview-loading" aria-hidden="true">
+          <span className="dg-link-preview-skeleton dg-link-preview-skeleton-image" />
+          <span className="dg-link-preview-skeleton dg-link-preview-skeleton-line" />
+          <span className="dg-link-preview-skeleton dg-link-preview-skeleton-line short" />
+        </div>
+      )}
+
+      {metadata && (
+        <>
+          {metadata.imageDataUrl && (
+            <div className="dg-link-preview-media">
+              <img src={metadata.imageDataUrl} alt="" />
+            </div>
+          )}
+          {metadata.description && (
+            <div className="dg-link-preview-description">{metadata.description}</div>
+          )}
+          {!metadata.imageDataUrl && !metadata.description && (
+            <div className="dg-link-preview-message">Preview details are not available for this page.</div>
+          )}
+        </>
+      )}
+
+      {loadState.status === "unavailable" && (
+        <div className="dg-link-preview-message">
+          Preview unavailable for this URL.
+        </div>
+      )}
+    </div>
+  );
 }
 
 function TooltipContent({ text }: { text: string }): React.ReactElement {
@@ -2727,18 +2868,7 @@ function TooltipContent({ text }: { text: string }): React.ReactElement {
     const showPreview = (element: HTMLAnchorElement) => {
       if (!previewTarget) return;
       const rect = element.getBoundingClientRect();
-      const availableWidth = Math.min(LINK_PREVIEW_WIDTH, window.innerWidth - LINK_PREVIEW_MARGIN * 2);
-      const availableHeight = Math.min(LINK_PREVIEW_HEIGHT, window.innerHeight - LINK_PREVIEW_MARGIN * 2);
-      const preferredLeft = rect.right + LINK_PREVIEW_GAP;
-      const fallbackLeft = rect.left - availableWidth - LINK_PREVIEW_GAP;
-      const left = preferredLeft + availableWidth <= window.innerWidth - LINK_PREVIEW_MARGIN
-        ? preferredLeft
-        : Math.max(LINK_PREVIEW_MARGIN, fallbackLeft);
-      const top = Math.min(
-        Math.max(LINK_PREVIEW_MARGIN, rect.top - 36),
-        Math.max(LINK_PREVIEW_MARGIN, window.innerHeight - availableHeight - LINK_PREVIEW_MARGIN)
-      );
-      setPreview({ src: previewTarget.url, hostname: previewTarget.hostname, left, top });
+      setPreview({ ...previewTarget, ...getLinkPreviewPosition(rect) });
     };
     parts.push(
       <a
@@ -2766,26 +2896,7 @@ function TooltipContent({ text }: { text: string }): React.ReactElement {
     <>
       {parts}
       {preview && createPortal(
-        <div
-          className="dg-link-preview"
-          style={{ left: preview.left, top: preview.top }}
-          aria-hidden="true"
-        >
-          <div className="dg-link-preview-header">
-            <Icon icon="link" size={13} />
-            <span className="dg-link-preview-hostname">{preview.hostname}</span>
-            <span className="dg-link-preview-safety">Sandboxed preview</span>
-          </div>
-          <iframe
-            src={preview.src}
-            title={`Link preview for ${preview.hostname}`}
-            sandbox="allow-scripts allow-same-origin"
-            referrerPolicy="no-referrer"
-            allow="autoplay 'none'; camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; fullscreen 'none'; payment 'none'"
-            loading="lazy"
-            tabIndex={-1}
-          />
-        </div>,
+        <LinkPreviewCard preview={preview} />,
         document.body
       )}
     </>

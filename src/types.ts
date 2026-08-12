@@ -25,6 +25,7 @@ export interface DbApi {
   exportPatterns: () => Promise<boolean>;
   importPatterns: () => Promise<{ imported: number; error?: string }>;
   openExternal: (url: string) => Promise<void>;
+  fetchLinkPreview: (url: string) => Promise<LinkPreviewMetadata>;
   writeJsonFile: (filePath: string, data: any) => Promise<boolean>;
   readJsonFile: () => Promise<any | null>;
   readTextFile: (filePath: string) => Promise<string>;
@@ -46,6 +47,15 @@ export interface DbApi {
   releaseUpdateNotice: (version: string) => Promise<boolean>;
   installUpdate: (onProgress: (event: UpdateDownloadEvent) => void) => Promise<void>;
   restartApp: () => Promise<void>;
+}
+
+export interface LinkPreviewMetadata {
+  url: string;
+  hostname: string;
+  title: string;
+  description?: string | null;
+  imageDataUrl?: string | null;
+  faviconDataUrl?: string | null;
 }
 
 export interface AppUpdateInfo {

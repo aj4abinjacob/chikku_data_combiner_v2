@@ -3,6 +3,7 @@ mod commands;
 mod db;
 mod error;
 mod excel;
+mod link_preview;
 mod menu;
 mod patterns;
 mod window_mgr;
@@ -10,6 +11,7 @@ mod window_mgr;
 use app_updates::*;
 use commands::*;
 use db::DbState;
+use link_preview::*;
 use menu::MenuState;
 use parking_lot::Mutex;
 use patterns::PatternState;
@@ -109,6 +111,7 @@ pub fn run() {
             restart_app,
             set_qc_dirty,
             request_app_quit,
+            fetch_link_preview,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

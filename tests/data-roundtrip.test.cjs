@@ -244,7 +244,7 @@ test("pivot path keys do not confuse nulls or path punctuation with state syntax
   );
 });
 
-test("public HTTPS links keep their full URL for sandboxed previews", () => {
+test("public HTTPS links keep their full URL for metadata previews", () => {
   assert.deepEqual(
     getLinkPreviewTarget("https://example.com/articles?id=42#details"),
     { url: "https://example.com/articles?id=42#details", hostname: "example.com" }
@@ -252,7 +252,7 @@ test("public HTTPS links keep their full URL for sandboxed previews", () => {
   assert.deepEqual(
     getLinkPreviewTarget("https://docs.google.com/spreadsheets/d/sheet_ID-123/edit?usp=sharing#gid=456"),
     {
-      url: "https://docs.google.com/spreadsheets/d/sheet_ID-123/preview?gid=456",
+      url: "https://docs.google.com/spreadsheets/d/sheet_ID-123/edit?usp=sharing#gid=456",
       hostname: "docs.google.com",
     }
   );
