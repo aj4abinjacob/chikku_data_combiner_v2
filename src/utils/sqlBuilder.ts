@@ -379,17 +379,48 @@ export function buildColumnStatsSummaryQuery(
   return sql;
 }
 
+export function buildDatasetOverviewQuery(
+  tableName: string,
+  columns: Array<{ column_name: string; column_type: string }>,
+  filters: FilterGroup
+): string {
+  const selects = ["COUNT(*) AS row_count"];
+
+  columns.forEach((column, index) => {
+    const col = escapeIdent(column.column_name);
+    const isText = /^(VARCHAR|CHAR|BPCHAR|TEXT|STRING)(\(|$)/i.test(column.column_type.trim());
+    const presentValue = isText
+      ? `CASE WHEN ${col} IS NOT NULL AND TRIM(CAST(${col} AS VARCHAR)) <> '' THEN ${col} ELSE NULL END`
+      : col;
+    const missingCondition = isText
+      ? `${col} IS NULL OR TRIM(CAST(${col} AS VARCHAR)) = ''`
+      : `${col} IS NULL`;
+
+    selects.push(
+      `SUM(CASE WHEN ${missingCondition} THEN 1 ELSE 0 END) AS missing_${index}`,
+      `APPROX_COUNT_DISTINCT(${presentValue}) AS unique_${index}`
+    );
+  });
+
+  let sql = `SELECT ${selects.join(", ")} FROM ${escapeIdent(tableName)}`;
+  const whereClause = buildFilterGroupClause(filters);
+  if (whereClause) sql += ` WHERE ${whereClause}`;
+  return sql;
+}
+
 export function buildColumnTopValuesQuery(
   tableName: string,
   column: string,
   filters: FilterGroup,
-  limit = 6
+  limit = 6,
+  excludeEmptyStrings = false
 ): string {
   const col = escapeIdent(column);
   const whereParts: string[] = [];
   const filterClause = buildFilterGroupClause(filters);
   if (filterClause) whereParts.push(filterClause);
   whereParts.push(`${col} IS NOT NULL`);
+  if (excludeEmptyStrings) whereParts.push(`TRIM(CAST(${col} AS VARCHAR)) <> ''`);
 
   let sql = `SELECT CAST(${col} AS VARCHAR) AS value, COUNT(*) AS count FROM ${escapeIdent(tableName)}`;
   if (whereParts.length > 0) {

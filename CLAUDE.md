@@ -84,7 +84,7 @@ Tauri 2, Rust, React 18, TypeScript 5 (strict, ES2020, CommonJS), DuckDB (in-mem
 - Layout: `Sidebar + PivotToolbar + DataGrid + FilterPanel + StatusBar + dialogs`
 
 ### Sidebar.tsx — Left Panel
-Three sections: Tables, Columns, Operations. Table management, column visibility/search, sort/group controls, and operation buttons for data operations, aggregate, pivot table, lookup merge, comparison, date conversion, and export.
+Tables and Operations stay available while the center section switches between Columns and Overview. Columns provides visibility/search and sort/group controls. Overview profiles the current filtered table with row/column totals, completeness, type mix, missing-value signals, and a selectable top-values chart. Operation buttons cover data operations, aggregate, pivot table, lookup merge, comparison, date conversion, and export.
 
 ### DataGrid.tsx — Virtualized Data Grid
 Virtual scrolling via `@tanstack/react-virtual`. Div-based layout. Dual-mode: flat (chunk cache) and pivot (tree with group/data rows). Chunk generations reject stale responses, clear stale counts/loading markers on query changes, and expose failed count/chunk/pivot queries in the grid with a retry action. Cell selection, copy (TSV), multi-sort, column resize/reorder. Native text selection is disabled on grid cells (including the WebKit-prefixed rule) so clipboard copying stays cell-based. `ROW_HEIGHT = 28`.

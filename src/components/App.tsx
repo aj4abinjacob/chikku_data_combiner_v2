@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Button, Classes, Dialog, Icon, Intent, Tag } from "@blueprintjs/core";
 import { getCurrentWindow, type DragDropEvent } from "@tauri-apps/api/window";
-import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions, ColumnStats, ColumnStatsUniqueValue, ComparisonViewConfig, DocumentWorkspaceFileActions, QcCreateConfig, QcOptionSortMode, QcSession, QcValueType } from "../types";
+import { LoadedTable, ViewState, ColumnInfo, FilterGroup, FilterNode, SheetInfo, hasActiveFilters, countConditions, isFilterGroup, ColOpType, ColOpStep, RowOpType, RowOpStep, UndoStrategy, SortColumn, PivotAggFunction, PivotGroupColumn, SavedView, TableHistory, TableSourceInfo, HistoryEntry, HistoryOpSource, HistoryExportData, ImportOptions, ColumnStats, ColumnStatsUniqueValue, ComparisonViewConfig, DocumentWorkspaceFileActions, QcCreateConfig, QcOptionSortMode, QcSession, QcValueType, DatasetOverview, ColumnStatsTopValue } from "../types";
 import { Sidebar } from "./Sidebar";
 import { DataGrid } from "./DataGrid";
 import { ComparisonView, createDefaultComparisonConfig } from "./ComparisonView";
@@ -17,7 +17,7 @@ import { UpdateNotice } from "./UpdateNotice";
 import { JsonWorkspace } from "./JsonWorkspace";
 import { MarkdownWorkspace } from "./MarkdownWorkspace";
 import { HelpCenter } from "./HelpCenter";
-import { buildColumnStatsSummaryQuery, buildColumnTopValuesQuery, buildColumnUniqueValuesQuery, buildCombineQuery } from "../utils/sqlBuilder";
+import { buildColumnStatsSummaryQuery, buildColumnTopValuesQuery, buildColumnUniqueValuesQuery, buildCombineQuery, buildDatasetOverviewQuery } from "../utils/sqlBuilder";
 import { buildColOpUpdateSQL, buildStepDescription } from "../utils/colOpsSQL";
 import { buildRowOpSQL, buildRowOpStepDescription } from "../utils/rowOpsSQL";
 import { useChunkCache } from "../hooks/useChunkCache";
@@ -681,6 +681,48 @@ export function App(): React.ReactElement {
     },
     [activeTable, numericColumns, viewState.filters, dataVersion]
   );
+
+  const handleGetDatasetOverview = useCallback(async (): Promise<DatasetOverview> => {
+    if (!activeTable) throw new Error("No active table");
+
+    const rows = await window.api.query(
+      buildDatasetOverviewQuery(activeTable, schema, viewState.filters)
+    );
+    const summary = rows[0] ?? {};
+    const sourceRowCount = tables.find((table) => table.tableName === activeTable)?.rowCount;
+
+    return {
+      rowCount: toStatNumber(summary.row_count),
+      totalRows: sourceRowCount ?? toStatNumber(summary.row_count),
+      isFiltered: hasActiveFilters(viewState.filters),
+      columns: schema.map((column, index) => ({
+        column: column.column_name,
+        columnType: column.column_type,
+        missingCount: toStatNumber(summary[`missing_${index}`]),
+        uniqueCount: toStatNumber(summary[`unique_${index}`]),
+      })),
+    };
+  }, [activeTable, dataVersion, schema, tables, viewState.filters]);
+
+  const handleGetOverviewTopValues = useCallback(async (column: string): Promise<ColumnStatsTopValue[]> => {
+    if (!activeTable) throw new Error("No active table");
+    const columnType = columnTypes.get(column);
+    if (!columnType) throw new Error("Column not found");
+
+    const rows = await window.api.query(
+      buildColumnTopValuesQuery(
+        activeTable,
+        column,
+        viewState.filters,
+        5,
+        isTextColumnType(columnType)
+      )
+    );
+    return rows.map((row) => ({
+      value: String(row.value ?? ""),
+      count: toStatNumber(row.count),
+    }));
+  }, [activeTable, columnTypes, dataVersion, viewState.filters]);
 
   // Chunk cache for lazy-loaded virtual scrolling (flat mode)
   const {
@@ -3085,6 +3127,8 @@ export function App(): React.ReactElement {
               onOpenFiles={handleChooseFiles}
               onOpenHelp={() => setHelpCenterOpen(true)}
               onHide={() => setSidebarVisible(false)}
+              onGetDatasetOverview={handleGetDatasetOverview}
+              onGetOverviewTopValues={handleGetOverviewTopValues}
               jsonWorkspaceActive={jsonWorkspaceActive}
               markdownWorkspaceActive={markdownWorkspaceActive}
               documentFileActions={documentFileActions}

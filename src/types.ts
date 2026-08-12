@@ -105,6 +105,20 @@ export interface ColumnStats {
   topValues: ColumnStatsTopValue[];
 }
 
+export interface DatasetColumnOverview {
+  column: string;
+  columnType: string;
+  missingCount: number;
+  uniqueCount: number;
+}
+
+export interface DatasetOverview {
+  rowCount: number;
+  totalRows: number;
+  isFiltered: boolean;
+  columns: DatasetColumnOverview[];
+}
+
 export const INTERNAL_ROW_ID_COLUMN = "__chikku_internal_rowid";
 export const INTERNAL_ROW_ID_VALUE = Symbol("chikku-internal-rowid");
 

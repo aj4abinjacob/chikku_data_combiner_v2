@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   buildChunkQuery,
+  buildDatasetOverviewQuery,
   buildDistinctFilterValuesQuery,
   buildFilterClause,
   buildPivotGroupQuery,
@@ -110,6 +111,25 @@ test("picker and transport queries escape identifiers and preserve exact decimal
   assert.equal(
     chunk,
     'SELECT CAST("amount" AS VARCHAR) AS "amount", "large_id" FROM "typed_data" LIMIT 1000 OFFSET 0'
+  );
+});
+
+test("dataset overview profiles missing and distinct values in one filtered query", () => {
+  const sql = buildDatasetOverviewQuery(
+    'sales"data',
+    [
+      { column_name: 'customer"name', column_type: "VARCHAR" },
+      { column_name: "amount", column_type: "DOUBLE" },
+    ],
+    {
+      logic: "AND",
+      children: [{ column: "status", columnType: "VARCHAR", operator: "=", value: "open" }],
+    }
+  );
+
+  assert.equal(
+    sql,
+    'SELECT COUNT(*) AS row_count, SUM(CASE WHEN "customer""name" IS NULL OR TRIM(CAST("customer""name" AS VARCHAR)) = \'\' THEN 1 ELSE 0 END) AS missing_0, APPROX_COUNT_DISTINCT(CASE WHEN "customer""name" IS NOT NULL AND TRIM(CAST("customer""name" AS VARCHAR)) <> \'\' THEN "customer""name" ELSE NULL END) AS unique_0, SUM(CASE WHEN "amount" IS NULL THEN 1 ELSE 0 END) AS missing_1, APPROX_COUNT_DISTINCT("amount") AS unique_1 FROM "sales""data" WHERE "status" = \'open\''
   );
 });
 

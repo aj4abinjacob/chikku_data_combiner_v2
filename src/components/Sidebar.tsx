@@ -7,13 +7,14 @@ import {
   Intent,
 } from "@blueprintjs/core";
 import { Tooltip2 } from "@blueprintjs/popover2";
-import { LoadedTable, ColumnInfo, SortColumn, PivotViewConfig, DocumentWorkspaceFileActions } from "../types";
+import { LoadedTable, ColumnInfo, SortColumn, PivotViewConfig, DocumentWorkspaceFileActions, DatasetOverview, ColumnStatsTopValue } from "../types";
 import { DataOperationsDialog } from "./DataOperationsDialog";
 import { AggregateDialog } from "./AggregateDialog";
 import { PivotDialog } from "./PivotDialog";
 import { LookupMergeDialog } from "./LookupMergeDialog";
 import { DateConversionDialog } from "./DateConversionDialog";
 import { SearchInput } from "./SearchInput";
+import { DatasetOverviewPanel } from "./DatasetOverviewPanel";
 
 interface SidebarProps {
   tables: LoadedTable[];
@@ -44,6 +45,8 @@ interface SidebarProps {
   onOpenFiles: () => void;
   onOpenHelp: () => void;
   onHide: () => void;
+  onGetDatasetOverview: () => Promise<DatasetOverview>;
+  onGetOverviewTopValues: (column: string) => Promise<ColumnStatsTopValue[]>;
   jsonWorkspaceActive?: boolean;
   markdownWorkspaceActive?: boolean;
   documentFileActions?: DocumentWorkspaceFileActions | null;
@@ -155,6 +158,8 @@ export function Sidebar({
   onOpenFiles,
   onOpenHelp,
   onHide,
+  onGetDatasetOverview,
+  onGetOverviewTopValues,
   jsonWorkspaceActive = false,
   markdownWorkspaceActive = false,
   documentFileActions = null,
@@ -169,6 +174,7 @@ export function Sidebar({
   const [columnSearch, setColumnSearch] = useState("");
   const [tableSearch, setTableSearch] = useState("");
   const [fileContextMenu, setFileContextMenu] = useState<FileContextMenuState | null>(null);
+  const [sidebarView, setSidebarView] = useState<"columns" | "overview">("columns");
   const sidebarRef = React.useRef<HTMLDivElement>(null);
   const fileContextMenuRef = React.useRef<HTMLDivElement>(null);
 
@@ -185,6 +191,10 @@ export function Sidebar({
   const workspaceLabel = markdownWorkspaceActive ? "Markdown" : "JSON";
   const combinableTables = useMemo(() => tables.filter((table) => !isTextWorkspaceTable(table)), [tables]);
   const comparableTables = useMemo(() => tables.filter((table) => table.schema.length > 0), [tables]);
+  const activeLoadedTable = useMemo(
+    () => tables.find((table) => table.tableName === activeTable) ?? null,
+    [activeTable, tables]
+  );
   const combinableTableNames = useMemo(
     () => new Set(combinableTables.map((table) => table.tableName)),
     [combinableTables]
@@ -202,6 +212,10 @@ export function Sidebar({
   useEffect(() => {
     setColumnSearch("");
   }, [activeTable]);
+
+  useEffect(() => {
+    if (documentWorkspaceActive || !activeTable) setSidebarView("columns");
+  }, [activeTable, documentWorkspaceActive]);
 
   // Filter tables by search
   const filteredTables = useMemo(() => {
@@ -695,6 +709,31 @@ export function Sidebar({
         </div>
       )}
 
+      {!documentWorkspaceActive && activeTable && schema.length > 0 && (
+        <div className="sidebar-view-switch" role="tablist" aria-label="Sidebar view">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sidebarView === "columns"}
+            className={sidebarView === "columns" ? "active" : ""}
+            onClick={() => setSidebarView("columns")}
+          >
+            <Icon icon="column-layout" size={12} />
+            <span>Columns</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sidebarView === "overview"}
+            className={sidebarView === "overview" ? "active" : ""}
+            onClick={() => setSidebarView("overview")}
+          >
+            <Icon icon="grouped-bar-chart" size={12} />
+            <span>Overview</span>
+          </button>
+        </div>
+      )}
+
       {documentWorkspaceActive && activeDocumentFileActions && (
         <div className="sidebar-section sidebar-file-actions">
           <div className="sidebar-section-header">
@@ -804,7 +843,7 @@ export function Sidebar({
       )}
 
       {/* Column visibility */}
-      {!documentWorkspaceActive && schema.length > 0 && (
+      {!documentWorkspaceActive && schema.length > 0 && sidebarView === "columns" && (
         <div className="sidebar-section sidebar-section-columns" ref={columnsScrollRef}>
           <div className="column-header-row">
             <div className="sidebar-heading-block">
@@ -953,6 +992,15 @@ export function Sidebar({
             <div className="sidebar-empty">No matching columns</div>
           )}
         </div>
+      )}
+
+      {!documentWorkspaceActive && activeLoadedTable && schema.length > 0 && sidebarView === "overview" && (
+        <DatasetOverviewPanel
+          table={activeLoadedTable}
+          schema={schema}
+          onGetOverview={onGetDatasetOverview}
+          onGetTopValues={onGetOverviewTopValues}
+        />
       )}
 
       {/* Data operation + filter buttons */}
