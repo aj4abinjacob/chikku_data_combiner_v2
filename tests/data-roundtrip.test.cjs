@@ -20,6 +20,7 @@ const { formatCell } = require("../.test-dist/components/DataGrid.js");
 const { mergeFilterListValues } = require("../.test-dist/utils/filterValues.js");
 const { compareExactNumericValues } = require("../.test-dist/utils/numericCompare.js");
 const { pivotPathKey } = require("../.test-dist/utils/pivotPath.js");
+const { getLinkPreviewTarget } = require("../.test-dist/utils/linkPreview.js");
 
 test("timestamp IN values retain precision and offsets as typed literals", () => {
   const sql = buildFilterClause({
@@ -241,4 +242,50 @@ test("pivot path keys do not confuse nulls or path punctuation with state syntax
       { column: "b", value: "y" },
     ])
   );
+});
+
+test("public HTTPS links keep their full URL for sandboxed previews", () => {
+  assert.deepEqual(
+    getLinkPreviewTarget("https://example.com/articles?id=42#details"),
+    { url: "https://example.com/articles?id=42#details", hostname: "example.com" }
+  );
+  assert.deepEqual(
+    getLinkPreviewTarget("https://docs.google.com/spreadsheets/d/sheet_ID-123/edit?usp=sharing#gid=456"),
+    {
+      url: "https://docs.google.com/spreadsheets/d/sheet_ID-123/preview?gid=456",
+      hostname: "docs.google.com",
+    }
+  );
+});
+
+test("link previews reject unsafe schemes, credentials, and ports", () => {
+  const rejected = [
+    "http://example.com/page",
+    "https://example.com:444/page",
+    "https://user:secret@example.com/page",
+    "javascript:alert(1)",
+    "data:text/html,hello",
+  ];
+
+  for (const url of rejected) assert.equal(getLinkPreviewTarget(url), null, url);
+});
+
+test("link previews reject local and private-network targets", () => {
+  const rejected = [
+    "https://localhost/admin",
+    "https://service.localhost/admin",
+    "https://router.local/admin",
+    "https://service.internal/admin",
+    "https://intranet/admin",
+    "https://127.0.0.1/admin",
+    "https://2130706433/admin",
+    "https://10.0.0.1/admin",
+    "https://100.64.0.1/admin",
+    "https://169.254.169.254/latest/meta-data/",
+    "https://172.16.0.1/admin",
+    "https://192.168.0.1/admin",
+    "https://[::1]/admin",
+  ];
+
+  for (const url of rejected) assert.equal(getLinkPreviewTarget(url), null, url);
 });

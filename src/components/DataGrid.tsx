@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button, ButtonGroup, Icon } from "@blueprintjs/core";
 import { Popover2 } from "@blueprintjs/popover2";
 import { SoftSelect } from "./SoftSelect";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, PivotAggFunction, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy, QcSession, INTERNAL_ROW_ID_VALUE } from "../types";
+import { getLinkPreviewTarget } from "../utils/linkPreview";
 
 const TOOLTIP_DELAY = 600; // ms before tooltip appears
 
@@ -2698,7 +2700,20 @@ function isPrecisionSensitiveNumber(value: string): boolean {
 // URL regex for detecting links in tooltip text
 const URL_RE = /https?:\/\/[^\s<>"'`,;)}\]]+/g;
 
+const LINK_PREVIEW_WIDTH = 480;
+const LINK_PREVIEW_HEIGHT = 320;
+const LINK_PREVIEW_MARGIN = 8;
+const LINK_PREVIEW_GAP = 10;
+
+interface LinkPreviewState {
+  src: string;
+  hostname: string;
+  left: number;
+  top: number;
+}
+
 function TooltipContent({ text }: { text: string }): React.ReactElement {
+  const [preview, setPreview] = useState<LinkPreviewState | null>(null);
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -2708,11 +2723,32 @@ function TooltipContent({ text }: { text: string }): React.ReactElement {
       parts.push(text.slice(lastIndex, match.index));
     }
     const url = match[0];
+    const previewTarget = getLinkPreviewTarget(url);
+    const showPreview = (element: HTMLAnchorElement) => {
+      if (!previewTarget) return;
+      const rect = element.getBoundingClientRect();
+      const availableWidth = Math.min(LINK_PREVIEW_WIDTH, window.innerWidth - LINK_PREVIEW_MARGIN * 2);
+      const availableHeight = Math.min(LINK_PREVIEW_HEIGHT, window.innerHeight - LINK_PREVIEW_MARGIN * 2);
+      const preferredLeft = rect.right + LINK_PREVIEW_GAP;
+      const fallbackLeft = rect.left - availableWidth - LINK_PREVIEW_GAP;
+      const left = preferredLeft + availableWidth <= window.innerWidth - LINK_PREVIEW_MARGIN
+        ? preferredLeft
+        : Math.max(LINK_PREVIEW_MARGIN, fallbackLeft);
+      const top = Math.min(
+        Math.max(LINK_PREVIEW_MARGIN, rect.top - 36),
+        Math.max(LINK_PREVIEW_MARGIN, window.innerHeight - availableHeight - LINK_PREVIEW_MARGIN)
+      );
+      setPreview({ src: previewTarget.url, hostname: previewTarget.hostname, left, top });
+    };
     parts.push(
       <a
         key={match.index}
         className="dg-tooltip-link"
         href="#"
+        onMouseEnter={(event) => showPreview(event.currentTarget)}
+        onMouseLeave={() => setPreview(null)}
+        onFocus={(event) => showPreview(event.currentTarget)}
+        onBlur={() => setPreview(null)}
         onClick={(e) => {
           e.preventDefault();
           (window as any).api.openExternal(url);
@@ -2726,5 +2762,32 @@ function TooltipContent({ text }: { text: string }): React.ReactElement {
   if (lastIndex < text.length) {
     parts.push(text.slice(lastIndex));
   }
-  return <>{parts}</>;
+  return (
+    <>
+      {parts}
+      {preview && createPortal(
+        <div
+          className="dg-link-preview"
+          style={{ left: preview.left, top: preview.top }}
+          aria-hidden="true"
+        >
+          <div className="dg-link-preview-header">
+            <Icon icon="link" size={13} />
+            <span className="dg-link-preview-hostname">{preview.hostname}</span>
+            <span className="dg-link-preview-safety">Sandboxed preview</span>
+          </div>
+          <iframe
+            src={preview.src}
+            title={`Link preview for ${preview.hostname}`}
+            sandbox="allow-scripts allow-same-origin"
+            referrerPolicy="no-referrer"
+            allow="autoplay 'none'; camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; fullscreen 'none'; payment 'none'"
+            loading="lazy"
+            tabIndex={-1}
+          />
+        </div>,
+        document.body
+      )}
+    </>
+  );
 }
