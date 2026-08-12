@@ -176,6 +176,7 @@ export function DataGrid({
   const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tooltipDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tooltipHovered = useRef(false);
+  const tooltipFocused = useRef(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
   const [tooltipFlipped, setTooltipFlipped] = useState(false);
@@ -358,7 +359,7 @@ export function DataGrid({
     clearDismissTimer();
     tooltipDismissTimer.current = setTimeout(() => {
       // Don't dismiss if user is hovering the tooltip or has text selected in it
-      if (tooltipHovered.current || hasTooltipSelection()) return;
+      if (tooltipHovered.current || tooltipFocused.current || hasTooltipSelection()) return;
       setTooltip(null);
       setCellLinkPreview(null);
       setCopied(false);
@@ -421,6 +422,17 @@ export function DataGrid({
       scheduleDismiss(150);
     }
   }, [hasTooltipSelection, scheduleDismiss]);
+
+  const handleTooltipFocus = useCallback(() => {
+    tooltipFocused.current = true;
+    clearDismissTimer();
+  }, [clearDismissTimer]);
+
+  const handleTooltipBlur = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+    if (event.relatedTarget && event.currentTarget.contains(event.relatedTarget as Node)) return;
+    tooltipFocused.current = false;
+    scheduleDismiss(150);
+  }, [scheduleDismiss]);
 
   const handleCopyTooltip = useCallback(() => {
     if (!tooltip) return;
@@ -1760,7 +1772,13 @@ export function DataGrid({
         </div>
       )}
       {cellLinkPreview && createPortal(
-        <LinkPreviewCard preview={cellLinkPreview} />,
+        <LinkPreviewCard
+          preview={cellLinkPreview}
+          onMouseEnter={handleTooltipMouseEnter}
+          onMouseLeave={handleTooltipMouseLeave}
+          onFocus={handleTooltipFocus}
+          onBlur={handleTooltipBlur}
+        />,
         document.body
       )}
     </div>
@@ -2772,12 +2790,28 @@ function getLinkPreviewPosition(rect: DOMRect): Pick<LinkPreviewState, "left" | 
   return { left, top };
 }
 
-function LinkPreviewCard({ preview }: { preview: LinkPreviewState }): React.ReactElement {
+interface LinkPreviewCardProps {
+  preview: LinkPreviewState;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+  onFocus?: () => void;
+  onBlur?: React.FocusEventHandler<HTMLDivElement>;
+}
+
+function LinkPreviewCard({
+  preview,
+  onMouseEnter,
+  onMouseLeave,
+  onFocus,
+  onBlur,
+}: LinkPreviewCardProps): React.ReactElement {
   const [loadState, setLoadState] = useState<LinkPreviewLoadState>({ status: "loading" });
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
 
   useEffect(() => {
     let active = true;
     setLoadState({ status: "loading" });
+    setCopyState("idle");
     requestLinkPreview(preview.url)
       .then((metadata) => {
         if (active) setLoadState({ status: "ready", metadata });
@@ -2794,12 +2828,26 @@ function LinkPreviewCard({ preview }: { preview: LinkPreviewState }): React.Reac
   const hostname = metadata?.hostname || preview.hostname;
   const hasImage = !!metadata?.imageDataUrl;
 
+  const copyUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(preview.url);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 1500);
+    } catch {
+      setCopyState("error");
+    }
+  };
+
   return (
     <div
       className={`dg-link-preview${hasImage ? " has-image" : ""}`}
       style={{ left: preview.left, top: preview.top }}
-      role="tooltip"
+      role="dialog"
       aria-label={`Link preview for ${hostname}`}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      onFocus={onFocus}
+      onBlur={onBlur}
     >
       <div className="dg-link-preview-heading">
         <span className="dg-link-preview-favicon">
@@ -2815,10 +2863,32 @@ function LinkPreviewCard({ preview }: { preview: LinkPreviewState }): React.Reac
           </span>
           <span className="dg-link-preview-hostname">{hostname}</span>
         </span>
-        <span className="dg-link-preview-safe" title="Fetched without page scripts or cookies">
-          <Icon icon="shield" size={13} />
+        <span className="dg-link-preview-actions">
+          <button
+            type="button"
+            className={`dg-link-preview-action${copyState === "copied" ? " copied" : ""}${copyState === "error" ? " error" : ""}`}
+            onClick={() => void copyUrl()}
+            aria-label={copyState === "copied" ? "URL copied" : copyState === "error" ? "Copy failed" : "Copy full URL"}
+            title={copyState === "copied" ? "Copied" : copyState === "error" ? "Copy failed" : "Copy full URL"}
+          >
+            <Icon icon={copyState === "copied" ? "tick" : copyState === "error" ? "warning-sign" : "clipboard"} size={13} />
+          </button>
+          <button
+            type="button"
+            className="dg-link-preview-action"
+            onClick={() => void window.api.openExternal(preview.url)}
+            aria-label="Open full URL in browser"
+            title="Open full URL in browser"
+          >
+            <Icon icon="share" size={13} />
+          </button>
+          <span className="dg-link-preview-safe" title="Fetched without page scripts or cookies">
+            <Icon icon="shield" size={13} />
+          </span>
         </span>
       </div>
+
+      <div className="dg-link-preview-url" title={preview.url}>{preview.url}</div>
 
       {loadState.status === "loading" && (
         <div className="dg-link-preview-loading" aria-hidden="true">
