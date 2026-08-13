@@ -6,7 +6,7 @@ import {
   Icon,
   Intent,
 } from "@blueprintjs/core";
-import { Tooltip2 } from "@blueprintjs/popover2";
+import { Popover2, PopupKind, Tooltip2 } from "@blueprintjs/popover2";
 import { LoadedTable, ColumnInfo, SortColumn, PivotViewConfig, DocumentWorkspaceFileActions, DatasetOverview, ColumnStatsTopValue } from "../types";
 import { DataOperationsDialog } from "./DataOperationsDialog";
 import { AggregateDialog } from "./AggregateDialog";
@@ -67,6 +67,7 @@ type FileListIcon = {
 const FILE_CONTEXT_MENU_WIDTH = 168;
 const FILE_CONTEXT_MENU_HEIGHT = 36;
 const FILE_CONTEXT_MENU_MARGIN = 8;
+const FILE_PATH_HOVER_DELAY = 700;
 
 function getFileExtension(filePath: string): string {
   return filePath.split(".").pop()?.toLowerCase() || "";
@@ -114,6 +115,53 @@ function getFileListLabel(table: LoadedTable): string {
     return table.filePath.split(/[/\\]/).pop() || table.tableName;
   }
   return table.tableName;
+}
+
+function FilePathDialog({ table }: { table: LoadedTable }): React.ReactElement {
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
+  const copyStatusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (copyStatusTimerRef.current) clearTimeout(copyStatusTimerRef.current);
+  }, []);
+
+  const copyFilePath = async () => {
+    if (copyStatusTimerRef.current) clearTimeout(copyStatusTimerRef.current);
+    try {
+      await navigator.clipboard.writeText(table.filePath);
+      setCopyStatus("copied");
+    } catch (err) {
+      console.warn("Failed to copy file path:", err);
+      setCopyStatus("error");
+    }
+    copyStatusTimerRef.current = setTimeout(() => {
+      setCopyStatus("idle");
+      copyStatusTimerRef.current = null;
+    }, 1600);
+  };
+
+  return (
+    <div className="file-path-dialog" role="dialog" aria-label={`Full path for ${table.tableName}`}>
+      <div className="file-path-dialog-heading">
+        <Icon icon="path" size={13} />
+        <span>Full path</span>
+      </div>
+      <div className="file-path-dialog-path" title={table.filePath}>
+        {table.filePath}
+      </div>
+      <button
+        type="button"
+        className={`file-path-dialog-copy${copyStatus === "copied" ? " copied" : ""}${copyStatus === "error" ? " error" : ""}`}
+        onClick={() => {
+          void copyFilePath();
+        }}
+        aria-live="polite"
+      >
+        <Icon icon={copyStatus === "copied" ? "tick" : copyStatus === "error" ? "warning-sign" : "clipboard"} size={12} />
+        <span>{copyStatus === "copied" ? "Copied" : copyStatus === "error" ? "Copy failed" : "Copy path"}</span>
+      </button>
+    </div>
+  );
 }
 
 function getDocumentExportDisabledReason(actions: DocumentWorkspaceFileActions): string | null {
@@ -595,51 +643,68 @@ export function Sidebar({
           );
 
           return (
-            <div
+            <Popover2
               key={t.tableName}
-              className={`table-list-item${t.tableName === activeTable ? " active" : ""}${selectedForCombine.has(t.tableName) ? " selected" : ""}`}
-              onContextMenu={(event) => openFileContextMenu(event, t)}
-            >
-              {tables.length >= 2 && (
-                rowCombineSelectionDisabledReason ? (
-                  <Tooltip2
-                    content={rowCombineSelectionDisabledReason}
-                    placement="top"
-                    minimal
-                    compact
+              content={<FilePathDialog table={t} />}
+              disabled={t.filePath.startsWith("(")}
+              interactionKind="hover"
+              hoverOpenDelay={FILE_PATH_HOVER_DELAY}
+              hoverCloseDelay={200}
+              placement="right-start"
+              popupKind={PopupKind.DIALOG}
+              popoverClassName="file-path-popover"
+              renderTarget={({ isOpen: _isOpen, ref, ...targetProps }) => (
+                <div
+                  {...targetProps}
+                  ref={ref}
+                  className={`table-list-item${t.tableName === activeTable ? " active" : ""}${selectedForCombine.has(t.tableName) ? " selected" : ""}${targetProps.className ? ` ${targetProps.className}` : ""}`}
+                  onContextMenu={(event) => {
+                    openFileContextMenu(event, t);
+                    targetProps.onContextMenu?.(event);
+                  }}
+                >
+                  {tables.length >= 2 && (
+                    rowCombineSelectionDisabledReason ? (
+                      <Tooltip2
+                        content={rowCombineSelectionDisabledReason}
+                        placement="top"
+                        minimal
+                        compact
+                      >
+                        <span className="table-combine-checkbox-tooltip">
+                          {combineCheckbox}
+                        </span>
+                      </Tooltip2>
+                    ) : combineCheckbox
+                  )}
+                  <span
+                    className="table-main"
+                    onClick={() => onSelectTable(t.tableName)}
+                    title={t.filePath.startsWith("(") ? fileLabel : undefined}
                   >
-                    <span className="table-combine-checkbox-tooltip">
-                      {combineCheckbox}
+                    <span className={`table-icon ${fileIcon.className}`}>
+                      <Icon icon={fileIcon.icon} size={12} />
                     </span>
-                  </Tooltip2>
-                ) : combineCheckbox
-              )}
-              <span
-                className="table-main"
-                onClick={() => onSelectTable(t.tableName)}
-                title={fileLabel}
-              >
-                <span className={`table-icon ${fileIcon.className}`}>
-                  <Icon icon={fileIcon.icon} size={12} />
-                </span>
-                <span className="table-text">
-                  <span className="table-name">{fileLabel}</span>
-                  <span className="row-count">
-                    {getFileMetricLabel(t)}
+                    <span className="table-text">
+                      <span className="table-name">{fileLabel}</span>
+                      <span className="row-count">
+                        {getFileMetricLabel(t)}
+                      </span>
+                    </span>
                   </span>
-                </span>
-              </span>
-              <Button
-                icon="cross"
-                minimal
-                small
-                className="table-delete-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setDeleteTarget(t.tableName);
-                }}
-              />
-            </div>
+                  <Button
+                    icon="cross"
+                    minimal
+                    small
+                    className="table-delete-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteTarget(t.tableName);
+                    }}
+                  />
+                </div>
+              )}
+            />
           );
         })}
       </div>

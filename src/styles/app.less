@@ -2703,6 +2703,83 @@ html, body, #root {
   }
 }
 
+.file-path-popover {
+  .bp4-popover2-content {
+    border-radius: 7px;
+  }
+
+  .file-path-dialog {
+    width: min(380px, calc(100vw - 16px));
+    padding: 10px;
+    border-radius: 7px;
+    background: #fff;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  .file-path-dialog-heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 7px;
+    color: #5c7080;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .file-path-dialog-path {
+    max-height: 72px;
+    overflow: auto;
+    color: #182026;
+    font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
+  .file-path-dialog-copy {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 26px;
+    margin-top: 9px;
+    padding: 0 9px;
+    border: 1px solid #bfccd6;
+    border-radius: var(--control-radius);
+    background: #f7f9fb;
+    color: #30404d;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+
+    &:hover,
+    &:focus-visible {
+      outline: none;
+      border-color: rgba(19, 124, 189, 0.45);
+      background: #eef7ff;
+      color: #106ba3;
+    }
+
+    &.copied {
+      border-color: rgba(15, 118, 110, 0.32);
+      background: #e7f5f2;
+      color: #0f766e;
+    }
+
+    &.error {
+      border-color: rgba(194, 48, 48, 0.3);
+      background: #fff1f1;
+      color: #c23030;
+    }
+  }
+}
+
 .dataset-overview-column-popover .soft-select-popover {
   max-height: 260px;
 }
@@ -14477,6 +14554,46 @@ button.dg-stats-metric {
 @dark-error: #f97066;
 @dark-error-bg: rgba(249, 112, 102, 0.14);
 @dark-error-border: rgba(249, 112, 102, 0.28);
+
+.file-path-popover.bp4-dark {
+  .file-path-dialog {
+    background: @dark-bg-3;
+  }
+
+  .file-path-dialog-heading {
+    color: @dark-text-3;
+  }
+
+  .file-path-dialog-path {
+    color: @dark-text-1;
+  }
+
+  .file-path-dialog-copy {
+    border-color: @dark-border-1;
+    background: @dark-bg-4;
+    color: @dark-text-2;
+
+    &:hover,
+    &:focus-visible {
+      border-color: @dark-accent-border;
+      background: @dark-accent-bg-subtle;
+      color: @dark-accent;
+    }
+
+    &.copied {
+      border-color: @dark-success-border;
+      background: @dark-success-bg;
+      color: @dark-success;
+    }
+
+    &.error {
+      border-color: @dark-error-border;
+      background: @dark-error-bg;
+      color: @dark-error;
+    }
+  }
+}
+
 // Root background
 html.dark-theme,
 html.dark-theme body,
