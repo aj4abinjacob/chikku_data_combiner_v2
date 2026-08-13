@@ -32,6 +32,7 @@ const DEFAULT_TABLE_FONT_SIZE = 13;
 const MIN_TABLE_FONT_SIZE = 11;
 const MAX_TABLE_FONT_SIZE = 24;
 const SUPPORTED_DATA_EXTENSIONS = new Set(["csv", "tsv", "json", "jsonl", "ndjson", "md", "markdown", "parquet", "xlsx", "xls"]);
+const LINK_PREVIEWS_STORAGE_KEY = "linkPreviewsEnabled";
 
 function makeTableName(filePath: string): string {
   const name = filePath.split(/[/\\]/).pop() || "table";
@@ -512,6 +513,9 @@ export function App(): React.ReactElement {
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [helpCenterOpen, setHelpCenterOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("theme") === "dark");
+  const [linkPreviewsEnabled, setLinkPreviewsEnabled] = useState(
+    () => localStorage.getItem(LINK_PREVIEWS_STORAGE_KEY) !== "false"
+  );
   const [displayDecimalPlaces, setDisplayDecimalPlaces] = useState(() => {
     const storedValue = localStorage.getItem("displayDecimalPlaces");
     if (storedValue !== null) {
@@ -1282,6 +1286,10 @@ export function App(): React.ReactElement {
       setDarkMode(isDark);
       localStorage.setItem("theme", isDark ? "dark" : "light");
     });
+    window.api.onSetLinkPreviewsEnabled((enabled) => {
+      setLinkPreviewsEnabled(enabled);
+      localStorage.setItem(LINK_PREVIEWS_STORAGE_KEY, String(enabled));
+    });
     window.api.onRequestQuit(() => {
       quitEntireAppRef.current = true;
       if (qcDirtyTablesRef.current.size === 0) {
@@ -1377,6 +1385,14 @@ export function App(): React.ReactElement {
     document.documentElement.classList.toggle("dark-theme", darkMode);
     window.api.syncTheme(darkMode);
   }, [darkMode]);
+
+  useEffect(() => {
+    localStorage.setItem(LINK_PREVIEWS_STORAGE_KEY, String(linkPreviewsEnabled));
+    if (!isTauri()) return;
+    void window.api
+      .syncLinkPreviewsEnabled(linkPreviewsEnabled)
+      .catch((err) => console.warn("Failed to sync live link preview setting", err));
+  }, [linkPreviewsEnabled]);
 
   useEffect(() => {
     localStorage.setItem("displayDecimalPlaces", String(displayDecimalPlaces));
@@ -3268,6 +3284,7 @@ export function App(): React.ReactElement {
                       ? (pivotQueryError ? { scope: "pivot", message: pivotQueryError } : null)
                       : chunkQueryError}
                     onQueryRetry={pivotActive ? retryPivotQuery : retryChunkQuery}
+                    linkPreviewsEnabled={linkPreviewsEnabled}
                   />
                   {filterPanelMounted && (
                     <FilterPanel

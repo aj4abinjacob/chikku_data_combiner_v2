@@ -5,7 +5,7 @@ import { Popover2 } from "@blueprintjs/popover2";
 import { SoftSelect } from "./SoftSelect";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { SortColumn, PivotFlatRow, PivotGroupColumn, PivotGroupSortMode, PivotAggFunction, ColumnStats, ColumnStatsUniqueValue, ColOpStep, ColOpType, UndoStrategy, QcSession, INTERNAL_ROW_ID_VALUE, LinkPreviewMetadata } from "../types";
-import { getLinkPreviewTarget } from "../utils/linkPreview";
+import { getEnabledLinkPreviewTarget } from "../utils/linkPreview";
 
 const TOOLTIP_DELAY = 600; // ms before tooltip appears
 
@@ -115,6 +115,7 @@ interface DataGridProps {
   queryStatus?: "idle" | "loading" | "ready" | "error";
   queryError?: { scope: "count" | "chunk" | "pivot"; message: string } | null;
   onQueryRetry?: () => void;
+  linkPreviewsEnabled?: boolean;
 }
 
 export function DataGrid({
@@ -159,6 +160,7 @@ export function DataGrid({
   queryStatus,
   queryError,
   onQueryRetry,
+  linkPreviewsEnabled = true,
 }: DataGridProps): React.ReactElement {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const anchor = useRef<{ row: number; col: string } | null>(null);
@@ -182,6 +184,16 @@ export function DataGrid({
   const [tooltipFlipped, setTooltipFlipped] = useState(false);
   const [columnDisplayFormats, setColumnDisplayFormats] = useState<Record<string, ColumnDisplayFormat>>({});
   const [previewColumnFormat, setPreviewColumnFormat] = useState<{ column: string; format: ColumnDisplayFormat } | null>(null);
+
+  useEffect(() => {
+    if (!linkPreviewsEnabled) {
+      if (tooltipTimer.current) {
+        clearTimeout(tooltipTimer.current);
+        tooltipTimer.current = null;
+      }
+      setCellLinkPreview(null);
+    }
+  }, [linkPreviewsEnabled]);
 
   // ── Column stats rail state ──
   const [columnStatsPanel, setColumnStatsPanel] = useState<ColumnStatsPanelState | null>(null);
@@ -372,7 +384,7 @@ export function DataGrid({
       // Cancel any pending dismiss when entering a new cell
       clearDismissTimer();
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const previewTarget = getLinkPreviewTarget(value);
+      const previewTarget = getEnabledLinkPreviewTarget(value, linkPreviewsEnabled);
       setCellLinkPreview(null);
       tooltipTimer.current = setTimeout(() => {
         tooltipTimer.current = null;
@@ -393,7 +405,7 @@ export function DataGrid({
         }
       }, TOOLTIP_DELAY);
     },
-    [clearDismissTimer]
+    [clearDismissTimer, linkPreviewsEnabled]
   );
 
   const handleCellMouseLeave = useCallback(() => {
@@ -1760,7 +1772,7 @@ export function DataGrid({
           onMouseLeave={handleTooltipMouseLeave}
         >
           <div className="dg-tooltip-body">
-            <TooltipContent text={tooltip.text} />
+            <TooltipContent text={tooltip.text} linkPreviewsEnabled={linkPreviewsEnabled} />
           </div>
           <button
             className={`dg-tooltip-copy${copied ? " copied" : ""}`}
@@ -2923,8 +2935,17 @@ function LinkPreviewCard({
   );
 }
 
-function TooltipContent({ text }: { text: string }): React.ReactElement {
+function TooltipContent({
+  text,
+  linkPreviewsEnabled,
+}: {
+  text: string;
+  linkPreviewsEnabled: boolean;
+}): React.ReactElement {
   const [preview, setPreview] = useState<LinkPreviewState | null>(null);
+  useEffect(() => {
+    if (!linkPreviewsEnabled) setPreview(null);
+  }, [linkPreviewsEnabled]);
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -2934,7 +2955,7 @@ function TooltipContent({ text }: { text: string }): React.ReactElement {
       parts.push(text.slice(lastIndex, match.index));
     }
     const url = match[0];
-    const previewTarget = getLinkPreviewTarget(url);
+    const previewTarget = getEnabledLinkPreviewTarget(url, linkPreviewsEnabled);
     const showPreview = (element: HTMLAnchorElement) => {
       if (!previewTarget) return;
       const rect = element.getBoundingClientRect();
@@ -2965,7 +2986,7 @@ function TooltipContent({ text }: { text: string }): React.ReactElement {
   return (
     <>
       {parts}
-      {preview && createPortal(
+      {linkPreviewsEnabled && preview && createPortal(
         <LinkPreviewCard preview={preview} />,
         document.body
       )}

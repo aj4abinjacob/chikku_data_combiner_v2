@@ -200,6 +200,10 @@ function installTauriApi() {
       listen<boolean>("set-dark-mode", (e) => callback(e.payload));
     },
 
+    onSetLinkPreviewsEnabled: (callback: (enabled: boolean) => void) => {
+      listen<boolean>("set-link-previews-enabled", (e) => callback(e.payload));
+    },
+
     onRequestQuit: (callback: () => void) => {
       listen("request-quit", () => callback());
     },
@@ -211,6 +215,9 @@ function installTauriApi() {
     syncTheme: (_isDark: boolean) => {
       // Native menu sync is not wired in this scaffold pass; intentionally no-op.
     },
+
+    syncLinkPreviewsEnabled: (enabled: boolean) =>
+      invoke<boolean>("sync_link_previews_enabled", { enabled }),
 
     getAppVersion: () => invoke("get_app_version"),
 

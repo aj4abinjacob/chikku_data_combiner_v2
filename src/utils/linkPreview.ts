@@ -76,3 +76,10 @@ export function getLinkPreviewTarget(value: string): LinkPreviewTarget | null {
 
   return { url: url.href, hostname };
 }
+
+export function getEnabledLinkPreviewTarget(
+  value: string,
+  enabled: boolean
+): LinkPreviewTarget | null {
+  return enabled ? getLinkPreviewTarget(value) : null;
+}

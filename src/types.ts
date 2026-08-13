@@ -39,10 +39,12 @@ export interface DbApi {
   onExportCSV: (callback: () => void) => void;
   onCheckForUpdates: (callback: () => void) => void;
   onSetDarkMode: (callback: (isDark: boolean) => void) => void;
+  onSetLinkPreviewsEnabled: (callback: (enabled: boolean) => void) => void;
   onRequestQuit: (callback: () => void) => void;
   setQcDirty: (dirty: boolean) => Promise<void>;
   requestAppQuit: () => Promise<void>;
   syncTheme: (isDark: boolean) => void;
+  syncLinkPreviewsEnabled: (enabled: boolean) => Promise<boolean>;
   getAppVersion: () => Promise<string>;
   checkForUpdate: () => Promise<AppUpdateInfo | null>;
   claimUpdateNotice: (version: string) => Promise<boolean>;

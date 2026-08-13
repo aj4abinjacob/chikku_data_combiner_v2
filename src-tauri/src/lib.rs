@@ -12,7 +12,7 @@ use app_updates::*;
 use commands::*;
 use db::DbState;
 use link_preview::*;
-use menu::MenuState;
+use menu::{sync_link_previews_enabled, MenuState};
 use parking_lot::Mutex;
 use patterns::PatternState;
 use std::collections::HashSet;
@@ -116,6 +116,7 @@ pub fn run() {
             set_qc_dirty,
             request_app_quit,
             fetch_link_preview,
+            sync_link_previews_enabled,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

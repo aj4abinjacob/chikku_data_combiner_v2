@@ -52,7 +52,7 @@ const HELP_TOPICS: HelpTopic[] = [
     category: "Tabular data",
     summary: "Navigate large datasets, select cells, inspect columns, sort, and group.",
     icon: "panel-table",
-    keywords: ["grid", "columns", "copy", "stats", "sort", "group", "resize", "reorder"],
+    keywords: ["grid", "columns", "copy", "stats", "sort", "group", "resize", "reorder", "url", "link", "live preview"],
     sections: [
       {
         title: "Grid basics",
@@ -70,6 +70,10 @@ const HELP_TOPICS: HelpTopic[] = [
       {
         title: "Column profiles",
         body: "Select the chart icon in a grid header to inspect nulls, unique values, frequent values, numeric summaries, and text profiles. The profile rail also includes quick formatting and cleaning actions where supported.",
+      },
+      {
+        title: "Live link previews",
+        body: "Hover over a public HTTPS URL in the grid to open a safe metadata preview with its title, image, and description. To stop loading rich previews, open the View menu and uncheck Live Link Previews. The preference is remembered; URLs remain visible, copyable, and clickable when previews are off.",
       },
     ],
   },

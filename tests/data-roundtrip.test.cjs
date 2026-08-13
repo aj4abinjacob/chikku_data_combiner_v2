@@ -21,7 +21,7 @@ const { formatCell } = require("../.test-dist/components/DataGrid.js");
 const { mergeFilterListValues } = require("../.test-dist/utils/filterValues.js");
 const { compareExactNumericValues } = require("../.test-dist/utils/numericCompare.js");
 const { pivotPathKey } = require("../.test-dist/utils/pivotPath.js");
-const { getLinkPreviewTarget } = require("../.test-dist/utils/linkPreview.js");
+const { getEnabledLinkPreviewTarget, getLinkPreviewTarget } = require("../.test-dist/utils/linkPreview.js");
 
 test("timestamp IN values retain precision and offsets as typed literals", () => {
   const sql = buildFilterClause({
@@ -263,6 +263,15 @@ test("public HTTPS links keep their full URL for metadata previews", () => {
       url: "https://docs.google.com/spreadsheets/d/sheet_ID-123/edit?usp=sharing#gid=456",
       hostname: "docs.google.com",
     }
+  );
+});
+
+test("disabled live link previews never create a metadata preview target", () => {
+  const url = "https://example.com/product/42";
+  assert.equal(getEnabledLinkPreviewTarget(url, false), null);
+  assert.deepEqual(
+    getEnabledLinkPreviewTarget(url, true),
+    { url, hostname: "example.com" }
   );
 });
 

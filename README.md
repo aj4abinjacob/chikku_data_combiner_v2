@@ -11,6 +11,7 @@ A Tauri desktop app for viewing, combining, and transforming CSV/data files. Bui
 - **Pivot & Aggregate** — Build grouped, aggregate, pivot, lookup, and row-operation workflows
 - **Export** — Export filtered or combined results to CSV, TSV, JSON, Excel, or Parquet
 - **Cell Selection & Copy** — Select cells and copy as TSV
+- **Live Link Previews** — Hover public HTTPS URLs for safe metadata cards, or disable them from View → Live Link Previews
 - **In-App Help** — Searchable guidance for tabular, JSON, Markdown, multi-file, review, and export workflows
 
 ## Tech Stack
@@ -92,6 +93,12 @@ Each Tauri window owns its own in-memory DuckDB session. Files opened through th
 | Cmd+E / Ctrl+E | Export |
 | Cmd+C / Ctrl+C | Copy selected cells |
 | F1 | Open the in-app Help Center |
+
+## Live Link Previews
+
+Chikku can show a rich metadata card when you hover over a public HTTPS URL in the data grid. The preview fetches page metadata without running page scripts or using browser cookies.
+
+Use **View → Live Link Previews** to turn this behavior on or off. The setting is enabled by default and remembered across app launches. When disabled, URLs remain visible, copyable, and clickable, but Chikku does not request rich preview metadata.
 
 ## License
 
