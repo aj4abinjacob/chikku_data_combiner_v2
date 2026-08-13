@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   buildChunkQuery,
+  buildDatasetDuplicateRowsQuery,
   buildDatasetOverviewQuery,
   buildDistinctFilterValuesQuery,
   buildFilterClause,
@@ -130,7 +131,14 @@ test("dataset overview profiles missing and distinct values in one filtered quer
 
   assert.equal(
     sql,
-    'SELECT COUNT(*) AS row_count, SUM(CASE WHEN "customer""name" IS NULL OR TRIM(CAST("customer""name" AS VARCHAR)) = \'\' THEN 1 ELSE 0 END) AS missing_0, APPROX_COUNT_DISTINCT(CASE WHEN "customer""name" IS NOT NULL AND TRIM(CAST("customer""name" AS VARCHAR)) <> \'\' THEN "customer""name" ELSE NULL END) AS unique_0, SUM(CASE WHEN "amount" IS NULL THEN 1 ELSE 0 END) AS missing_1, APPROX_COUNT_DISTINCT("amount") AS unique_1 FROM "sales""data" WHERE "status" = \'open\''
+    'SELECT COUNT(*) AS row_count, SUM(CASE WHEN "customer""name" IS NULL OR TRIM(CAST("customer""name" AS VARCHAR)) = \'\' THEN 1 ELSE 0 END) AS missing_0, APPROX_COUNT_DISTINCT(CASE WHEN "customer""name" IS NOT NULL AND TRIM(CAST("customer""name" AS VARCHAR)) <> \'\' THEN "customer""name" ELSE NULL END) AS unique_0, CAST(MIN(CASE WHEN "customer""name" IS NOT NULL AND TRIM(CAST("customer""name" AS VARCHAR)) <> \'\' THEN "customer""name" ELSE NULL END) AS VARCHAR) AS min_0, CAST(MAX(CASE WHEN "customer""name" IS NOT NULL AND TRIM(CAST("customer""name" AS VARCHAR)) <> \'\' THEN "customer""name" ELSE NULL END) AS VARCHAR) AS max_0, SUM(CASE WHEN "amount" IS NULL THEN 1 ELSE 0 END) AS missing_1, APPROX_COUNT_DISTINCT("amount") AS unique_1, CAST(MIN("amount") AS VARCHAR) AS min_1, CAST(MAX("amount") AS VARCHAR) AS max_1 FROM "sales""data" WHERE "status" = \'open\''
+  );
+});
+
+test("dataset overview duplicate count reports rows beyond the first copy", () => {
+  assert.equal(
+    buildDatasetDuplicateRowsQuery('sales"data'),
+    'SELECT COALESCE(SUM(group_count - 1), 0) AS duplicate_rows FROM (\n    SELECT COUNT(*) AS group_count\n    FROM "sales""data"\n    GROUP BY ALL\n    HAVING COUNT(*) > 1\n  ) _duplicate_groups'
   );
 });
 

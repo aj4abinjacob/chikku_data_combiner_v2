@@ -19,7 +19,8 @@ use std::collections::HashSet;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, Window};
 use window_mgr::{
-    filter_supported, spawn_window, spawn_windows_for_files, take_pending_files, PendingFiles,
+    filter_supported, open_overview_window, spawn_window, spawn_windows_for_files,
+    take_overview_context, take_pending_files, PendingFiles, PendingOverviewContexts,
 };
 
 fn args_to_files(argv: &[String]) -> Vec<String> {
@@ -77,6 +78,7 @@ pub fn run() {
         .manage(UpdateState::default())
         .manage(PatternState::default())
         .manage(PendingFiles::default())
+        .manage(PendingOverviewContexts::default())
         .manage(MenuState::default())
         .manage(QcQuitState::default())
         .invoke_handler(tauri::generate_handler![
@@ -101,7 +103,9 @@ pub fn run() {
             write_binary_file,
             file_exists,
             open_new_window,
+            open_overview_window,
             close_db,
+            take_overview_context,
             take_pending_files,
             get_app_version,
             check_for_update,

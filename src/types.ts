@@ -32,6 +32,8 @@ export interface DbApi {
   writeTextFile: (filePath: string, contents: string) => Promise<boolean>;
   writeBinaryFile: (filePath: string, contents: Uint8Array) => Promise<boolean>;
   fileExists: (filePath: string) => Promise<boolean>;
+  openOverviewWindow: (tableName: string, displayName: string) => Promise<string>;
+  takeOverviewContext: () => Promise<OverviewWindowContext | null>;
   onOpenFiles: (callback: (filePaths: string[]) => void) => void;
   onAddFiles: (callback: (filePaths: string[]) => void) => void;
   onExportCSV: (callback: () => void) => void;
@@ -47,6 +49,11 @@ export interface DbApi {
   releaseUpdateNotice: (version: string) => Promise<boolean>;
   installUpdate: (onProgress: (event: UpdateDownloadEvent) => void) => Promise<void>;
   restartApp: () => Promise<void>;
+}
+
+export interface OverviewWindowContext {
+  tableName: string;
+  displayName: string;
 }
 
 export interface LinkPreviewMetadata {
@@ -120,6 +127,8 @@ export interface DatasetColumnOverview {
   columnType: string;
   missingCount: number;
   uniqueCount: number;
+  minValue?: string | null;
+  maxValue?: string | null;
 }
 
 export interface DatasetOverview {

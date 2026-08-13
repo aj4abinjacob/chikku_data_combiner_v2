@@ -700,6 +700,8 @@ export function App(): React.ReactElement {
         columnType: column.column_type,
         missingCount: toStatNumber(summary[`missing_${index}`]),
         uniqueCount: toStatNumber(summary[`unique_${index}`]),
+        minValue: summary[`min_${index}`] == null ? null : String(summary[`min_${index}`]),
+        maxValue: summary[`max_${index}`] == null ? null : String(summary[`max_${index}`]),
       })),
     };
   }, [activeTable, dataVersion, schema, tables, viewState.filters]);
@@ -723,6 +725,13 @@ export function App(): React.ReactElement {
       count: toStatNumber(row.count),
     }));
   }, [activeTable, columnTypes, dataVersion, viewState.filters]);
+
+  const handleOpenDatasetOverview = useCallback(() => {
+    if (!activeTable || !activeLoadedTable) return;
+    void window.api
+      .openOverviewWindow(activeTable, getDisplayFileName(activeLoadedTable))
+      .catch((err) => console.warn("Failed to open data overview", err));
+  }, [activeLoadedTable, activeTable]);
 
   // Chunk cache for lazy-loaded virtual scrolling (flat mode)
   const {
@@ -3127,6 +3136,7 @@ export function App(): React.ReactElement {
               onOpenFiles={handleChooseFiles}
               onOpenHelp={() => setHelpCenterOpen(true)}
               onHide={() => setSidebarVisible(false)}
+              onOpenOverview={handleOpenDatasetOverview}
               onGetDatasetOverview={handleGetDatasetOverview}
               onGetOverviewTopValues={handleGetOverviewTopValues}
               jsonWorkspaceActive={jsonWorkspaceActive}

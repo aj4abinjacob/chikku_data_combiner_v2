@@ -33,6 +33,21 @@ impl DbState {
         }
     }
 
+    pub fn share_for(&self, source_label: &str, target_label: &str) -> AppResult<()> {
+        let mut map = self.sessions.lock();
+        let connection = map
+            .get(source_label)
+            .cloned()
+            .ok_or_else(|| AppError::NoDb(source_label.to_string()))?;
+        map.insert(target_label.to_string(), connection);
+        log::info!(
+            "DuckDB session shared from window {} to {}",
+            source_label,
+            target_label
+        );
+        Ok(())
+    }
+
     pub fn get(&self, label: &str) -> AppResult<Arc<Mutex<Connection>>> {
         let map = self.sessions.lock();
         map.get(label)
@@ -361,6 +376,31 @@ pub fn query(conn: &Connection, sql: &str) -> AppResult<Vec<Value>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overview_window_can_share_the_parent_session_without_copying_data() {
+        let state = DbState::default();
+        let source = state.open_for("main").unwrap();
+        exec(
+            &source.lock(),
+            "CREATE TABLE active_data AS SELECT 42 AS value",
+        )
+        .unwrap();
+
+        state.share_for("main", "overview-1").unwrap();
+        let shared = state.get("overview-1").unwrap();
+        assert!(std::sync::Arc::ptr_eq(&source, &shared));
+        assert_eq!(
+            query(&shared.lock(), "SELECT value FROM active_data").unwrap()[0]["value"],
+            42
+        );
+
+        state.close_for("overview-1");
+        assert_eq!(
+            query(&source.lock(), "SELECT value FROM active_data").unwrap()[0]["value"],
+            42
+        );
+    }
 
     #[test]
     fn supplied_csv_timestamp_in_filter_round_trip() {

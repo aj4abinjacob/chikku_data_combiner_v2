@@ -9,7 +9,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
-import type { AppUpdateInfo, DbApi, LinkPreviewMetadata, UpdateDownloadEvent } from "./types";
+import type { AppUpdateInfo, DbApi, LinkPreviewMetadata, OverviewWindowContext, UpdateDownloadEvent } from "./types";
 
 interface RegexPattern {
   id: string;
@@ -167,6 +167,12 @@ function installTauriApi() {
       invoke<boolean>("write_binary_file", { filePath, bytes: Array.from(contents) }),
 
     fileExists: (filePath: string) => invoke("file_exists", { filePath }),
+
+    openOverviewWindow: (tableName: string, displayName: string) =>
+      invoke<string>("open_overview_window", { tableName, displayName }),
+
+    takeOverviewContext: () =>
+      invoke<OverviewWindowContext | null>("take_overview_context"),
 
     onOpenFiles: (callback: (filePaths: string[]) => void) => {
       listen<string[]>("open-files", (e) => callback(e.payload));

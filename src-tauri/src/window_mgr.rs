@@ -1,6 +1,7 @@
 use crate::db::DbState;
 use crate::error::{AppError, AppResult};
 use parking_lot::Mutex;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -54,7 +55,30 @@ impl PendingFiles {
     }
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverviewWindowContext {
+    pub table_name: String,
+    pub display_name: String,
+}
+
+#[derive(Default)]
+pub struct PendingOverviewContexts {
+    by_window: Mutex<HashMap<String, OverviewWindowContext>>,
+}
+
+impl PendingOverviewContexts {
+    fn insert(&self, label: &str, context: OverviewWindowContext) {
+        self.by_window.lock().insert(label.to_string(), context);
+    }
+
+    fn take(&self, label: &str) -> Option<OverviewWindowContext> {
+        self.by_window.lock().remove(label)
+    }
+}
+
 static WINDOW_COUNTER: AtomicU64 = AtomicU64::new(1);
+static OVERVIEW_WINDOW_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 fn label_for(n: u64) -> String {
     if n == 1 {
@@ -111,6 +135,55 @@ pub fn spawn_window(app: &AppHandle, files: Option<Vec<String>>) -> AppResult<St
     Ok(label)
 }
 
+fn spawn_overview_window(
+    app: &AppHandle,
+    source_label: &str,
+    db_state: &DbState,
+    contexts: &PendingOverviewContexts,
+    context: OverviewWindowContext,
+) -> AppResult<String> {
+    let window_id = OVERVIEW_WINDOW_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let label = format!("overview-{window_id}");
+    let title = format!("Data Overview - {}", context.display_name);
+
+    db_state.share_for(source_label, &label)?;
+    contexts.insert(&label, context);
+
+    let builder = WebviewWindowBuilder::new(
+        app,
+        &label,
+        WebviewUrl::App("index.html?view=overview".into()),
+    )
+    .title(title)
+    .inner_size(1420.0, 940.0)
+    .min_inner_size(960.0, 680.0)
+    .resizable(true)
+    .devtools(false);
+
+    let window = match builder.build() {
+        Ok(window) => window,
+        Err(err) => {
+            db_state.close_for(&label);
+            contexts.take(&label);
+            return Err(AppError::msg(format!("overview window build: {err}")));
+        }
+    };
+
+    let app_handle = app.clone();
+    let closed_label = label.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::Destroyed = event {
+            let dbs: tauri::State<'_, DbState> = app_handle.state();
+            dbs.close_for(&closed_label);
+            let pending: tauri::State<'_, PendingOverviewContexts> = app_handle.state();
+            pending.take(&closed_label);
+        }
+    });
+
+    let _ = window.set_focus();
+    Ok(label)
+}
+
 /// Open externally requested files as independent app sessions.
 pub fn spawn_windows_for_files(app: &AppHandle, files: Vec<String>) -> AppResult<Vec<String>> {
     let supported = filter_supported(files);
@@ -139,4 +212,33 @@ pub fn take_pending_files(
     state: tauri::State<'_, PendingFiles>,
 ) -> AppResult<Vec<String>> {
     Ok(state.take(window.label()))
+}
+
+#[tauri::command]
+pub fn open_overview_window(
+    window: tauri::Window,
+    app: AppHandle,
+    db_state: tauri::State<'_, DbState>,
+    contexts: tauri::State<'_, PendingOverviewContexts>,
+    table_name: String,
+    display_name: String,
+) -> AppResult<String> {
+    spawn_overview_window(
+        &app,
+        window.label(),
+        db_state.inner(),
+        contexts.inner(),
+        OverviewWindowContext {
+            table_name,
+            display_name,
+        },
+    )
+}
+
+#[tauri::command]
+pub fn take_overview_context(
+    window: tauri::Window,
+    contexts: tauri::State<'_, PendingOverviewContexts>,
+) -> AppResult<Option<OverviewWindowContext>> {
+    Ok(contexts.take(window.label()))
 }

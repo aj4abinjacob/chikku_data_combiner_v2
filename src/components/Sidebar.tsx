@@ -45,6 +45,7 @@ interface SidebarProps {
   onOpenFiles: () => void;
   onOpenHelp: () => void;
   onHide: () => void;
+  onOpenOverview: () => void;
   onGetDatasetOverview: () => Promise<DatasetOverview>;
   onGetOverviewTopValues: (column: string) => Promise<ColumnStatsTopValue[]>;
   jsonWorkspaceActive?: boolean;
@@ -158,6 +159,7 @@ export function Sidebar({
   onOpenFiles,
   onOpenHelp,
   onHide,
+  onOpenOverview,
   onGetDatasetOverview,
   onGetOverviewTopValues,
   jsonWorkspaceActive = false,
@@ -1073,6 +1075,13 @@ export function Sidebar({
             icon="history"
             text="History"
             onClick={onOpenHistory}
+            small
+          />
+          <Button
+            icon="dashboard"
+            text="Overview"
+            title="Open Data Overview"
+            onClick={onOpenOverview}
             small
           />
           <Button

@@ -389,6 +389,7 @@ export function buildDatasetOverviewQuery(
   columns.forEach((column, index) => {
     const col = escapeIdent(column.column_name);
     const isText = /^(VARCHAR|CHAR|BPCHAR|TEXT|STRING)(\(|$)/i.test(column.column_type.trim());
+    const supportsRange = /^(TINYINT|SMALLINT|INTEGER|INT|BIGINT|HUGEINT|UTINYINT|USMALLINT|UINTEGER|UBIGINT|FLOAT|REAL|DOUBLE|DECIMAL|NUMERIC|DATE|TIME|TIMESTAMP|INTERVAL|VARCHAR|CHAR|BPCHAR|TEXT|STRING|UUID|BOOLEAN)(\(|$)/i.test(column.column_type.trim());
     const presentValue = isText
       ? `CASE WHEN ${col} IS NOT NULL AND TRIM(CAST(${col} AS VARCHAR)) <> '' THEN ${col} ELSE NULL END`
       : col;
@@ -398,7 +399,9 @@ export function buildDatasetOverviewQuery(
 
     selects.push(
       `SUM(CASE WHEN ${missingCondition} THEN 1 ELSE 0 END) AS missing_${index}`,
-      `APPROX_COUNT_DISTINCT(${presentValue}) AS unique_${index}`
+      `APPROX_COUNT_DISTINCT(${presentValue}) AS unique_${index}`,
+      supportsRange ? `CAST(MIN(${presentValue}) AS VARCHAR) AS min_${index}` : `NULL AS min_${index}`,
+      supportsRange ? `CAST(MAX(${presentValue}) AS VARCHAR) AS max_${index}` : `NULL AS max_${index}`
     );
   });
 
@@ -406,6 +409,16 @@ export function buildDatasetOverviewQuery(
   const whereClause = buildFilterGroupClause(filters);
   if (whereClause) sql += ` WHERE ${whereClause}`;
   return sql;
+}
+
+export function buildDatasetDuplicateRowsQuery(tableName: string): string {
+  const table = escapeIdent(tableName);
+  return `SELECT COALESCE(SUM(group_count - 1), 0) AS duplicate_rows FROM (
+    SELECT COUNT(*) AS group_count
+    FROM ${table}
+    GROUP BY ALL
+    HAVING COUNT(*) > 1
+  ) _duplicate_groups`;
 }
 
 export function buildColumnTopValuesQuery(

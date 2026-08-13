@@ -13,9 +13,12 @@ interface SearchableColumnSelectProps {
   showType?: boolean;
   fill?: boolean;
   className?: string;
+  id?: string;
   allowEmpty?: boolean;
   emptyLabel?: string;
+  triggerPrefix?: string;
   disabled?: boolean;
+  "aria-label"?: string;
 }
 
 function getColumnLabel(column: ColumnInfo): string {
@@ -31,9 +34,12 @@ export function SearchableColumnSelect({
   showType = false,
   fill = false,
   className = "",
+  id,
   allowEmpty = false,
   emptyLabel = "— None —",
+  triggerPrefix = "",
   disabled = false,
+  "aria-label": ariaLabel,
 }: SearchableColumnSelectProps): React.ReactElement {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -80,7 +86,8 @@ export function SearchableColumnSelect({
   // Build selectable items list (with optional empty item at top)
   const items = React.useMemo(() => {
     const list: { value: string; label: string; type?: string }[] = [];
-    if (allowEmpty) {
+    const normalizedSearch = search.trim().toLowerCase();
+    if (allowEmpty && (!normalizedSearch || emptyLabel.toLowerCase().includes(normalizedSearch))) {
       list.push({ value: "", label: emptyLabel });
     }
     for (const col of filteredColumns) {
@@ -91,7 +98,7 @@ export function SearchableColumnSelect({
       });
     }
     return list;
-  }, [filteredColumns, allowEmpty, emptyLabel, showType]);
+  }, [filteredColumns, allowEmpty, emptyLabel, search, showType]);
 
   const handleSelect = useCallback(
     (val: string) => {
@@ -149,6 +156,7 @@ export function SearchableColumnSelect({
       ? getColumnLabel(selectedCol)
       : value
     : "";
+  const triggerText = displayText ? `${triggerPrefix}${displayText}` : "";
 
   const popoverContent = (
     <div
@@ -222,6 +230,7 @@ export function SearchableColumnSelect({
       matchTargetWidth={fill}
     >
       <button
+        id={id}
         type="button"
         className={`col-select-trigger ${fill ? "col-select-trigger-fill" : ""} ${className}`}
         onClick={() => {
@@ -231,12 +240,13 @@ export function SearchableColumnSelect({
         onKeyDown={handleTriggerKeyDown}
         disabled={disabled}
         aria-haspopup="listbox"
+        aria-label={ariaLabel}
         aria-expanded={isOpen}
         aria-controls={isOpen ? listId : undefined}
       >
         {leftIcon && <Icon icon={leftIcon} iconSize={13} className="col-select-trigger-left-icon" />}
-        <span className={`col-select-trigger-text ${!displayText ? "col-select-trigger-placeholder" : ""}`}>
-          {displayText || placeholder}
+        <span className={`col-select-trigger-text ${!triggerText ? "col-select-trigger-placeholder" : ""}`}>
+          {triggerText || placeholder}
         </span>
         <Icon icon="caret-down" iconSize={12} className="col-select-trigger-caret" />
       </button>
