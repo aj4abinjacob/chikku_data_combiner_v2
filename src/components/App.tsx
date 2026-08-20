@@ -706,6 +706,8 @@ export function App(): React.ReactElement {
         uniqueCount: toStatNumber(summary[`unique_${index}`]),
         minValue: summary[`min_${index}`] == null ? null : String(summary[`min_${index}`]),
         maxValue: summary[`max_${index}`] == null ? null : String(summary[`max_${index}`]),
+        minLength: summary[`min_length_${index}`] == null ? null : toStatNumber(summary[`min_length_${index}`]),
+        maxLength: summary[`max_length_${index}`] == null ? null : toStatNumber(summary[`max_length_${index}`]),
       })),
     };
   }, [activeTable, dataVersion, schema, tables, viewState.filters]);

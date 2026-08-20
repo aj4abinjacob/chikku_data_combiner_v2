@@ -385,7 +385,6 @@ export function DataGrid({
       clearDismissTimer();
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const previewTarget = getEnabledLinkPreviewTarget(value, linkPreviewsEnabled);
-      setCellLinkPreview(null);
       tooltipTimer.current = setTimeout(() => {
         tooltipTimer.current = null;
         if (previewTarget) {
@@ -418,6 +417,10 @@ export function DataGrid({
   }, [scheduleDismiss]);
 
   const handleTooltipMouseEnter = useCallback(() => {
+    if (tooltipTimer.current) {
+      clearTimeout(tooltipTimer.current);
+      tooltipTimer.current = null;
+    }
     tooltipHovered.current = true;
     clearDismissTimer();
   }, [clearDismissTimer]);
@@ -2943,9 +2946,29 @@ function TooltipContent({
   linkPreviewsEnabled: boolean;
 }): React.ReactElement {
   const [preview, setPreview] = useState<LinkPreviewState | null>(null);
+  const previewDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearPreviewDismissTimer = useCallback(() => {
+    if (previewDismissTimer.current) {
+      clearTimeout(previewDismissTimer.current);
+      previewDismissTimer.current = null;
+    }
+  }, []);
+
+  const schedulePreviewDismiss = useCallback(() => {
+    clearPreviewDismissTimer();
+    previewDismissTimer.current = setTimeout(() => {
+      previewDismissTimer.current = null;
+      setPreview(null);
+    }, 200);
+  }, [clearPreviewDismissTimer]);
+
   useEffect(() => {
     if (!linkPreviewsEnabled) setPreview(null);
   }, [linkPreviewsEnabled]);
+
+  useEffect(() => () => clearPreviewDismissTimer(), [clearPreviewDismissTimer]);
+
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -2958,6 +2981,7 @@ function TooltipContent({
     const previewTarget = getEnabledLinkPreviewTarget(url, linkPreviewsEnabled);
     const showPreview = (element: HTMLAnchorElement) => {
       if (!previewTarget) return;
+      clearPreviewDismissTimer();
       const rect = element.getBoundingClientRect();
       setPreview({ ...previewTarget, ...getLinkPreviewPosition(rect) });
     };
@@ -2967,9 +2991,9 @@ function TooltipContent({
         className="dg-tooltip-link"
         href="#"
         onMouseEnter={(event) => showPreview(event.currentTarget)}
-        onMouseLeave={() => setPreview(null)}
+        onMouseLeave={schedulePreviewDismiss}
         onFocus={(event) => showPreview(event.currentTarget)}
-        onBlur={() => setPreview(null)}
+        onBlur={schedulePreviewDismiss}
         onClick={(e) => {
           e.preventDefault();
           (window as any).api.openExternal(url);
@@ -2987,7 +3011,13 @@ function TooltipContent({
     <>
       {parts}
       {linkPreviewsEnabled && preview && createPortal(
-        <LinkPreviewCard preview={preview} />,
+        <LinkPreviewCard
+          preview={preview}
+          onMouseEnter={clearPreviewDismissTimer}
+          onMouseLeave={schedulePreviewDismiss}
+          onFocus={clearPreviewDismissTimer}
+          onBlur={schedulePreviewDismiss}
+        />,
         document.body
       )}
     </>

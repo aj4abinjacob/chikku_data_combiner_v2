@@ -131,6 +131,8 @@ export interface DatasetColumnOverview {
   uniqueCount: number;
   minValue?: string | null;
   maxValue?: string | null;
+  minLength?: number | null;
+  maxLength?: number | null;
 }
 
 export interface DatasetOverview {

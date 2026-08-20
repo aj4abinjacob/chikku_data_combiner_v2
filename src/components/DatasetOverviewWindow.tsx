@@ -50,12 +50,12 @@ const DEMO_OVERVIEW: DatasetOverview = {
   totalRows: 12_842,
   isFiltered: false,
   columns: [
-    { column: "Brand", columnType: "VARCHAR", missingCount: 0, uniqueCount: 42, minValue: "Adidas", maxValue: "Zara" },
-    { column: "Code", columnType: "VARCHAR", missingCount: 0, uniqueCount: 12_842, minValue: "1007067-OR", maxValue: "9984501-BL" },
-    { column: "Color", columnType: "VARCHAR", missingCount: 0, uniqueCount: 18, minValue: "Black", maxValue: "Yellow" },
-    { column: "Source", columnType: "VARCHAR", missingCount: 163, uniqueCount: 18, minValue: "Distributor", maxValue: "Wholesale" },
-    { column: "crawled_link", columnType: "VARCHAR", missingCount: 82, uniqueCount: 12_760, minValue: "https://example.com/a", maxValue: "https://example.com/z" },
-    { column: "Notes", columnType: "VARCHAR", missingCount: 38, uniqueCount: 1_247, minValue: "", maxValue: "Seasonal" },
+    { column: "Brand", columnType: "VARCHAR", missingCount: 0, uniqueCount: 42, minValue: "Adidas", maxValue: "Zara", minLength: 3, maxLength: 18 },
+    { column: "Code", columnType: "VARCHAR", missingCount: 0, uniqueCount: 12_842, minValue: "1007067-OR", maxValue: "9984501-BL", minLength: 8, maxLength: 14 },
+    { column: "Color", columnType: "VARCHAR", missingCount: 0, uniqueCount: 18, minValue: "Black", maxValue: "Yellow", minLength: 3, maxLength: 12 },
+    { column: "Source", columnType: "VARCHAR", missingCount: 163, uniqueCount: 18, minValue: "Distributor", maxValue: "Wholesale", minLength: 6, maxLength: 19 },
+    { column: "crawled_link", columnType: "VARCHAR", missingCount: 82, uniqueCount: 12_760, minValue: "https://example.com/a", maxValue: "https://example.com/z", minLength: 21, maxLength: 146 },
+    { column: "Notes", columnType: "VARCHAR", missingCount: 38, uniqueCount: 1_247, minValue: "", maxValue: "Seasonal", minLength: 2, maxLength: 284 },
     { column: "Price", columnType: "DOUBLE", missingCount: 0, uniqueCount: 3_210, minValue: "4.99", maxValue: "899" },
     { column: "Quantity", columnType: "INTEGER", missingCount: 0, uniqueCount: 186, minValue: "1", maxValue: "1000" },
     { column: "Weight", columnType: "DOUBLE", missingCount: 111, uniqueCount: 1_247, minValue: "0.05", maxValue: "25" },
@@ -93,6 +93,12 @@ function toNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function toNullableNumber(value: unknown): number | null {
+  if (value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function classifyType(columnType: string): TypeGroup {
   if (/^(TINYINT|SMALLINT|INTEGER|INT|BIGINT|HUGEINT|UTINYINT|USMALLINT|UINTEGER|UBIGINT|FLOAT|REAL|DOUBLE|DECIMAL|NUMERIC)/i.test(columnType)) return "Number";
   if (/^(DATE|TIME|TIMESTAMP|INTERVAL)/i.test(columnType)) return "Date";
@@ -103,6 +109,11 @@ function classifyType(columnType: string): TypeGroup {
 
 function isTextType(columnType: string): boolean {
   return classifyType(columnType) === "Text";
+}
+
+function isConstantColumn(column: DatasetColumnOverview, rowCount: number): boolean {
+  const populatedRows = Math.max(0, rowCount - column.missingCount);
+  return populatedRows > 1 && column.uniqueCount <= 1;
 }
 
 function formatNumber(value: number): string {
@@ -122,9 +133,13 @@ function compactValue(value: string | null | undefined): string {
   return value.length > 24 ? `${value.slice(0, 21)}…` : value;
 }
 
-function formatRange(column: DatasetColumnOverview): string {
+function formatRangeOrLength(column: DatasetColumnOverview): string {
   if (classifyType(column.columnType) === "Text") {
-    return `${formatNumber(column.uniqueCount)} distinct value${column.uniqueCount === 1 ? "" : "s"}`;
+    if (column.minLength == null || column.maxLength == null) return "—";
+    if (column.minLength === column.maxLength) {
+      return `${formatNumber(column.minLength)} character${column.minLength === 1 ? "" : "s"}`;
+    }
+    return `${formatNumber(column.minLength)}–${formatNumber(column.maxLength)} characters`;
   }
   if (column.minValue == null && column.maxValue == null) return "—";
   if (column.minValue === column.maxValue) return compactValue(column.minValue);
@@ -169,6 +184,8 @@ function createOverview(summary: Record<string, unknown>, schema: ColumnInfo[]):
       uniqueCount: toNumber(summary[`unique_${index}`]),
       minValue: summary[`min_${index}`] == null ? null : String(summary[`min_${index}`]),
       maxValue: summary[`max_${index}`] == null ? null : String(summary[`max_${index}`]),
+      minLength: toNullableNumber(summary[`min_length_${index}`]),
+      maxLength: toNullableNumber(summary[`max_length_${index}`]),
     })),
   };
 }
@@ -181,6 +198,7 @@ export function DatasetOverviewWindow(): React.ReactElement {
   const [duplicateRows, setDuplicateRows] = React.useState(0);
   const [selectedColumn, setSelectedColumn] = React.useState("");
   const [topValues, setTopValues] = React.useState<ColumnStatsTopValue[]>([]);
+  const [profileTopValues, setProfileTopValues] = React.useState<Record<string, ColumnStatsTopValue | null>>({});
   const [columnLoading, setColumnLoading] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -191,6 +209,9 @@ export function DatasetOverviewWindow(): React.ReactElement {
   const [exported, setExported] = React.useState(false);
   const [refreshedAt, setRefreshedAt] = React.useState<Date | null>(null);
   const tableRef = React.useRef<HTMLElement>(null);
+  const profileTopValuesRef = React.useRef<Record<string, ColumnStatsTopValue | null>>({});
+  const profileTopValueRequests = React.useRef(new Set<string>());
+  const profileGeneration = React.useRef(0);
 
   const useDemoData = React.useMemo(() => (
     new URLSearchParams(window.location.search).get("demo") === "1" || !getApi()
@@ -205,6 +226,10 @@ export function DatasetOverviewWindow(): React.ReactElement {
   }, []);
 
   const loadOverview = React.useCallback(async () => {
+    profileGeneration.current += 1;
+    profileTopValuesRef.current = {};
+    profileTopValueRequests.current.clear();
+    setProfileTopValues({});
     setLoading(true);
     setError(null);
     try {
@@ -297,6 +322,74 @@ export function DatasetOverviewWindow(): React.ReactElement {
     };
   }, [context, overview, selectedColumn, useDemoData]);
 
+  React.useEffect(() => {
+    if (!context || !overview || selectedColumn) return;
+
+    const matchingColumns = overview.columns.filter((column) => {
+      if (issuesOnly && column.missingCount === 0 && !isConstantColumn(column, overview.rowCount)) return false;
+      return column.column.toLowerCase().includes(search.trim().toLowerCase());
+    });
+    const pageCount = Math.max(1, Math.ceil(matchingColumns.length / PAGE_SIZE));
+    const currentPage = Math.min(page, pageCount - 1);
+    const columnsToLoad = matchingColumns.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
+    const generation = profileGeneration.current;
+
+    const storeValue = (column: string, value: ColumnStatsTopValue | null) => {
+      if (profileGeneration.current !== generation) return;
+      profileTopValuesRef.current = { ...profileTopValuesRef.current, [column]: value };
+      setProfileTopValues(profileTopValuesRef.current);
+    };
+
+    for (const column of columnsToLoad) {
+      if (Object.prototype.hasOwnProperty.call(profileTopValuesRef.current, column.column)) continue;
+      if (profileTopValueRequests.current.has(column.column)) continue;
+
+      const populatedRows = Math.max(0, overview.rowCount - column.missingCount);
+      if (populatedRows === 0) {
+        storeValue(column.column, null);
+        continue;
+      }
+
+      profileTopValueRequests.current.add(column.column);
+      if (useDemoData) {
+        const demoValue = DEMO_TOP_VALUES[column.column]?.[0] ?? {
+          value: compactValue(column.minValue || column.maxValue),
+          count: column.uniqueCount >= populatedRows ? 1 : Math.max(2, Math.round(populatedRows * 0.21)),
+        };
+        storeValue(column.column, demoValue);
+        profileTopValueRequests.current.delete(column.column);
+        continue;
+      }
+
+      const api = getApi();
+      if (!api) {
+        storeValue(column.column, null);
+        profileTopValueRequests.current.delete(column.column);
+        continue;
+      }
+
+      void api.query(buildColumnTopValuesQuery(
+        context.tableName,
+        column.column,
+        EMPTY_FILTERS,
+        1,
+        isTextType(column.columnType)
+      ))
+        .then((rows) => {
+          const first = rows[0];
+          storeValue(column.column, first
+            ? { value: String(first.value ?? ""), count: toNumber(first.count) }
+            : null);
+        })
+        .catch(() => storeValue(column.column, null))
+        .finally(() => {
+          if (profileGeneration.current === generation) {
+            profileTopValueRequests.current.delete(column.column);
+          }
+        });
+    }
+  }, [context, issuesOnly, overview, page, search, selectedColumn, useDemoData]);
+
   const handleExport = React.useCallback(async () => {
     if (!overview || !context) return;
     const api = getApi();
@@ -382,7 +475,7 @@ export function DatasetOverviewWindow(): React.ReactElement {
   const dateColumn = overview.columns.find((column) => classifyType(column.columnType) === "Date");
   const dateRows = dateColumn ? Math.max(0, overview.rowCount - dateColumn.missingCount) : 0;
   const visibleColumns = overview.columns.filter((column) => {
-    if (issuesOnly && column.missingCount === 0) return false;
+    if (issuesOnly && column.missingCount === 0 && !isConstantColumn(column, overview.rowCount)) return false;
     return column.column.toLowerCase().includes(search.trim().toLowerCase());
   });
   const pageCount = Math.max(1, Math.ceil(visibleColumns.length / PAGE_SIZE));
@@ -445,6 +538,12 @@ export function DatasetOverviewWindow(): React.ReactElement {
             )}
           </div>
           <div className="overview-window-hero-metrics">
+            <div className="is-rows">
+              <Icon icon="th-list" size={24} />
+              <span>Total rows</span>
+              <strong>{formatNumber(overview.rowCount)}</strong>
+              <small>Rows in the dataset</small>
+            </div>
             <div className="is-warning">
               <Icon icon="doughnut-chart" size={24} />
               <span>Missing values</span>
@@ -590,7 +689,7 @@ export function DatasetOverviewWindow(): React.ReactElement {
                 <div><span>Complete</span><strong>{formatPercent(overview.rowCount > 0 ? ((overview.rowCount - selectedStats.missingCount) / overview.rowCount) * 100 : 100)}</strong></div>
                 <div><span>Missing</span><strong>{formatNumber(selectedStats.missingCount)}</strong></div>
                 <div><span>Unique</span><strong>{formatNumber(selectedStats.uniqueCount)}</strong></div>
-                <div><span>Range</span><strong>{formatRange(selectedStats)}</strong></div>
+                <div><span>Range / length</span><strong>{formatRangeOrLength(selectedStats)}</strong></div>
               </div>
               <div className="overview-window-column-values">
                 <h3>Most common values</h3>
@@ -615,26 +714,47 @@ export function DatasetOverviewWindow(): React.ReactElement {
             <>
               <div className="overview-window-table-scroll">
                 <table className="overview-window-table">
-                  <thead><tr><th>Name</th><th>Type</th><th>Complete</th><th>Unique</th><th>Range / top value</th><th>Signal</th></tr></thead>
+                  <thead><tr><th>Name</th><th>Type</th><th>Missing</th><th>Unique</th><th>Range / length</th><th>Most common</th><th>Signal</th></tr></thead>
                   <tbody>
                     {pageColumns.map((column) => {
-                      const complete = overview.rowCount > 0 ? ((overview.rowCount - column.missingCount) / overview.rowCount) * 100 : 100;
+                      const populatedRows = Math.max(0, overview.rowCount - column.missingCount);
+                      const missingPercent = overview.rowCount > 0 ? (column.missingCount / overview.rowCount) * 100 : 0;
+                      const uniquePercent = populatedRows > 0 ? Math.min(100, (column.uniqueCount / populatedRows) * 100) : 0;
+                      const mostCommonLoaded = Object.prototype.hasOwnProperty.call(profileTopValues, column.column);
+                      const mostCommon = profileTopValues[column.column];
+                      const mostCommonPercent = mostCommon && populatedRows > 0 ? (mostCommon.count / populatedRows) * 100 : 0;
                       const isKey = potentialKeys.includes(column);
+                      const isConstant = isConstantColumn(column, overview.rowCount);
                       return (
                         <tr key={column.column}>
                           <td><span className={`overview-window-type-icon is-${classifyType(column.columnType).toLowerCase()}`}><Icon icon={typeIcon(column.columnType)} size={12} /></span><strong title={column.column}>{column.column}</strong></td>
                           <td>{column.columnType}</td>
-                          <td><span>{formatPercent(complete)}</span><div className="overview-window-table-progress"><i style={{ width: `${Math.max(1.5, complete)}%` }} /></div></td>
-                          <td>{formatNumber(column.uniqueCount)}</td>
-                          <td title={formatRange(column)}>{formatRange(column)}</td>
-                          <td className={column.missingCount > 0 ? "is-warning" : isKey ? "is-key" : "is-good"}>
-                            <Icon icon={column.missingCount > 0 ? "warning-sign" : isKey ? "key" : "full-circle"} size={11} />
-                            {column.missingCount > 0 ? "Needs attention" : isKey ? "Potential key" : "Good"}
+                          <td className={`overview-window-table-metric${column.missingCount > 0 ? " is-warning" : ""}`} title="Null or blank values">
+                            <strong>{formatNumber(column.missingCount)}</strong><small>{formatPercent(missingPercent)}</small>
+                          </td>
+                          <td className="overview-window-table-metric" title="Distinct values as a share of populated rows">
+                            <strong>{formatNumber(column.uniqueCount)}</strong><small>{formatPercent(uniquePercent)}</small>
+                          </td>
+                          <td title={formatRangeOrLength(column)}>{formatRangeOrLength(column)}</td>
+                          <td className="overview-window-most-common">
+                            {!mostCommonLoaded ? (
+                              <span className="is-loading">Loading…</span>
+                            ) : !mostCommon || mostCommon.count <= 0 ? (
+                              <span>—</span>
+                            ) : mostCommon.count === 1 ? (
+                              <span>All unique</span>
+                            ) : (
+                              <><strong title={mostCommon.value}>{compactValue(mostCommon.value)}</strong><small>{formatNumber(mostCommon.count)} · {formatPercent(mostCommonPercent)}</small></>
+                            )}
+                          </td>
+                          <td className={column.missingCount > 0 || isConstant ? "is-warning" : isKey ? "is-key" : "is-good"}>
+                            <Icon icon={column.missingCount > 0 ? "warning-sign" : isConstant ? "minus" : isKey ? "key" : "full-circle"} size={11} />
+                            {column.missingCount > 0 ? "Missing values" : isConstant ? "Constant" : isKey ? "Potential key" : "Good"}
                           </td>
                         </tr>
                       );
                     })}
-                    {pageColumns.length === 0 && <tr><td colSpan={6} className="overview-window-empty-row">No matching columns</td></tr>}
+                    {pageColumns.length === 0 && <tr><td colSpan={7} className="overview-window-empty-row">No matching columns</td></tr>}
                   </tbody>
                 </table>
               </div>

@@ -401,7 +401,9 @@ export function buildDatasetOverviewQuery(
       `SUM(CASE WHEN ${missingCondition} THEN 1 ELSE 0 END) AS missing_${index}`,
       `APPROX_COUNT_DISTINCT(${presentValue}) AS unique_${index}`,
       supportsRange ? `CAST(MIN(${presentValue}) AS VARCHAR) AS min_${index}` : `NULL AS min_${index}`,
-      supportsRange ? `CAST(MAX(${presentValue}) AS VARCHAR) AS max_${index}` : `NULL AS max_${index}`
+      supportsRange ? `CAST(MAX(${presentValue}) AS VARCHAR) AS max_${index}` : `NULL AS max_${index}`,
+      isText ? `MIN(LENGTH(CAST(${presentValue} AS VARCHAR))) AS min_length_${index}` : `NULL AS min_length_${index}`,
+      isText ? `MAX(LENGTH(CAST(${presentValue} AS VARCHAR))) AS max_length_${index}` : `NULL AS max_length_${index}`
     );
   });
 
