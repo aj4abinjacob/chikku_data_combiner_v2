@@ -7,7 +7,7 @@
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
-    "tauri:assets": "mkdirp dist-tauri && recursive-copy -w html/index.html dist-tauri/index.html && recursive-copy -w src-tauri/icons/icon.png dist-tauri/icon.png",
+    "tauri:assets": "node scripts/copy-renderer-assets.mjs",
     "tauri:renderer:build": "npm run tauri:assets && webpack --env tauri --mode production",
     "tauri:renderer:watch": "npm run tauri:assets && webpack serve --env tauri --mode development",
     "tauri:dev": "tauri dev",
@@ -25,6 +25,9 @@
   ],
   "author": "Abin Jacob <aj4abinjacob@gmail.com>",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "dependencies": {
     "@blueprintjs/core": "^4.20.2",
     "@blueprintjs/icons": "^4.16.0",
@@ -38,6 +41,7 @@
     "html2canvas-pro": "^2.2.3",
     "jspdf": "^4.2.1",
     "lodash": "^4.17.21",
+    "pdfjs-dist": "6.2.108",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",

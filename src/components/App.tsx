@@ -16,6 +16,7 @@ import { HistoryDialog } from "./HistoryDialog";
 import { UpdateNotice } from "./UpdateNotice";
 import { JsonWorkspace } from "./JsonWorkspace";
 import { MarkdownWorkspace } from "./MarkdownWorkspace";
+import { PdfWorkspace } from "./PdfWorkspace";
 import { HelpCenter } from "./HelpCenter";
 import { buildColumnStatsSummaryQuery, buildColumnTopValuesQuery, buildColumnUniqueValuesQuery, buildCombineQuery, buildDatasetOverviewQuery } from "../utils/sqlBuilder";
 import { buildColOpUpdateSQL, buildStepDescription } from "../utils/colOpsSQL";
@@ -31,7 +32,7 @@ const MAX_DISPLAY_DECIMAL_PLACES = 10;
 const DEFAULT_TABLE_FONT_SIZE = 13;
 const MIN_TABLE_FONT_SIZE = 11;
 const MAX_TABLE_FONT_SIZE = 24;
-const SUPPORTED_DATA_EXTENSIONS = new Set(["csv", "tsv", "json", "jsonl", "ndjson", "md", "markdown", "parquet", "xlsx", "xls"]);
+const SUPPORTED_DATA_EXTENSIONS = new Set(["csv", "tsv", "json", "jsonl", "ndjson", "md", "markdown", "pdf", "parquet", "xlsx", "xls"]);
 const LINK_PREVIEWS_STORAGE_KEY = "linkPreviewsEnabled";
 
 function makeTableName(filePath: string): string {
@@ -84,8 +85,16 @@ function isTextWorkspaceFilePath(filePath: string): boolean {
   return isJsonFilePath(filePath) || isMarkdownFilePath(filePath);
 }
 
+function isPdfFilePath(filePath: string): boolean {
+  return getFileExtension(filePath) === "pdf";
+}
+
+function isDocumentWorkspaceFilePath(filePath: string): boolean {
+  return isTextWorkspaceFilePath(filePath) || isPdfFilePath(filePath);
+}
+
 function isCombinableTable(table: LoadedTable): boolean {
-  return !isTextWorkspaceFilePath(table.filePath);
+  return !isDocumentWorkspaceFilePath(table.filePath);
 }
 
 function refreshedTable(previous: LoadedTable, next: LoadedTable): LoadedTable {
@@ -598,7 +607,7 @@ export function App(): React.ReactElement {
   );
   const activeQcSession = activeTable ? qcSessions[activeTable] ?? null : null;
   const sqlBackedTables = useMemo(
-    () => tables.filter((table) => table.filePath.startsWith("(") || !isTextWorkspaceFilePath(table.filePath)),
+    () => tables.filter((table) => table.filePath.startsWith("(") || !isDocumentWorkspaceFilePath(table.filePath)),
     [tables]
   );
 
@@ -608,7 +617,10 @@ export function App(): React.ReactElement {
   const markdownWorkspaceActive = !!activeLoadedTable
     && !activeLoadedTable.filePath.startsWith("(")
     && isMarkdownFilePath(activeLoadedTable.filePath);
-  const textWorkspaceActive = jsonWorkspaceActive || markdownWorkspaceActive;
+  const pdfWorkspaceActive = !!activeLoadedTable
+    && !activeLoadedTable.filePath.startsWith("(")
+    && isPdfFilePath(activeLoadedTable.filePath);
+  const documentWorkspaceActive = jsonWorkspaceActive || markdownWorkspaceActive || pdfWorkspaceActive;
 
   const handleGetColumnStats = useCallback(
     async (column: string): Promise<ColumnStats> => {
@@ -751,7 +763,7 @@ export function App(): React.ReactElement {
   } = useChunkCache({
     tableName: activeTable,
     viewState,
-    enabled: viewState.visibleColumns.length > 0 && !pivotActive && !textWorkspaceActive && !comparisonActive,
+    enabled: viewState.visibleColumns.length > 0 && !pivotActive && !documentWorkspaceActive && !comparisonActive,
     dataVersion,
     columnTypes,
   });
@@ -773,7 +785,7 @@ export function App(): React.ReactElement {
     tableName: activeTable,
     viewState,
     schema,
-    enabled: viewState.visibleColumns.length > 0 && pivotActive && !textWorkspaceActive,
+    enabled: viewState.visibleColumns.length > 0 && pivotActive && !documentWorkspaceActive,
     dataVersion,
   });
 
@@ -986,6 +998,16 @@ export function App(): React.ReactElement {
     []
   );
 
+  const loadDocumentWorkspaceFile = useCallback(
+    async (fp: string, tableName: string): Promise<LoadedTable | null> => {
+      if (isPdfFilePath(fp)) {
+        return { tableName, filePath: fp, schema: [], rowCount: 0 };
+      }
+      return loadTextWorkspaceFile(fp, tableName);
+    },
+    [loadTextWorkspaceFile]
+  );
+
   // Load files into DuckDB (handles all formats)
   // accumulatedTables: when continuing after a dialog, pass the already-loaded tables
   const loadFiles = useCallback(
@@ -1017,8 +1039,8 @@ export function App(): React.ReactElement {
         if (existingIndexes.length > 0) {
           for (const index of existingIndexes) {
             const existingTable = newTables[index];
-            const result = isTextWorkspaceFilePath(existingTable.filePath)
-              ? await loadTextWorkspaceFile(existingTable.filePath, existingTable.tableName)
+            const result = isDocumentWorkspaceFilePath(existingTable.filePath)
+              ? await loadDocumentWorkspaceFile(existingTable.filePath, existingTable.tableName)
               : await loadSingleFile(
                   existingTable.filePath,
                   existingTable.tableName,
@@ -1048,9 +1070,9 @@ export function App(): React.ReactElement {
           continue;
         }
 
-        if (isTextWorkspaceFilePath(fp)) {
+        if (isDocumentWorkspaceFilePath(fp)) {
           const tableName = makeUniqueTableName(makeTableName(fp), tableNames);
-          const result = await loadTextWorkspaceFile(fp, tableName);
+          const result = await loadDocumentWorkspaceFile(fp, tableName);
           if (result) {
             newTables.push(result);
             nextActiveTable = result.tableName;
@@ -1126,7 +1148,7 @@ export function App(): React.ReactElement {
         refreshExisting
       );
     },
-    [loadSingleFile, loadTextWorkspaceFile, finalizeLoadedTables]
+    [loadSingleFile, loadDocumentWorkspaceFile, finalizeLoadedTables]
   );
 
   // Handle Excel sheet picker result
@@ -1225,11 +1247,20 @@ export function App(): React.ReactElement {
     setResetKey((k) => k + 1);
   }, [activeTable, schema]);
 
-  const handleReloadActiveTextTable = useCallback(async () => {
+  const handleReloadActiveDocument = useCallback(async () => {
     const currentTableName = activeTableRef.current;
     if (!currentTableName) return;
     const currentTable = tablesRef.current.find((t) => t.tableName === currentTableName);
     if (!currentTable) return;
+
+    if (isPdfFilePath(currentTable.filePath)) {
+      setTables((prev) => prev.map((table) =>
+        table.tableName === currentTable.tableName
+          ? { ...table, reloadVersion: (table.reloadVersion ?? 0) + 1 }
+          : table
+      ));
+      return;
+    }
 
     if (isTextWorkspaceFilePath(currentTable.filePath)) {
       try {
@@ -1272,6 +1303,18 @@ export function App(): React.ReactElement {
     setResetKey((k) => k + 1);
   }, [loadSingleFile]);
 
+  const handleActivePdfPageCountChange = useCallback((pageCount: number) => {
+    const currentTableName = activeTableRef.current;
+    if (!currentTableName) return;
+    setTables((prev) => prev.map((table) =>
+      table.tableName === currentTableName
+        && isPdfFilePath(table.filePath)
+        && table.rowCount !== pageCount
+        ? { ...table, rowCount: pageCount }
+        : table
+    ));
+  }, []);
+
   // Register IPC listeners once on mount
   useEffect(() => {
     window.api.onOpenFiles((filePaths) => loadFiles(filePaths, false));
@@ -1281,7 +1324,7 @@ export function App(): React.ReactElement {
       const currentTable = currentTableName
         ? tablesRef.current.find((table) => table.tableName === currentTableName)
         : null;
-      if (currentTable && isTextWorkspaceFilePath(currentTable.filePath)) return;
+      if (currentTable && isDocumentWorkspaceFilePath(currentTable.filePath)) return;
       setExportDialogOpen(true);
     });
     window.api.onSetDarkMode((isDark) => {
@@ -1430,8 +1473,8 @@ export function App(): React.ReactElement {
   }, [filterPanelOpen, filterPanelMounted]);
 
   useEffect(() => {
-    if (textWorkspaceActive) setFilterPanelOpen(false);
-  }, [textWorkspaceActive]);
+    if (documentWorkspaceActive) setFilterPanelOpen(false);
+  }, [documentWorkspaceActive]);
 
   // When active table changes, refresh schema and reset columns
   useEffect(() => {
@@ -1444,7 +1487,7 @@ export function App(): React.ReactElement {
     }
 
     const currentTable = tablesRef.current.find((table) => table.tableName === activeTable);
-    if (currentTable && !currentTable.filePath.startsWith("(") && isTextWorkspaceFilePath(currentTable.filePath)) {
+    if (currentTable && !currentTable.filePath.startsWith("(") && isDocumentWorkspaceFilePath(currentTable.filePath)) {
       setSchema([]);
       setComparisonConfig(null);
       setFilterPanelOpen(false);
@@ -3107,7 +3150,7 @@ export function App(): React.ReactElement {
         </div>
       )}
       <div className="main-layout">
-        <div className={`sidebar-shell${sidebarVisible ? " sidebar-shell-open" : " sidebar-shell-collapsed"}${textWorkspaceActive ? " sidebar-shell-document" : ""}${jsonWorkspaceActive ? " sidebar-shell-json" : ""}`}>
+        <div className={`sidebar-shell${sidebarVisible ? " sidebar-shell-open" : " sidebar-shell-collapsed"}${documentWorkspaceActive ? " sidebar-shell-document" : ""}${jsonWorkspaceActive ? " sidebar-shell-json" : ""}${pdfWorkspaceActive ? " sidebar-shell-pdf" : ""}`}>
           <div className="sidebar-shell-panel" aria-hidden={!sidebarVisible}>
             <Sidebar
               tables={tables}
@@ -3159,6 +3202,7 @@ export function App(): React.ReactElement {
               onGetOverviewTopValues={handleGetOverviewTopValues}
               jsonWorkspaceActive={jsonWorkspaceActive}
               markdownWorkspaceActive={markdownWorkspaceActive}
+              pdfWorkspaceActive={pdfWorkspaceActive}
               documentFileActions={documentFileActions}
             />
           </div>
@@ -3188,18 +3232,24 @@ export function App(): React.ReactElement {
               {jsonWorkspaceActive && activeLoadedTable ? (
                 <JsonWorkspace
                   table={activeLoadedTable}
-                  sourceTables={tables.filter((loadedTable) => !loadedTable.filePath.startsWith("(") && !isTextWorkspaceFilePath(loadedTable.filePath))}
+                  sourceTables={tables.filter((loadedTable) => !loadedTable.filePath.startsWith("(") && !isDocumentWorkspaceFilePath(loadedTable.filePath))}
                   jsonTables={tables.filter((loadedTable) => !loadedTable.filePath.startsWith("(") && isJsonFilePath(loadedTable.filePath))}
                   onOpenFiles={handleChooseFiles}
-                  onReloadTable={handleReloadActiveTextTable}
+                  onReloadTable={handleReloadActiveDocument}
                   onFileActionsChange={setDocumentFileActions}
                 />
               ) : markdownWorkspaceActive && activeLoadedTable ? (
                 <MarkdownWorkspace
                   table={activeLoadedTable}
                   onOpenFiles={handleChooseFiles}
-                  onReloadTable={handleReloadActiveTextTable}
+                  onReloadTable={handleReloadActiveDocument}
                   onFileActionsChange={setDocumentFileActions}
+                />
+              ) : pdfWorkspaceActive && activeLoadedTable ? (
+                <PdfWorkspace
+                  table={activeLoadedTable}
+                  onOpenFiles={handleChooseFiles}
+                  onPageCountChange={handleActivePdfPageCountChange}
                 />
               ) : comparisonActive && comparisonConfig && activeTable ? (
                 <ComparisonView
@@ -3230,7 +3280,7 @@ export function App(): React.ReactElement {
                       onExitPivot={handleClearPivotGroups}
                     />
                   )}
-                  {activeQcSession && !comparisonActive && !textWorkspaceActive && (
+                  {activeQcSession && !comparisonActive && !documentWorkspaceActive && (
                     <QcSessionBar
                       session={activeQcSession}
                       totalRows={activeLoadedTable?.rowCount ?? 0}
@@ -3344,7 +3394,7 @@ export function App(): React.ReactElement {
                 <div className="welcome-copy">
                   <span className="welcome-kicker">No files loaded</span>
                   <h2>Open a data file</h2>
-                  <p>CSV, TSV, Excel, JSON, Markdown, and Parquet files are ready to load.</p>
+                  <p>CSV, TSV, Excel, JSON, Markdown, PDF, and Parquet files are ready to load.</p>
                 </div>
                 <div className="welcome-actions">
                   <Button
@@ -3389,7 +3439,7 @@ export function App(): React.ReactElement {
           )}
         </div>
       </div>
-      {!textWorkspaceActive && (
+      {!documentWorkspaceActive && (
         <StatusBar
           totalRows={
             comparisonActive

@@ -50,6 +50,7 @@ interface SidebarProps {
   onGetOverviewTopValues: (column: string) => Promise<ColumnStatsTopValue[]>;
   jsonWorkspaceActive?: boolean;
   markdownWorkspaceActive?: boolean;
+  pdfWorkspaceActive?: boolean;
   documentFileActions?: DocumentWorkspaceFileActions | null;
 }
 
@@ -83,8 +84,12 @@ function isMarkdownTable(table: LoadedTable): boolean {
   return extension === "md" || extension === "markdown";
 }
 
-function isTextWorkspaceTable(table: LoadedTable): boolean {
-  return isJsonTable(table) || isMarkdownTable(table);
+function isPdfTable(table: LoadedTable): boolean {
+  return getFileExtension(table.filePath) === "pdf";
+}
+
+function isDocumentWorkspaceTable(table: LoadedTable): boolean {
+  return isJsonTable(table) || isMarkdownTable(table) || isPdfTable(table);
 }
 
 function getFileListIcon(table: LoadedTable): FileListIcon {
@@ -99,6 +104,9 @@ function getFileListIcon(table: LoadedTable): FileListIcon {
   if (extension === "md" || extension === "markdown") {
     return { icon: "document", className: "table-icon-markdown" };
   }
+  if (extension === "pdf") {
+    return { icon: "document", className: "table-icon-pdf" };
+  }
 
   return { icon: "panel-table", className: "table-icon-tabular" };
 }
@@ -107,11 +115,16 @@ function getFileMetricLabel(table: LoadedTable): string {
   if (isMarkdownTable(table)) {
     return `${table.rowCount.toLocaleString()} line${table.rowCount === 1 ? "" : "s"}`;
   }
+  if (isPdfTable(table)) {
+    return table.rowCount > 0
+      ? `${table.rowCount.toLocaleString()} page${table.rowCount === 1 ? "" : "s"}`
+      : "PDF";
+  }
   return `${table.rowCount.toLocaleString()} rows`;
 }
 
 function getFileListLabel(table: LoadedTable): string {
-  if (isMarkdownTable(table) && !table.filePath.startsWith("(")) {
+  if ((isMarkdownTable(table) || isPdfTable(table)) && !table.filePath.startsWith("(")) {
     return table.filePath.split(/[/\\]/).pop() || table.tableName;
   }
   return table.tableName;
@@ -212,6 +225,7 @@ export function Sidebar({
   onGetOverviewTopValues,
   jsonWorkspaceActive = false,
   markdownWorkspaceActive = false,
+  pdfWorkspaceActive = false,
   documentFileActions = null,
 }: SidebarProps): React.ReactElement {
   const [dataOpDialogOpen, setDataOpDialogOpen] = useState(false);
@@ -237,9 +251,9 @@ export function Sidebar({
   const [dropTarget, setDropTarget] = useState<{ index: number; position: "top" | "bottom" } | null>(null);
   const [draggingColumn, setDraggingColumn] = useState<string | null>(null);
   React.useEffect(() => () => dragCleanupRef.current?.(), []);
-  const documentWorkspaceActive = jsonWorkspaceActive || markdownWorkspaceActive;
-  const workspaceLabel = markdownWorkspaceActive ? "Markdown" : "JSON";
-  const combinableTables = useMemo(() => tables.filter((table) => !isTextWorkspaceTable(table)), [tables]);
+  const documentWorkspaceActive = jsonWorkspaceActive || markdownWorkspaceActive || pdfWorkspaceActive;
+  const workspaceLabel = pdfWorkspaceActive ? "PDF" : markdownWorkspaceActive ? "Markdown" : "JSON";
+  const combinableTables = useMemo(() => tables.filter((table) => !isDocumentWorkspaceTable(table)), [tables]);
   const comparableTables = useMemo(() => tables.filter((table) => table.schema.length > 0), [tables]);
   const activeLoadedTable = useMemo(
     () => tables.find((table) => table.tableName === activeTable) ?? null,
@@ -567,7 +581,7 @@ export function Sidebar({
     || selectedForCombine.size === 0;
 
   return (
-    <div ref={sidebarRef} className={`sidebar${documentWorkspaceActive ? " sidebar-document" : ""}${jsonWorkspaceActive ? " sidebar-json" : ""}`}>
+    <div ref={sidebarRef} className={`sidebar${documentWorkspaceActive ? " sidebar-document" : ""}${jsonWorkspaceActive ? " sidebar-json" : ""}${pdfWorkspaceActive ? " sidebar-pdf" : ""}`}>
       {draggingColumn && (
         <div ref={dragGhostRef} className="column-drag-ghost">
           <Icon icon="drag-handle-vertical" size={10} />
@@ -632,7 +646,7 @@ export function Sidebar({
             ? `Combine selection is unavailable in ${workspaceLabel} view.`
             : canCombineTable
               ? null
-              : "Text workspace files cannot be selected for combine.";
+              : "Document workspace files cannot be selected for combine.";
           const combineCheckbox = (
             <Checkbox
               checked={selectedForCombine.has(t.tableName)}

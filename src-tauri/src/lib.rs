@@ -102,6 +102,8 @@ pub fn run() {
             write_text_file,
             write_binary_file,
             file_exists,
+            allow_pdf_asset,
+            open_pdf_externally,
             open_new_window,
             open_overview_window,
             close_db,

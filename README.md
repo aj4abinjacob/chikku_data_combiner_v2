@@ -1,10 +1,11 @@
 # Chikku Parser
 
-A Tauri desktop app for viewing, combining, and transforming CSV/data files. Built with React, DuckDB, Rust, and BlueprintJS.
+A Tauri desktop app for viewing documents and exploring, combining, and transforming data files. Built with React, DuckDB, Rust, and BlueprintJS.
 
 ## Features
 
 - **Data Viewer** — Open and browse large CSV, TSV, JSON, Parquet, and Excel files with virtualized scrolling
+- **Read-only PDF Viewer** — Search, thumbnails, outlines, zoom, rotation, password prompts, and permission-aware printing without modifying source PDFs
 - **Combine Tables** — Load multiple files and combine them with flexible column mapping
 - **Column Operations** — Transform columns with regex extract, trim, upper/lower case, find/replace, assignment, and more
 - **Filter & Sort** — Filter data with 16+ operators and sort by any column
@@ -12,7 +13,7 @@ A Tauri desktop app for viewing, combining, and transforming CSV/data files. Bui
 - **Export** — Export filtered or combined results to CSV, TSV, JSON, Excel, or Parquet
 - **Cell Selection & Copy** — Select cells and copy as TSV
 - **Live Link Previews** — Hover public HTTPS URLs for safe metadata cards, or disable them from View → Live Link Previews
-- **In-App Help** — Searchable guidance for tabular, JSON, Markdown, multi-file, review, and export workflows
+- **In-App Help** — Searchable guidance for tabular, JSON, Markdown, PDF, multi-file, review, and export workflows
 
 ## Tech Stack
 
@@ -32,7 +33,7 @@ A Tauri desktop app for viewing, combining, and transforming CSV/data files. Bui
 
 ### Prerequisites
 
-- Node.js (v18+)
+- Node.js (v22.13+)
 - npm
 - Rust toolchain via [rustup](https://rustup.rs)
 - macOS: Xcode Command Line Tools (`xcode-select --install`)

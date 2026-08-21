@@ -39,10 +39,11 @@ const filterMap: Record<string, { name: string; extensions: string[] }[]> = {
 };
 
 const dataFileFilters = [
-  { name: "Data Files", extensions: ["csv", "tsv", "json", "jsonl", "ndjson", "md", "markdown", "parquet", "xlsx", "xls"] },
+  { name: "Data Files", extensions: ["csv", "tsv", "json", "jsonl", "ndjson", "md", "markdown", "pdf", "parquet", "xlsx", "xls"] },
   { name: "CSV / TSV", extensions: ["csv", "tsv"] },
   { name: "JSON", extensions: ["json", "jsonl", "ndjson"] },
   { name: "Markdown", extensions: ["md", "markdown"] },
+  { name: "PDF", extensions: ["pdf"] },
   { name: "Parquet", extensions: ["parquet"] },
   { name: "Excel", extensions: ["xlsx", "xls"] },
 ];
@@ -167,6 +168,12 @@ function installTauriApi() {
       invoke<boolean>("write_binary_file", { filePath, bytes: Array.from(contents) }),
 
     fileExists: (filePath: string) => invoke("file_exists", { filePath }),
+
+    allowPdfAsset: (filePath: string) =>
+      invoke<string>("allow_pdf_asset", { filePath }),
+
+    openPdfExternally: (filePath: string) =>
+      invoke<boolean>("open_pdf_externally", { filePath }),
 
     openOverviewWindow: (tableName: string, displayName: string) =>
       invoke<string>("open_overview_window", { tableName, displayName }),

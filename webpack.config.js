@@ -6,7 +6,9 @@ module.exports = function (_env, argv) {
   const mode = argv?.mode || "development";
 
   return {
-    devtool: "source-map",
+    // Source maps are useful while developing, but putting them in frontendDist
+    // makes Tauri ship them inside every production installer.
+    devtool: mode === "development" ? "source-map" : false,
     mode,
     target: "web",
     entry: {

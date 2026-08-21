@@ -1,11 +1,27 @@
 use crate::db::{self, DbState};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::excel::{self, SheetExport, SheetInfo};
 use crate::patterns::{self, PatternState, RegexPattern};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::Path;
-use tauri::{State, Window};
+use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager, State, Window};
+
+fn validated_pdf_path(file_path: &str) -> AppResult<PathBuf> {
+    let path = std::fs::canonicalize(file_path)?;
+    if !path.is_file() {
+        return Err(AppError::msg("PDF path is not a file"));
+    }
+    let is_pdf = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false);
+    if !is_pdf {
+        return Err(AppError::msg("Only PDF files can use the PDF viewer"));
+    }
+    Ok(path)
+}
 
 fn safe_table_name(name: &str) -> String {
     name.chars()
@@ -363,6 +379,21 @@ pub fn file_exists(file_path: String) -> AppResult<bool> {
 }
 
 #[tauri::command]
+pub fn allow_pdf_asset(app: AppHandle, file_path: String) -> AppResult<String> {
+    let path = validated_pdf_path(&file_path)?;
+    app.asset_protocol_scope().allow_file(&path)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn open_pdf_externally(file_path: String) -> AppResult<bool> {
+    let path = validated_pdf_path(&file_path)?;
+    open::that_detached(&path)
+        .map_err(|error| AppError::msg(format!("open PDF externally: {error}")))?;
+    Ok(true)
+}
+
+#[tauri::command]
 pub fn open_new_window(app: tauri::AppHandle, files: Option<Vec<String>>) -> AppResult<String> {
     let label = crate::window_mgr::spawn_window(&app, files)?;
     Ok(label)
@@ -424,6 +455,21 @@ mod tests {
         let rows = db::query(&conn, "SELECT missing, empty FROM imported").unwrap();
         assert_eq!(rows[0]["missing"], Value::Null);
         assert_eq!(rows[0]["empty"], "");
+    }
+
+    #[test]
+    fn pdf_asset_validation_accepts_only_existing_pdf_files() {
+        let pdf_path = std::env::temp_dir().join(format!("chikku_pdf_{}.PDF", uuid_like()));
+        let text_path = std::env::temp_dir().join(format!("chikku_pdf_{}.txt", uuid_like()));
+        std::fs::write(&pdf_path, b"%PDF-1.7\n").unwrap();
+        std::fs::write(&text_path, b"not a pdf\n").unwrap();
+
+        let validated = validated_pdf_path(&pdf_path.to_string_lossy()).unwrap();
+        assert_eq!(validated, std::fs::canonicalize(&pdf_path).unwrap());
+        assert!(validated_pdf_path(&text_path.to_string_lossy()).is_err());
+
+        let _ = std::fs::remove_file(pdf_path);
+        let _ = std::fs::remove_file(text_path);
     }
 }
 

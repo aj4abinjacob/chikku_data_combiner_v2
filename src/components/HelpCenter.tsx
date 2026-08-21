@@ -38,7 +38,7 @@ const HELP_TOPICS: HelpTopic[] = [
       },
       {
         title: "Supported files",
-        body: "Chikku opens CSV, TSV, Excel (.xlsx/.xls), JSON/JSONL/NDJSON, Markdown, and Parquet. JSON and Markdown open in purpose-built document workspaces; the other formats open as tables.",
+        body: "Chikku opens CSV, TSV, Excel (.xlsx/.xls), JSON/JSONL/NDJSON, Markdown, PDF, and Parquet. JSON, Markdown, and PDF open in purpose-built document workspaces; the other formats open as tables.",
       },
       {
         title: "A useful mental model",
@@ -236,6 +236,28 @@ const HELP_TOPICS: HelpTopic[] = [
       {
         title: "Save and export",
         body: "Save writes changes to the current Markdown file. Export creates a Markdown copy, while Export PDF captures the rendered document. Revert and History help recover earlier saved or edited states.",
+      },
+    ],
+  },
+  {
+    id: "pdf",
+    title: "PDF viewer",
+    category: "Document workspaces",
+    summary: "Read, search, navigate, rotate, zoom, and print PDFs without changing them.",
+    icon: "document",
+    keywords: ["pdf", "viewer", "pages", "thumbnail", "outline", "password", "signature", "print", "zoom", "rotate"],
+    sections: [
+      {
+        title: "Read and navigate",
+        body: "PDF files open in a read-only viewer. Use thumbnails or the document outline to navigate, enter a page number, search with Cmd/Ctrl+F, and use the zoom and rotate controls without modifying the source file.",
+      },
+      {
+        title: "Protected and signed documents",
+        body: "Password-protected PDFs prompt for a password. Forms and annotations are displayed as static content and are not saved. Chikku can report that digital signatures are present, but it does not verify signer identity or signature validity.",
+      },
+      {
+        title: "Print or use the system viewer",
+        body: "Print is available only when the PDF permissions allow it. Large documents are handed to the system PDF viewer for memory-safe printing. Open externally is also available as a compatibility fallback.",
       },
     ],
   },
