@@ -1,5 +1,29 @@
 # Changelog
 
+## Chikku Parser v0.3.45
+
+### PDF Workspace
+
+- Added a dedicated PDF workspace with thumbnails, document outlines, page navigation, search, zoom, page rotation, password prompts, and secure external-link handling.
+- Added permission-aware printing with a memory-safe system-viewer fallback for large documents.
+- Added PDF file associations, in-app help, signature warnings, and optimized rendering that keeps long documents responsive.
+- Moved PDF thumbnails and outlines into the main sidebar so document navigation stays consistent with the rest of the app.
+
+### PDF Image Editing
+
+- Added image insertion from APNG, AVIF, BMP, GIF, ICO, JPEG, PNG, SVG, and WebP files, with drag positioning, resizing, deletion, and Save As support.
+- Added 90° rotation, mouse-driven 1° rotation with a live angle readout, Shift-assisted 15° snapping, and a right-click option to reset rotation to 0°.
+- Added horizontal and vertical flipping, layer ordering, undo and redo support, and saved-PDF persistence for image transforms.
+- Restricted the image picker to supported formats and preserved the original PDF by saving edits to a new copy.
+
+### PDF Image Export
+
+- Added PNG, JPEG, and WebP export for the current page or the entire document, with previews, progress, and numbered filenames for multi-page exports.
+- Added original, A4, A3, Letter, Legal, and custom output sizes; portrait, landscape, and automatic orientation; and 96, 150, or 300 DPI output.
+- Added custom dimensions in pixels, millimetres, or inches plus quality controls for lossy formats.
+
+**Full changelog:** https://github.com/aj4abinjacob/chikku_parser/compare/v0.3.44...v0.3.45
+
 ## Chikku Parser v0.3.44
 
 ### Data Overview

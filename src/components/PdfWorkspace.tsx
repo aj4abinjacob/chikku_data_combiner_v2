@@ -18,6 +18,7 @@ import {
   PdfImagePaperSize,
   PdfImageResolution,
 } from "../utils/pdfImageExport";
+import { getRotatedBoundingSize, normalizeRotationDegrees } from "../utils/pdfImageTransform";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -94,7 +95,21 @@ interface PdfAnnotationStorage {
 interface ImageTransformState {
   flipHorizontal: boolean;
   flipVertical: boolean;
+  fineRotation: number;
   originalSerialize: PdfStampEditor["serialize"] | null;
+}
+
+interface ImageRotationDragState {
+  editor: PdfStampEditor;
+  button: HTMLElement;
+  pointerId: number;
+  centerX: number;
+  centerY: number;
+  startPointerAngle: number;
+  startRotation: number;
+  startX: number;
+  startY: number;
+  dragging: boolean;
 }
 
 interface ImageContextMenuState {
@@ -220,14 +235,53 @@ function getRotatedImagePosition(editor: PdfStampEditor, rotation: number): { x:
   }
 }
 
-function flipSerializedBitmap(bitmap: ImageBitmap, flipHorizontal: boolean, flipVertical: boolean): ImageBitmap {
-  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+function transformSerializedBitmap(
+  bitmap: ImageBitmap,
+  flipHorizontal: boolean,
+  flipVertical: boolean,
+  rotation: number
+): ImageBitmap {
+  const bounds = getRotatedBoundingSize(bitmap.width, bitmap.height, rotation);
+  const canvas = new OffscreenCanvas(Math.ceil(bounds.width), Math.ceil(bounds.height));
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Image transformation is not available in this webview");
-  context.translate(flipHorizontal ? bitmap.width : 0, flipVertical ? bitmap.height : 0);
+  context.translate(canvas.width / 2, canvas.height / 2);
+  context.rotate(normalizeRotationDegrees(rotation) * Math.PI / 180);
   context.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
-  context.drawImage(bitmap, 0, 0);
+  context.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
   return canvas.transferToImageBitmap();
+}
+
+function getFineRotatedSerializedRect(
+  editor: PdfStampEditor,
+  rect: [number, number, number, number],
+  rotation: number
+): [number, number, number, number] {
+  const [pageWidth, pageHeight] = editor.pageDimensions;
+  const bounds = getRotatedBoundingSize(editor.width * pageWidth, editor.height * pageHeight, rotation);
+  const width = editor.rotation % 180 === 0 ? bounds.width : bounds.height;
+  const height = editor.rotation % 180 === 0 ? bounds.height : bounds.width;
+  const centerX = (rect[0] + rect[2]) / 2;
+  const centerY = (rect[1] + rect[3]) / 2;
+  return [centerX - width / 2, centerY - height / 2, centerX + width / 2, centerY + height / 2];
+}
+
+function syncImageTransformPreview(editor: PdfStampEditor, state: ImageTransformState): void {
+  const visualRotation = normalizeRotationDegrees(360 - editor.rotation);
+  const fineRotation = normalizeRotationDegrees(state.fineRotation);
+  editor.div.style.transform = fineRotation === 0
+    ? ""
+    : `rotate(${visualRotation}deg) translate(50%, 50%) rotate(${fineRotation}deg) translate(-50%, -50%)`;
+  editor.div.classList.toggle("chikku-image-fine-rotated", fineRotation !== 0);
+
+  const canvas = editor.div.querySelector(":scope > canvas") as HTMLCanvasElement | null;
+  if (canvas) {
+    canvas.style.transformOrigin = "center";
+    canvas.style.transform = `scale(${state.flipHorizontal ? -1 : 1}, ${state.flipVertical ? -1 : 1})`;
+  }
+
+  const toolbar = editor.div.querySelector(":scope > .editToolbar") as HTMLElement | null;
+  if (toolbar) toolbar.style.transform = fineRotation === 0 ? "" : `rotate(${-fineRotation}deg)`;
 }
 
 function isInsertedLayerEditor(value: unknown, pageIndex: number): value is PdfLayerEditor {
@@ -596,6 +650,8 @@ export function PdfWorkspace({
   const pruneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const imageTransformsRef = useRef<WeakMap<PdfStampEditor, ImageTransformState>>(new WeakMap());
   const imageTransformRevisionRef = useRef(0);
+  const imageRotationDragRef = useRef<ImageRotationDragState | null>(null);
+  const suppressRotateClickRef = useRef(false);
 
   const [phase, setPhase] = useState<PdfPhase>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -692,6 +748,8 @@ export function PdfWorkspace({
     setImageExportProgress(0);
     setImageExportStatus(null);
     imageTransformsRef.current = new WeakMap();
+    imageRotationDragRef.current = null;
+    suppressRotateClickRef.current = false;
 
     const openPdf = async () => {
       if (!containerRef.current || !viewerRef.current) return;
@@ -995,6 +1053,7 @@ export function PdfWorkspace({
       state = {
         flipHorizontal: false,
         flipVertical: false,
+        fineRotation: 0,
         originalSerialize: null,
       };
       imageTransformsRef.current.set(editor, state);
@@ -1004,21 +1063,23 @@ export function PdfWorkspace({
       state.originalSerialize = originalSerialize;
       editor.serialize = (isForCopying = false, context = null) => {
         const serialized = originalSerialize(isForCopying, context);
-        if (
-          !serialized
-          || isForCopying
-          || (!state?.flipHorizontal && !state?.flipVertical)
-          || !serialized.bitmap
-        ) {
+        if (!serialized || isForCopying || !state) {
           return serialized;
         }
-        const sourceBitmap = serialized.bitmap as ImageBitmap;
-        serialized.bitmap = flipSerializedBitmap(
-          sourceBitmap,
-          !!state.flipHorizontal,
-          !!state.flipVertical
-        );
-        sourceBitmap.close?.();
+        const fineRotation = normalizeRotationDegrees(state.fineRotation);
+        if (fineRotation !== 0) {
+          serialized.rect = getFineRotatedSerializedRect(editor, serialized.rect, fineRotation);
+        }
+        if ((state.flipHorizontal || state.flipVertical || fineRotation !== 0) && serialized.bitmap) {
+          const sourceBitmap = serialized.bitmap as ImageBitmap;
+          serialized.bitmap = transformSerializedBitmap(
+            sourceBitmap,
+            state.flipHorizontal,
+            state.flipVertical,
+            fineRotation
+          );
+          sourceBitmap.close?.();
+        }
         return serialized;
       };
     }
@@ -1043,11 +1104,7 @@ export function PdfWorkspace({
     const apply = (next: typeof before) => {
       transformState.flipHorizontal = next.flipHorizontal;
       transformState.flipVertical = next.flipVertical;
-      const canvas = editor.div.querySelector(":scope > canvas") as HTMLCanvasElement | null;
-      if (canvas) {
-        canvas.style.transformOrigin = "center";
-        canvas.style.transform = `scale(${next.flipHorizontal ? -1 : 1}, ${next.flipVertical ? -1 : 1})`;
-      }
+      syncImageTransformPreview(editor, transformState);
       markImageTransformModified(editor);
     };
     editor.addCommands({
@@ -1074,6 +1131,8 @@ export function PdfWorkspace({
       editor.y = next.y;
       editor.div.setAttribute("data-editor-rotation", String((360 - next.rotation) % 360));
       editor.fixAndSetPosition(next.rotation);
+      const transformState = imageTransformsRef.current.get(editor);
+      if (transformState) syncImageTransformPreview(editor, transformState);
       markImageTransformModified(editor);
     };
     editor.addCommands({
@@ -1083,6 +1142,43 @@ export function PdfWorkspace({
     });
     setFeedback("Image rotated 90° clockwise. Use Save As to keep the change.");
   }, [getStampEditor, markImageTransformModified]);
+
+  const resetImageRotation = useCallback((editorId: string) => {
+    const editor = getStampEditor(editorId);
+    if (!editor || editor.annotationElementId) {
+      setFeedback("Rotation is available for images inserted in Chikku.");
+      return;
+    }
+    const transformState = getImageTransformState(editor);
+    const before = {
+      rotation: editor.rotation,
+      fineRotation: normalizeRotationDegrees(transformState.fineRotation),
+      x: editor.x,
+      y: editor.y,
+    };
+    if (before.rotation === 0 && before.fineRotation === 0) {
+      setFeedback("Image rotation is already at the original 0° orientation.");
+      return;
+    }
+    const nextPosition = getRotatedImagePosition(editor, 0);
+    const after = { rotation: 0, fineRotation: 0, ...nextPosition };
+    const apply = (next: typeof before) => {
+      editor.rotation = next.rotation;
+      editor.x = next.x;
+      editor.y = next.y;
+      transformState.fineRotation = next.fineRotation;
+      editor.div.setAttribute("data-editor-rotation", String((360 - next.rotation) % 360));
+      editor.fixAndSetPosition(next.rotation);
+      syncImageTransformPreview(editor, transformState);
+      markImageTransformModified(editor);
+    };
+    editor.addCommands({
+      cmd: () => apply(after),
+      undo: () => apply(before),
+      mustExec: true,
+    });
+    setFeedback("Image rotation reset to the original 0° orientation. Use Save As to keep the change.");
+  }, [getImageTransformState, getStampEditor, markImageTransformModified]);
 
   const moveImageLayer = useCallback((editorId: string, direction: "forward" | "backward") => {
     const editor = getStampEditor(editorId);
@@ -1136,15 +1232,22 @@ export function PdfWorkspace({
         if (!editor || editor.annotationElementId) continue;
         pageIndexes.add(editor.pageIndex);
         const buttons = stamp.querySelector<HTMLElement>(":scope > .editToolbar .buttons");
-        if (!buttons || buttons.querySelector(".chikku-image-rotate-button")) continue;
-        const rotateButton = window.document.createElement("button");
-        rotateButton.type = "button";
-        rotateButton.className = "basic chikku-image-rotate-button";
-        rotateButton.textContent = "↻";
-        rotateButton.title = "Rotate image 90° clockwise";
-        rotateButton.setAttribute("aria-label", "Rotate image 90° clockwise");
-        rotateButton.addEventListener("pointerdown", (event) => event.stopPropagation());
-        buttons.insertBefore(rotateButton, buttons.querySelector(".deleteButton"));
+        if (!buttons) continue;
+        if (!buttons.querySelector(".chikku-image-rotate-button")) {
+          const rotateButton = window.document.createElement("button");
+          rotateButton.type = "button";
+          rotateButton.className = "basic chikku-image-rotate-button";
+          rotateButton.textContent = "↻";
+          rotateButton.setAttribute("data-tooltip", "Click: rotate 90° · Drag: fine rotation · Shift: snap 15°");
+          rotateButton.setAttribute(
+            "aria-label",
+            "Rotate image: click for 90 degrees, drag for fine rotation, or hold Shift while dragging to snap to 15 degrees"
+          );
+          rotateButton.addEventListener("pointerdown", (event) => event.stopPropagation());
+          buttons.insertBefore(rotateButton, buttons.querySelector(".deleteButton"));
+        }
+        const transformState = imageTransformsRef.current.get(editor);
+        if (transformState) syncImageTransformPreview(editor, transformState);
       }
       const annotationStorage = documentRef.current?.annotationStorage as unknown as PdfAnnotationStorage | undefined;
       if (annotationStorage) {
@@ -1186,7 +1289,7 @@ export function PdfWorkspace({
         value: { bitmapFile: file },
       });
       await waitForInsertedImage(editorLayer, previousImageCount);
-      setFeedback(`Image added to page ${pageNumber}. Drag or resize it, use ↻ to rotate, right-click to flip, or press Enter to finish selecting it.`);
+      setFeedback(`Image added to page ${pageNumber}. Drag or resize it, click ↻ for 90° or drag ↻ for fine rotation, right-click for flip/reset options, or press Enter to finish selecting it.`);
     } catch (insertError) {
       console.error("Failed to insert image into PDF", insertError);
       setFeedback(`Could not add the image: ${insertError instanceof Error ? insertError.message : String(insertError)}`);
@@ -1563,6 +1666,98 @@ export function PdfWorkspace({
     }
   }, [canPrint, highQualityPrint, printing, table.filePath]);
 
+  const handleViewerPointerDownCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const target = event.target as Element;
+    const rotateButton = target.closest<HTMLElement>(".chikku-image-rotate-button");
+    const stamp = rotateButton?.closest<HTMLElement>(".stampEditor");
+    if (!rotateButton || !stamp) return;
+    const editor = getStampEditor(stamp.id);
+    if (!editor || editor.annotationElementId) return;
+
+    const bounds = editor.div.getBoundingClientRect();
+    const centerX = bounds.left + bounds.width / 2;
+    const centerY = bounds.top + bounds.height / 2;
+    imageRotationDragRef.current = {
+      editor,
+      button: rotateButton,
+      pointerId: event.pointerId,
+      centerX,
+      centerY,
+      startPointerAngle: Math.atan2(event.clientY - centerY, event.clientX - centerX) * 180 / Math.PI,
+      startRotation: getImageTransformState(editor).fineRotation,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false,
+    };
+    rotateButton.setPointerCapture?.(event.pointerId);
+    event.stopPropagation();
+  }, [getImageTransformState, getStampEditor]);
+
+  const handleViewerPointerMoveCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = imageRotationDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+    if (!drag.dragging && distance < 4) return;
+
+    drag.dragging = true;
+    drag.button.classList.add("is-rotating");
+    const pointerAngle = Math.atan2(event.clientY - drag.centerY, event.clientX - drag.centerX) * 180 / Math.PI;
+    const delta = ((pointerAngle - drag.startPointerAngle + 540) % 360) - 180;
+    const increment = event.shiftKey ? 15 : 1;
+    const nextRotation = normalizeRotationDegrees(Math.round((drag.startRotation + delta) / increment) * increment);
+    const transformState = getImageTransformState(drag.editor);
+    transformState.fineRotation = nextRotation;
+    syncImageTransformPreview(drag.editor, transformState);
+    drag.button.setAttribute(
+      "data-rotation-label",
+      `${Math.round(normalizeRotationDegrees(360 - drag.editor.rotation + nextRotation))}°`
+    );
+    event.preventDefault();
+    event.stopPropagation();
+  }, [getImageTransformState]);
+
+  const finishImageRotationDrag = useCallback((event: React.PointerEvent<HTMLDivElement>, cancelled: boolean) => {
+    const drag = imageRotationDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    imageRotationDragRef.current = null;
+    drag.button.classList.remove("is-rotating");
+    drag.button.removeAttribute("data-rotation-label");
+    if (drag.button.hasPointerCapture?.(event.pointerId)) drag.button.releasePointerCapture(event.pointerId);
+
+    const transformState = getImageTransformState(drag.editor);
+    const before = normalizeRotationDegrees(drag.startRotation);
+    const after = normalizeRotationDegrees(transformState.fineRotation);
+    if (cancelled) {
+      transformState.fineRotation = before;
+      syncImageTransformPreview(drag.editor, transformState);
+      return;
+    }
+    if (!drag.dragging) return;
+    suppressRotateClickRef.current = true;
+    window.setTimeout(() => {
+      suppressRotateClickRef.current = false;
+    }, 0);
+    event.preventDefault();
+    event.stopPropagation();
+    if (before === after) return;
+
+    const apply = (rotation: number) => {
+      transformState.fineRotation = rotation;
+      syncImageTransformPreview(drag.editor, transformState);
+      markImageTransformModified(drag.editor);
+    };
+    transformState.fineRotation = before;
+    syncImageTransformPreview(drag.editor, transformState);
+    drag.editor.addCommands({
+      cmd: () => apply(after),
+      undo: () => apply(before),
+      mustExec: true,
+    });
+    const totalRotation = Math.round(normalizeRotationDegrees(360 - drag.editor.rotation + after));
+    setFeedback(`Image rotated to ${totalRotation}°. Use Save As to keep the change.`);
+  }, [getImageTransformState, markImageTransformModified]);
+
   const handleViewerClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const target = event.target as Element;
     const rotateButton = target.closest(".chikku-image-rotate-button");
@@ -1570,6 +1765,10 @@ export function PdfWorkspace({
       const stamp = rotateButton.closest<HTMLElement>(".stampEditor");
       event.preventDefault();
       event.stopPropagation();
+      if (suppressRotateClickRef.current) {
+        suppressRotateClickRef.current = false;
+        return;
+      }
       if (stamp) rotateImageClockwise(stamp.id);
       return;
     }
@@ -1598,11 +1797,18 @@ export function PdfWorkspace({
     setImageContextMenu({
       editorId: editor.id,
       x: Math.max(8, Math.min(event.clientX, window.innerWidth - 212)),
-      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 184)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 218)),
     });
   }, [getStampEditor]);
 
   const progressPercent = progress === null ? null : Math.round(progress * 100);
+  const contextMenuEditor = imageContextMenu ? getStampEditor(imageContextMenu.editorId) : null;
+  const contextMenuFineRotation = contextMenuEditor
+    ? imageTransformsRef.current.get(contextMenuEditor)?.fineRotation ?? 0
+    : 0;
+  const canResetContextMenuRotation = !!contextMenuEditor && (
+    contextMenuEditor.rotation !== 0 || normalizeRotationDegrees(contextMenuFineRotation) !== 0
+  );
   const imageExportSizeTooLarge = !!imageExportDimensions && (
     imageExportDimensions.width * imageExportDimensions.height > PDF_IMAGE_EXPORT_MAX_PIXELS
     || imageExportDimensions.width > PDF_IMAGE_EXPORT_MAX_DIMENSION
@@ -1762,6 +1968,11 @@ export function PdfWorkspace({
           <div
             ref={containerRef}
             className="pdf-viewer-container"
+            onPointerDownCapture={handleViewerPointerDownCapture}
+            onPointerMoveCapture={handleViewerPointerMoveCapture}
+            onPointerUpCapture={(event) => finishImageRotationDrag(event, false)}
+            onPointerCancelCapture={(event) => finishImageRotationDrag(event, true)}
+            onLostPointerCapture={(event) => finishImageRotationDrag(event, true)}
             onClickCapture={handleViewerClickCapture}
             onContextMenuCapture={handleViewerContextMenuCapture}
           >
@@ -1794,6 +2005,12 @@ export function PdfWorkspace({
                 setImageContextMenu(null);
               }}>
                 <Icon icon="image-rotate-right" size={14} /> Rotate clockwise
+              </button>
+              <button type="button" role="menuitem" disabled={!canResetContextMenuRotation} onClick={() => {
+                resetImageRotation(imageContextMenu.editorId);
+                setImageContextMenu(null);
+              }}>
+                <Icon icon="undo" size={14} /> Reset rotation (0°)
               </button>
               <button type="button" role="menuitem" onClick={() => {
                 applyImageFlip(imageContextMenu.editorId, "horizontal");

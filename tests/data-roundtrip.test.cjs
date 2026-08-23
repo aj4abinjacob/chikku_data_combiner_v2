@@ -27,6 +27,20 @@ const {
   getPdfImageDimensions,
   getPdfImagePagePath,
 } = require("../.test-dist/utils/pdfImageExport.js");
+const {
+  getRotatedBoundingSize,
+  normalizeRotationDegrees,
+} = require("../.test-dist/utils/pdfImageTransform.js");
+
+test("fine image rotation normalizes angles and expands the saved bounds", () => {
+  assert.equal(normalizeRotationDegrees(-15), 345);
+  assert.equal(normalizeRotationDegrees(375), 15);
+  assert.deepEqual(getRotatedBoundingSize(120, 80, 90), { width: 80, height: 120 });
+
+  const diagonal = getRotatedBoundingSize(100, 100, 45);
+  assert.ok(Math.abs(diagonal.width - Math.SQRT2 * 100) < 1e-10);
+  assert.ok(Math.abs(diagonal.height - Math.SQRT2 * 100) < 1e-10);
+});
 
 test("timestamp IN values retain precision and offsets as typed literals", () => {
   const sql = buildFilterClause({

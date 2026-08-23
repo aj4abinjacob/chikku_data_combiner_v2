@@ -377,16 +377,63 @@
 }
 
 .pdf-viewer-container .chikku-image-rotate-button {
+  position: relative;
   min-width: 28px;
   color: var(--editor-toolbar-fg-color);
   font-size: 18px;
   font-weight: 600;
   line-height: 20px;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+
+  &.is-rotating {
+    cursor: grabbing;
+  }
+
+  &::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    z-index: 20;
+    left: 50%;
+    bottom: calc(100% + 8px);
+    width: max-content;
+    max-width: 240px;
+    padding: 5px 8px;
+    border-radius: var(--control-radius);
+    background: #1c2127;
+    color: #f5f8fa;
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 1.35;
+    text-align: center;
+    white-space: normal;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, 2px);
+    transition: opacity 100ms ease, transform 100ms ease;
+  }
+
+  &:hover::after,
+  &:focus-visible::after,
+  &.is-rotating::after {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  &.is-rotating::after {
+    content: attr(data-rotation-label);
+    min-width: 34px;
+    font-variant-numeric: tabular-nums;
+  }
 
   &::before {
     display: none !important;
   }
+}
+
+.pdf-viewer-container .stampEditor.chikku-image-fine-rotated {
+  max-width: none;
+  max-height: none;
 }
 
 .pdf-image-context-menu {
@@ -427,6 +474,12 @@
     &:focus-visible {
       background: #eaf1f5;
       outline: none;
+    }
+
+    &:disabled {
+      background: transparent;
+      opacity: 0.45;
+      cursor: default;
     }
   }
 }
