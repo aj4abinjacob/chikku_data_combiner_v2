@@ -253,7 +253,7 @@ const HELP_TOPICS: HelpTopic[] = [
       },
       {
         title: "Insert and position images",
-        body: "Choose Image to add a PNG, JPEG, or WebP image to the current page. Drag it anywhere on the page, resize it with the handles, or select it and press Delete. Choose Done when positioning is complete, then Save As to create a new PDF while preserving the original.",
+        body: "Choose Image to open an image-only picker for APNG, AVIF, BMP, GIF, ICO, JPEG, PNG, SVG, or WebP files. The image is added to the current page; drag it anywhere, resize it with the handles, or select it and press Delete. Choose Done when positioning is complete, then Save As to create a new PDF while preserving the original.",
       },
       {
         title: "Export pages as images",

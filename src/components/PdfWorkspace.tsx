@@ -128,10 +128,18 @@ const PDF_IMAGE_MIME_TYPES = [
   "image/x-icon",
 ];
 const PDF_IMAGE_EXTENSIONS = ["apng", "avif", "bmp", "gif", "ico", "jpg", "jpeg", "png", "svg", "webp"];
-const PDF_IMAGE_ACCEPT = [
-  ...PDF_IMAGE_EXTENSIONS.map((extension) => `.${extension}`),
-  ...PDF_IMAGE_MIME_TYPES,
-].join(",");
+const PDF_IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
+  apng: "image/apng",
+  avif: "image/avif",
+  bmp: "image/bmp",
+  gif: "image/gif",
+  ico: "image/x-icon",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  svg: "image/svg+xml",
+  webp: "image/webp",
+};
 
 const ZOOM_OPTIONS = [
   { value: "page-width", label: "Fit width" },
@@ -170,6 +178,11 @@ function isSupportedPdfImage(file: File): boolean {
   if (PDF_IMAGE_MIME_TYPES.includes(file.type.toLowerCase())) return true;
   const extension = file.name.split(".").pop()?.toLowerCase();
   return !!extension && PDF_IMAGE_EXTENSIONS.includes(extension);
+}
+
+function getPdfImageMimeTypeFromPath(filePath: string): string {
+  const extension = filePath.split(".").pop()?.toLowerCase() || "";
+  return PDF_IMAGE_MIME_BY_EXTENSION[extension] || "application/octet-stream";
 }
 
 function getRotatedImagePosition(editor: PdfStampEditor, rotation: number): { x: number; y: number } {
@@ -573,7 +586,6 @@ export function PdfWorkspace({
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
   const imageExportPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
   const documentRef = useRef<PDFDocumentProxy | null>(null);
   const pdfjsModuleRef = useRef<PdfJsModule | null>(null);
@@ -1142,10 +1154,7 @@ export function PdfWorkspace({
     return () => observer.disconnect();
   }, [phase, table.filePath]);
 
-  const insertImage = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.currentTarget.files?.[0];
-    event.currentTarget.value = "";
-    if (!file) return;
+  const insertImage = useCallback(async (file: File) => {
     if (!canModify) {
       setFeedback("This PDF does not allow content changes.");
       return;
@@ -1182,6 +1191,24 @@ export function PdfWorkspace({
       setInsertingImage(false);
     }
   }, [canModify, pageNumber, phase]);
+
+  const chooseImage = useCallback(async () => {
+    try {
+      const selected = await window.api.openPdfImageDialog();
+      if (!selected) return;
+      const imageBuffer = new ArrayBuffer(selected.bytes.byteLength);
+      new Uint8Array(imageBuffer).set(selected.bytes);
+      const file = new File(
+        [imageBuffer],
+        getFileName(selected.filePath),
+        { type: getPdfImageMimeTypeFromPath(selected.filePath) }
+      );
+      await insertImage(file);
+    } catch (selectionError) {
+      console.error("Failed to choose a PDF image", selectionError);
+      setFeedback(`Could not choose the image: ${selectionError instanceof Error ? selectionError.message : String(selectionError)}`);
+    }
+  }, [insertImage]);
 
   const finishImageEditing = useCallback(async () => {
     const runtime = runtimeRef.current;
@@ -1663,13 +1690,6 @@ export function PdfWorkspace({
         </div>
 
         <div className="pdf-toolbar-group pdf-toolbar-actions">
-          <input
-            ref={imageInputRef}
-            className="pdf-image-input"
-            type="file"
-            accept={PDF_IMAGE_ACCEPT}
-            onChange={(event) => void insertImage(event)}
-          />
           <Button
             icon="media"
             text="Image"
@@ -1678,7 +1698,7 @@ export function PdfWorkspace({
             active={imageEditing}
             loading={insertingImage}
             disabled={!canModify || phase !== "ready"}
-            onClick={() => imageInputRef.current?.click()}
+            onClick={() => void chooseImage()}
             title={canModify ? "Insert an image on the current PDF page" : "Content changes are restricted by this PDF"}
           />
           {imageEditing && (

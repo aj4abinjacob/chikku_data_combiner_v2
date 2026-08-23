@@ -368,6 +368,11 @@ pub fn write_text_file(file_path: String, contents: String) -> AppResult<bool> {
 }
 
 #[tauri::command]
+pub fn read_binary_file(file_path: String) -> AppResult<Vec<u8>> {
+    Ok(std::fs::read(file_path)?)
+}
+
+#[tauri::command]
 pub fn write_binary_file(file_path: String, bytes: Vec<u8>) -> AppResult<bool> {
     std::fs::write(file_path, bytes)?;
     Ok(true)

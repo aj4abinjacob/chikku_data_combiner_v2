@@ -100,6 +100,7 @@ pub fn run() {
             read_json_file,
             read_text_file,
             write_text_file,
+            read_binary_file,
             write_binary_file,
             file_exists,
             allow_pdf_asset,

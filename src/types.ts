@@ -18,6 +18,7 @@ export interface DbApi {
   saveDialog: () => Promise<string | null>;
   saveFileDialog: (format: string) => Promise<string | null>;
   openDataFileDialog: () => Promise<string[] | null>;
+  openPdfImageDialog: () => Promise<{ filePath: string; bytes: Uint8Array } | null>;
   getFreeMemory: () => Promise<number>;
   getRegexPatterns: () => Promise<RegexPattern[]>;
   saveUserPattern: (pattern: RegexPattern) => Promise<boolean>;

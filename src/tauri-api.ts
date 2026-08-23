@@ -51,6 +51,11 @@ const dataFileFilters = [
   { name: "Excel", extensions: ["xlsx", "xls"] },
 ];
 
+const pdfImageFilter = [{
+  name: "Supported Images",
+  extensions: ["apng", "avif", "bmp", "gif", "ico", "jpg", "jpeg", "png", "svg", "webp"],
+}];
+
 function installTauriApi() {
   const api: DbApi = {
     loadCSV: (filePath: string, tableName: string) =>
@@ -103,6 +108,18 @@ function installTauriApi() {
       if (!selected) return null;
       return (Array.isArray(selected) ? selected : [selected])
         .filter((path): path is string => typeof path === "string");
+    },
+
+    openPdfImageDialog: async () => {
+      const selected = await openDialog({
+        multiple: false,
+        title: "Choose an image to insert",
+        filters: pdfImageFilter,
+      });
+      const filePath = Array.isArray(selected) ? selected[0] : selected;
+      if (!filePath) return null;
+      const bytes = await invoke<number[]>("read_binary_file", { filePath });
+      return { filePath, bytes: new Uint8Array(bytes) };
     },
 
     getFreeMemory: () => invoke("free_memory"),
