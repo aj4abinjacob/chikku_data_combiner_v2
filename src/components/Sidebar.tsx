@@ -52,6 +52,7 @@ interface SidebarProps {
   markdownWorkspaceActive?: boolean;
   pdfWorkspaceActive?: boolean;
   documentFileActions?: DocumentWorkspaceFileActions | null;
+  onPdfNavigationHostChange?: (host: HTMLDivElement | null) => void;
 }
 
 interface FileContextMenuState {
@@ -227,6 +228,7 @@ export function Sidebar({
   markdownWorkspaceActive = false,
   pdfWorkspaceActive = false,
   documentFileActions = null,
+  onPdfNavigationHostChange,
 }: SidebarProps): React.ReactElement {
   const [dataOpDialogOpen, setDataOpDialogOpen] = useState(false);
   const [aggregateDialogOpen, setAggregateDialogOpen] = useState(false);
@@ -795,6 +797,13 @@ export function Sidebar({
             </span>
           </Tooltip2>
         </div>
+      )}
+
+      {pdfWorkspaceActive && (
+        <div
+          ref={onPdfNavigationHostChange}
+          className="sidebar-pdf-navigation"
+        />
       )}
 
       {!documentWorkspaceActive && activeTable && schema.length > 0 && (

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactDOM from "react-dom";
 import { Button, Classes, Dialog, Icon, InputGroup, Intent, ProgressBar, Spinner, Tag } from "@blueprintjs/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -25,6 +26,7 @@ interface PdfWorkspaceProps {
   onOpenFiles: () => void;
   onPageCountChange: (pageCount: number) => void;
   onFileActionsChange?: (actions: DocumentWorkspaceFileActions | null) => void;
+  navigationHost: HTMLDivElement | null;
 }
 
 interface ViewerRuntime {
@@ -102,7 +104,7 @@ interface ImageContextMenuState {
 }
 
 type PdfPhase = "loading" | "ready" | "error";
-type SidePanel = "closed" | "thumbnails" | "outline";
+type SidePanel = "thumbnails" | "outline";
 type PdfImagePageSelection = "current" | "all";
 
 const PDF_RANGE_CHUNK_SIZE = 256 * 1024;
@@ -582,6 +584,7 @@ export function PdfWorkspace({
   onOpenFiles,
   onPageCountChange,
   onFileActionsChange,
+  navigationHost,
 }: PdfWorkspaceProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
@@ -1617,14 +1620,6 @@ export function PdfWorkspace({
         </div>
 
         <div className="pdf-toolbar-group">
-          <Button
-            icon="menu-open"
-            minimal
-            small
-            active={sidePanel !== "closed"}
-            onClick={() => setSidePanel((current) => current === "closed" ? "thumbnails" : "closed")}
-            title="Toggle PDF navigation panel"
-          />
           <Button icon="chevron-left" minimal small disabled={pageNumber <= 1} onClick={() => goToPage(pageNumber - 1)} />
           <input
             className="pdf-page-input"
@@ -1741,27 +1736,28 @@ export function PdfWorkspace({
         </div>
       )}
 
-      <div className="pdf-workspace-body">
-        {sidePanel !== "closed" && document && (
-          <aside className="pdf-side-panel">
-            <div className="pdf-side-tabs" role="tablist" aria-label="PDF navigation">
-              <button type="button" role="tab" aria-selected={sidePanel === "thumbnails"} onClick={() => setSidePanel("thumbnails")}>
-                <Icon icon="grid-view" size={12} /> Pages
-              </button>
-              <button type="button" role="tab" aria-selected={sidePanel === "outline"} onClick={() => setSidePanel("outline")}>
-                <Icon icon="list" size={12} /> Outline
-              </button>
-            </div>
-            {sidePanel === "thumbnails" ? (
-              <PdfThumbnailList document={document} currentPage={pageNumber} onSelect={goToPage} />
-            ) : outline.length > 0 ? (
-              <div className="pdf-outline-scroll"><PdfOutline items={outline} onActivate={activateOutline} /></div>
-            ) : (
-              <div className="pdf-empty-panel">This PDF has no document outline.</div>
-            )}
-          </aside>
-        )}
+      {navigationHost && document && ReactDOM.createPortal(
+        <aside className="pdf-side-panel">
+          <div className="pdf-side-tabs" role="tablist" aria-label="PDF navigation">
+            <button type="button" role="tab" aria-selected={sidePanel === "thumbnails"} onClick={() => setSidePanel("thumbnails")}>
+              <Icon icon="grid-view" size={12} /> Pages
+            </button>
+            <button type="button" role="tab" aria-selected={sidePanel === "outline"} onClick={() => setSidePanel("outline")}>
+              <Icon icon="list" size={12} /> Outline
+            </button>
+          </div>
+          {sidePanel === "thumbnails" ? (
+            <PdfThumbnailList document={document} currentPage={pageNumber} onSelect={goToPage} />
+          ) : outline.length > 0 ? (
+            <div className="pdf-outline-scroll"><PdfOutline items={outline} onActivate={activateOutline} /></div>
+          ) : (
+            <div className="pdf-empty-panel">This PDF has no document outline.</div>
+          )}
+        </aside>,
+        navigationHost
+      )}
 
+      <div className="pdf-workspace-body">
         <div className="pdf-viewer-stage">
           <div
             ref={containerRef}

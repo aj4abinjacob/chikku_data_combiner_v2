@@ -491,6 +491,7 @@ export function App(): React.ReactElement {
   const [tables, setTables] = useState<LoadedTable[]>([]);
   const [activeTable, setActiveTable] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [pdfNavigationHost, setPdfNavigationHost] = useState<HTMLDivElement | null>(null);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [qcPanelRequestKey, setQcPanelRequestKey] = useState(0);
   const [combineDialogOpen, setCombineDialogOpen] = useState(false);
@@ -3204,6 +3205,7 @@ export function App(): React.ReactElement {
               markdownWorkspaceActive={markdownWorkspaceActive}
               pdfWorkspaceActive={pdfWorkspaceActive}
               documentFileActions={documentFileActions}
+              onPdfNavigationHostChange={setPdfNavigationHost}
             />
           </div>
           <div className="sidebar-shell-strip" aria-hidden={sidebarVisible}>
@@ -3251,6 +3253,7 @@ export function App(): React.ReactElement {
                   onOpenFiles={handleChooseFiles}
                   onPageCountChange={handleActivePdfPageCountChange}
                   onFileActionsChange={setDocumentFileActions}
+                  navigationHost={pdfNavigationHost}
                 />
               ) : comparisonActive && comparisonConfig && activeTable ? (
                 <ComparisonView
