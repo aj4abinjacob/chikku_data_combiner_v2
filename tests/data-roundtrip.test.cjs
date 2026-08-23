@@ -22,6 +22,11 @@ const { mergeFilterListValues } = require("../.test-dist/utils/filterValues.js")
 const { compareExactNumericValues } = require("../.test-dist/utils/numericCompare.js");
 const { pivotPathKey } = require("../.test-dist/utils/pivotPath.js");
 const { getEnabledLinkPreviewTarget, getLinkPreviewTarget } = require("../.test-dist/utils/linkPreview.js");
+const {
+  ensurePdfImageExtension,
+  getPdfImageDimensions,
+  getPdfImagePagePath,
+} = require("../.test-dist/utils/pdfImageExport.js");
 
 test("timestamp IN values retain precision and offsets as typed literals", () => {
   const sql = buildFilterClause({
@@ -264,6 +269,39 @@ test("public HTTPS links keep their full URL for metadata previews", () => {
       hostname: "docs.google.com",
     }
   );
+});
+
+test("PDF image export resolves standard paper sizes and page filenames", () => {
+  assert.deepEqual(getPdfImageDimensions(612, 792, "a4", 150, "portrait"), {
+    width: 1240,
+    height: 1754,
+  });
+  assert.deepEqual(getPdfImageDimensions(792, 612, "a4", 150, "auto"), {
+    width: 1754,
+    height: 1240,
+  });
+  assert.deepEqual(getPdfImageDimensions(612, 792, "original", 96, "landscape"), {
+    width: 816,
+    height: 1056,
+  });
+  assert.deepEqual(getPdfImageDimensions(612, 792, "custom", 300, "portrait", {
+    width: 100,
+    height: 200,
+    unit: "mm",
+  }), {
+    width: 1181,
+    height: 2362,
+  });
+  assert.deepEqual(getPdfImageDimensions(612, 792, "custom", 96, "portrait", {
+    width: 1080,
+    height: 1350,
+    unit: "px",
+  }), {
+    width: 1080,
+    height: 1350,
+  });
+  assert.equal(ensurePdfImageExtension("/tmp/report.pdf", "jpeg"), "/tmp/report.jpg");
+  assert.equal(getPdfImagePagePath("/tmp/report.png", "png", 7, 24), "/tmp/report-page-007.png");
 });
 
 test("disabled live link previews never create a metadata preview target", () => {

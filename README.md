@@ -5,7 +5,7 @@ A Tauri desktop app for viewing documents and exploring, combining, and transfor
 ## Features
 
 - **Data Viewer** — Open and browse large CSV, TSV, JSON, Parquet, and Excel files with virtualized scrolling
-- **Read-only PDF Viewer** — Search, thumbnails, outlines, zoom, rotation, password prompts, and permission-aware printing without modifying source PDFs
+- **PDF Viewer, Image Placement & Export** — Search, thumbnails, outlines, zoom, rotation, permission-aware printing, drag-and-resize image insertion, and PNG/JPEG/WebP page export at standard paper sizes such as A4 or custom pixel/physical dimensions
 - **Combine Tables** — Load multiple files and combine them with flexible column mapping
 - **Column Operations** — Transform columns with regex extract, trim, upper/lower case, find/replace, assignment, and more
 - **Filter & Sort** — Filter data with 16+ operators and sort by any column

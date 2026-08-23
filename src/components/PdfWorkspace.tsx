@@ -1,9 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Classes, Dialog, Icon, InputGroup, Intent, Spinner, Tag } from "@blueprintjs/core";
+import { Button, Classes, Dialog, Icon, InputGroup, Intent, ProgressBar, Spinner, Tag } from "@blueprintjs/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
-import { LoadedTable } from "../types";
+import { DocumentWorkspaceFileActions, LoadedTable } from "../types";
+import {
+  ensurePdfImageExtension,
+  getPdfImageDimensions,
+  getPdfImageMimeType,
+  getPdfImagePagePath,
+  PDF_IMAGE_PAPER_OPTIONS,
+  PdfImageCustomSize,
+  PdfImageCustomUnit,
+  PdfImageFormat,
+  PdfImageOrientation,
+  PdfImagePaperSize,
+  PdfImageResolution,
+} from "../utils/pdfImageExport";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -11,6 +24,7 @@ interface PdfWorkspaceProps {
   table: LoadedTable;
   onOpenFiles: () => void;
   onPageCountChange: (pageCount: number) => void;
+  onFileActionsChange?: (actions: DocumentWorkspaceFileActions | null) => void;
 }
 
 interface ViewerRuntime {
@@ -18,6 +32,7 @@ interface ViewerRuntime {
   findController: any;
   linkService: any;
   pdfViewer: any;
+  annotationEditorUIManager: any | null;
   findState: Record<string, number>;
 }
 
@@ -39,8 +54,56 @@ interface FindMatchesCount {
   total: number;
 }
 
+interface PdfStampEditor {
+  id: string;
+  annotationElementId: string | null;
+  pageIndex: number;
+  div: HTMLElement;
+  rotation: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  pageDimensions: [number, number];
+  pageTranslation: [number, number];
+  getPDFRect: () => [number, number, number, number];
+  fixAndSetPosition: (rotation?: number) => void;
+  addCommands: (params: {
+    cmd: () => void;
+    undo: () => void;
+    mustExec: boolean;
+  }) => void;
+  serialize: (isForCopying?: boolean, context?: any) => any;
+}
+
+interface PdfLayerEditor {
+  id: string;
+  annotationElementId: string | null;
+  pageIndex: number;
+  div: HTMLElement;
+}
+
+interface PdfAnnotationStorage {
+  [Symbol.iterator](): IterableIterator<[string, unknown]>;
+  remove: (key: string) => void;
+  setValue: (key: string, value: unknown) => void;
+}
+
+interface ImageTransformState {
+  flipHorizontal: boolean;
+  flipVertical: boolean;
+  originalSerialize: PdfStampEditor["serialize"] | null;
+}
+
+interface ImageContextMenuState {
+  editorId: string;
+  x: number;
+  y: number;
+}
+
 type PdfPhase = "loading" | "ready" | "error";
 type SidePanel = "closed" | "thumbnails" | "outline";
+type PdfImagePageSelection = "current" | "all";
 
 const PDF_RANGE_CHUNK_SIZE = 256 * 1024;
 const PDF_MAX_CANVAS_PIXELS = 3_600_000;
@@ -49,6 +112,26 @@ const PDF_MAX_DIRECT_PRINT_PAGES = 50;
 const PDF_MAX_ESTIMATED_PRINT_BYTES = 400 * 1024 * 1024;
 const PDF_PRINT_DPI = 150;
 const PDF_LOW_QUALITY_PRINT_DPI = 96;
+const PDF_IMAGE_EXPORT_MAX_PIXELS = 40_000_000;
+const PDF_IMAGE_EXPORT_MAX_DIMENSION = 16384;
+const PDF_IMAGE_PREVIEW_MAX_WIDTH = 470;
+const PDF_IMAGE_PREVIEW_MAX_HEIGHT = 390;
+const PDF_IMAGE_MIME_TYPES = [
+  "image/apng",
+  "image/avif",
+  "image/bmp",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/svg+xml",
+  "image/webp",
+  "image/x-icon",
+];
+const PDF_IMAGE_EXTENSIONS = ["apng", "avif", "bmp", "gif", "ico", "jpg", "jpeg", "png", "svg", "webp"];
+const PDF_IMAGE_ACCEPT = [
+  ...PDF_IMAGE_EXTENSIONS.map((extension) => `.${extension}`),
+  ...PDF_IMAGE_MIME_TYPES,
+].join(",");
 
 const ZOOM_OPTIONS = [
   { value: "page-width", label: "Fit width" },
@@ -63,8 +146,100 @@ const ZOOM_OPTIONS = [
   { value: "3", label: "300%" },
 ];
 
+const PDF_IMAGE_FORMAT_OPTIONS: { value: PdfImageFormat; label: string; detail: string }[] = [
+  { value: "png", label: "PNG", detail: "Sharp text and lossless quality" },
+  { value: "jpeg", label: "JPEG", detail: "Smaller files for sharing" },
+  { value: "webp", label: "WebP", detail: "Compact files with high quality" },
+];
+
+const PDF_IMAGE_RESOLUTION_OPTIONS: { value: PdfImageResolution; label: string }[] = [
+  { value: 96, label: "96 DPI · Screen" },
+  { value: 150, label: "150 DPI · Standard" },
+  { value: 300, label: "300 DPI · Print" },
+];
+
 function getFileName(path: string): string {
   return path.split(/[/\\]/).pop() || path;
+}
+
+function ensurePdfExtension(path: string): string {
+  return /\.pdf$/i.test(path) ? path : `${path}.pdf`;
+}
+
+function isSupportedPdfImage(file: File): boolean {
+  if (PDF_IMAGE_MIME_TYPES.includes(file.type.toLowerCase())) return true;
+  const extension = file.name.split(".").pop()?.toLowerCase();
+  return !!extension && PDF_IMAGE_EXTENSIONS.includes(extension);
+}
+
+function getRotatedImagePosition(editor: PdfStampEditor, rotation: number): { x: number; y: number } {
+  const [pageWidth, pageHeight] = editor.pageDimensions;
+  const [pageX, pageY] = editor.pageTranslation;
+  const [left, bottom, right, top] = editor.getPDFRect();
+  const centerX = (left + right) / 2 - pageX;
+  const centerY = (bottom + top) / 2 - pageY;
+  const width = editor.width * pageWidth;
+  const height = editor.height * pageHeight;
+
+  switch (rotation) {
+    case 90:
+      return {
+        x: (centerX - height / 2) / pageWidth,
+        y: (pageHeight + width / 2 - centerY) / pageHeight,
+      };
+    case 180:
+      return {
+        x: (centerX + width / 2) / pageWidth,
+        y: (pageHeight + height / 2 - centerY) / pageHeight,
+      };
+    case 270:
+      return {
+        x: (centerX + height / 2) / pageWidth,
+        y: (pageHeight - width / 2 - centerY) / pageHeight,
+      };
+    default:
+      return {
+        x: (centerX - width / 2) / pageWidth,
+        y: (pageHeight - centerY - height / 2) / pageHeight,
+      };
+  }
+}
+
+function flipSerializedBitmap(bitmap: ImageBitmap, flipHorizontal: boolean, flipVertical: boolean): ImageBitmap {
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Image transformation is not available in this webview");
+  context.translate(flipHorizontal ? bitmap.width : 0, flipVertical ? bitmap.height : 0);
+  context.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
+  context.drawImage(bitmap, 0, 0);
+  return canvas.transferToImageBitmap();
+}
+
+function isInsertedLayerEditor(value: unknown, pageIndex: number): value is PdfLayerEditor {
+  if (!value || typeof value !== "object") return false;
+  const editor = value as Partial<PdfLayerEditor>;
+  return (
+    editor.annotationElementId === null
+    && editor.pageIndex === pageIndex
+    && typeof editor.id === "string"
+    && editor.div instanceof HTMLElement
+  );
+}
+
+function getInsertedLayerEntries(
+  annotationStorage: PdfAnnotationStorage,
+  pageIndex: number
+): [string, PdfLayerEditor][] {
+  return Array.from(annotationStorage).filter(
+    (entry): entry is [string, PdfLayerEditor] => isInsertedLayerEditor(entry[1], pageIndex)
+  );
+}
+
+function syncInsertedLayerOrder(annotationStorage: PdfAnnotationStorage, pageIndex: number): void {
+  const layerEditors = getInsertedLayerEntries(annotationStorage, pageIndex);
+  layerEditors.forEach(([, editor], index) => {
+    editor.div.style.zIndex = String(1000 + index);
+  });
 }
 
 function getPdfAssetBase(): string {
@@ -213,18 +388,199 @@ async function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
+interface PdfImageRenderSettings {
+  paperSize: PdfImagePaperSize;
+  resolution: PdfImageResolution;
+  orientation: PdfImageOrientation;
+  customSize?: PdfImageCustomSize;
+}
+
+interface RenderedPdfImage {
+  canvas: HTMLCanvasElement;
+  dimensions: { width: number; height: number };
+}
+
+function getPreviewDimensions(width: number, height: number): { width: number; height: number } {
+  const scale = Math.min(PDF_IMAGE_PREVIEW_MAX_WIDTH / width, PDF_IMAGE_PREVIEW_MAX_HEIGHT / height, 1);
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+async function renderPdfPageImage(
+  pdfDocument: PDFDocumentProxy,
+  pdfjsLib: PdfJsModule,
+  pageNumber: number,
+  settings: PdfImageRenderSettings,
+  preview = false,
+  printAnnotationStorage: any = null
+): Promise<RenderedPdfImage> {
+  const page = await pdfDocument.getPage(pageNumber);
+  const baseViewport = page.getViewport({ scale: 1 });
+  const exportDimensions = getPdfImageDimensions(
+    baseViewport.width,
+    baseViewport.height,
+    settings.paperSize,
+    settings.resolution,
+    settings.orientation,
+    settings.customSize
+  );
+  if (
+    !preview
+    && (exportDimensions.width * exportDimensions.height > PDF_IMAGE_EXPORT_MAX_PIXELS
+      || exportDimensions.width > PDF_IMAGE_EXPORT_MAX_DIMENSION
+      || exportDimensions.height > PDF_IMAGE_EXPORT_MAX_DIMENSION)
+  ) {
+    throw new Error(
+      `The selected output size (${exportDimensions.width.toLocaleString()} × ${exportDimensions.height.toLocaleString()} px) is too large. Choose a lower DPI or smaller paper size.`
+    );
+  }
+
+  const canvasDimensions = preview
+    ? getPreviewDimensions(exportDimensions.width, exportDimensions.height)
+    : exportDimensions;
+  const contentScale = Math.min(
+    canvasDimensions.width / baseViewport.width,
+    canvasDimensions.height / baseViewport.height
+  );
+  const viewport = page.getViewport({ scale: contentScale });
+  const offsetX = Math.max(0, (canvasDimensions.width - viewport.width) / 2);
+  const offsetY = Math.max(0, (canvasDimensions.height - viewport.height) / 2);
+  const canvas = window.document.createElement("canvas");
+  canvas.width = canvasDimensions.width;
+  canvas.height = canvasDimensions.height;
+  const context = canvas.getContext("2d", { alpha: false });
+  if (!context) throw new Error("Image rendering is not available in this webview");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  await page.render({
+    canvas,
+    viewport,
+    transform: [1, 0, 0, 1, offsetX, offsetY],
+    background: "#ffffff",
+    intent: preview ? "display" : "print",
+    annotationMode: pdfjsLib.AnnotationMode.ENABLE_STORAGE,
+    printAnnotationStorage,
+  }).promise;
+
+  return { canvas, dimensions: exportDimensions };
+}
+
+async function canvasToImageBytes(
+  canvas: HTMLCanvasElement,
+  format: PdfImageFormat,
+  quality: number
+): Promise<Uint8Array> {
+  const mimeType = getPdfImageMimeType(format);
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (result) => {
+        if (!result) {
+          reject(new Error(`Unable to encode the page as ${format.toUpperCase()}`));
+        } else if (result.type !== mimeType) {
+          reject(new Error(`${format.toUpperCase()} export is not supported by this webview`));
+        } else {
+          resolve(result);
+        }
+      },
+      mimeType,
+      format === "png" ? undefined : quality / 100
+    );
+  });
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+async function switchPdfEditorMode(runtime: ViewerRuntime, mode: number): Promise<void> {
+  if (runtime.pdfViewer.annotationEditorMode === mode) return;
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("The PDF image editor did not become ready"));
+    }, 8000);
+    const handleModeChanged = (event: { mode: number }) => {
+      if (event.mode !== mode) return;
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      clearTimeout(timeout);
+      runtime.eventBus.off("annotationeditormodechanged", handleModeChanged);
+    };
+
+    runtime.eventBus.on("annotationeditormodechanged", handleModeChanged);
+    try {
+      runtime.pdfViewer.annotationEditorMode = { mode };
+    } catch (modeError) {
+      cleanup();
+      reject(modeError);
+    }
+  });
+}
+
+async function waitForAnnotationEditor(runtime: ViewerRuntime): Promise<void> {
+  if (runtime.annotationEditorUIManager) return;
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Image editing is not available for this PDF"));
+    }, 8000);
+    const handleManagerReady = (event: { uiManager: any }) => {
+      runtime.annotationEditorUIManager = event.uiManager;
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      clearTimeout(timeout);
+      runtime.eventBus.off("annotationeditoruimanager", handleManagerReady);
+    };
+
+    runtime.eventBus.on("annotationeditoruimanager", handleManagerReady);
+  });
+}
+
+async function waitForInsertedImage(viewer: HTMLElement, previousImageCount: number): Promise<void> {
+  if (viewer.querySelectorAll(".stampEditor canvas").length > previousImageCount) return;
+
+  await new Promise<void>((resolve, reject) => {
+    const observer = new MutationObserver(() => {
+      if (viewer.querySelectorAll(".stampEditor canvas").length <= previousImageCount) return;
+      cleanup();
+      resolve();
+    });
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("The selected image could not be prepared"));
+    }, 10000);
+    const cleanup = () => {
+      clearTimeout(timeout);
+      observer.disconnect();
+    };
+
+    observer.observe(viewer, { childList: true, subtree: true });
+  });
+}
+
 export function PdfWorkspace({
   table,
   onOpenFiles,
   onPageCountChange,
+  onFileActionsChange,
 }: PdfWorkspaceProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const imageExportPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
   const documentRef = useRef<PDFDocumentProxy | null>(null);
   const pdfjsModuleRef = useRef<PdfJsModule | null>(null);
   const runtimeRef = useRef<ViewerRuntime | null>(null);
   const pruneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const imageTransformsRef = useRef<WeakMap<PdfStampEditor, ImageTransformState>>(new WeakMap());
+  const imageTransformRevisionRef = useRef(0);
 
   const [phase, setPhase] = useState<PdfPhase>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -243,13 +599,42 @@ export function PdfWorkspace({
   const [passwordRequest, setPasswordRequest] = useState<PasswordRequest | null>(null);
   const [password, setPassword] = useState("");
   const [canPrint, setCanPrint] = useState(true);
+  const [canModify, setCanModify] = useState(false);
   const [highQualityPrint, setHighQualityPrint] = useState(true);
   const [signatureCount, setSignatureCount] = useState(0);
+  const [imageEditing, setImageEditing] = useState(false);
+  const [insertingImage, setInsertingImage] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [imageContextMenu, setImageContextMenu] = useState<ImageContextMenuState | null>(null);
+  const [imageExportOpen, setImageExportOpen] = useState(false);
+  const [imageExportFormat, setImageExportFormat] = useState<PdfImageFormat>("png");
+  const [imageExportPaperSize, setImageExportPaperSize] = useState<PdfImagePaperSize>("a4");
+  const [imageExportResolution, setImageExportResolution] = useState<PdfImageResolution>(150);
+  const [imageExportOrientation, setImageExportOrientation] = useState<PdfImageOrientation>("auto");
+  const [imageExportCustomWidth, setImageExportCustomWidth] = useState("210");
+  const [imageExportCustomHeight, setImageExportCustomHeight] = useState("297");
+  const [imageExportCustomUnit, setImageExportCustomUnit] = useState<PdfImageCustomUnit>("mm");
+  const [imageExportPageSelection, setImageExportPageSelection] = useState<PdfImagePageSelection>("current");
+  const [imageExportPreviewPage, setImageExportPreviewPage] = useState(1);
+  const [imageExportQuality, setImageExportQuality] = useState(90);
+  const [imageExportDimensions, setImageExportDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [imageExportPreviewing, setImageExportPreviewing] = useState(false);
+  const [imageExporting, setImageExporting] = useState(false);
+  const [imageExportProgress, setImageExportProgress] = useState(0);
+  const [imageExportStatus, setImageExportStatus] = useState<string | null>(null);
   const [retryVersion, setRetryVersion] = useState(0);
 
   const fileName = useMemo(() => getFileName(table.filePath), [table.filePath]);
+  const imageExportCustomSize = useMemo<PdfImageCustomSize | null>(() => {
+    const width = Number(imageExportCustomWidth);
+    const height = Number(imageExportCustomHeight);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+    return { width, height, unit: imageExportCustomUnit };
+  }, [imageExportCustomHeight, imageExportCustomUnit, imageExportCustomWidth]);
+  const imageExportCustomSizeValid = imageExportPaperSize !== "custom" || imageExportCustomSize !== null;
 
   const pruneDistantPages = useCallback((current: number) => {
     if (pruneTimerRef.current) clearTimeout(pruneTimerRef.current);
@@ -280,7 +665,18 @@ export function PdfWorkspace({
     setMatches({ current: 0, total: 0 });
     setFindNotFound(false);
     setSignatureCount(0);
+    setCanModify(false);
+    setImageEditing(false);
+    setInsertingImage(false);
+    setHasUnsavedChanges(false);
+    setSaving(false);
     setFeedback(null);
+    setImageContextMenu(null);
+    setImageExportOpen(false);
+    setImageExporting(false);
+    setImageExportProgress(0);
+    setImageExportStatus(null);
+    imageTransformsRef.current = new WeakMap();
 
     const openPdf = async () => {
       if (!containerRef.current || !viewerRef.current) return;
@@ -309,7 +705,7 @@ export function PdfWorkspace({
         linkService,
         findController,
         annotationMode: pdfjsLib.AnnotationMode.ENABLE,
-        annotationEditorMode: pdfjsLib.AnnotationEditorType.DISABLE,
+        annotationEditorMode: pdfjsLib.AnnotationEditorType.NONE,
         enablePermissions: true,
         enableAutoLinking: false,
         maxCanvasPixels: PDF_MAX_CANVAS_PIXELS,
@@ -325,6 +721,7 @@ export function PdfWorkspace({
         findController,
         linkService,
         pdfViewer,
+        annotationEditorUIManager: null,
         findState: viewerModule.FindState,
       };
       runtimeRef.current = runtime;
@@ -343,6 +740,12 @@ export function PdfWorkspace({
       });
       eventBus.on("rotationchanging", (event: { pagesRotation: number }) => {
         setRotation(event.pagesRotation);
+      });
+      eventBus.on("annotationeditoruimanager", (event: { uiManager: any }) => {
+        if (runtime) runtime.annotationEditorUIManager = event.uiManager;
+      });
+      eventBus.on("annotationeditormodechanged", (event: { mode: number }) => {
+        setImageEditing(event.mode === pdfjsLib.AnnotationEditorType.STAMP);
       });
       eventBus.on("updatefindmatchescount", (event: { matchesCount: FindMatchesCount }) => {
         setMatches(event.matchesCount);
@@ -396,6 +799,13 @@ export function PdfWorkspace({
       }
 
       documentRef.current = pdfDocument;
+      const annotationStorage = pdfDocument.annotationStorage as any;
+      annotationStorage.onSetModified = () => {
+        if (!disposed) setHasUnsavedChanges(true);
+      };
+      annotationStorage.onResetModified = () => {
+        if (!disposed) setHasUnsavedChanges(false);
+      };
       setDocument(pdfDocument);
       setPageCount(pdfDocument.numPages);
       onPageCountChange(pdfDocument.numPages);
@@ -414,7 +824,10 @@ export function PdfWorkspace({
       const printAllowed = permissions === null
         || permissions.includes(pdfjsLib.PermissionFlag.PRINT)
         || permissions.includes(pdfjsLib.PermissionFlag.PRINT_HIGH_QUALITY);
+      const modifyAllowed = permissions === null
+        || permissions.includes(pdfjsLib.PermissionFlag.MODIFY_CONTENTS);
       setCanPrint(printAllowed);
+      setCanModify(modifyAllowed);
       setHighQualityPrint(
         permissions === null || permissions.includes(pdfjsLib.PermissionFlag.PRINT_HIGH_QUALITY)
       );
@@ -440,6 +853,11 @@ export function PdfWorkspace({
       runtime?.findController?.setDocument(null);
       runtime?.linkService?.setDocument(null);
       runtime?.pdfViewer?.setDocument(null);
+      if (documentRef.current) {
+        const annotationStorage = documentRef.current.annotationStorage as any;
+        annotationStorage.onSetModified = null;
+        annotationStorage.onResetModified = null;
+      }
       runtimeRef.current = null;
       documentRef.current = null;
       pdfjsModuleRef.current = null;
@@ -494,6 +912,12 @@ export function PdfWorkspace({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  useEffect(() => {
+    if (phase === "ready" && !highQualityPrint && imageExportResolution !== 96) {
+      setImageExportResolution(96);
+    }
+  }, [highQualityPrint, imageExportResolution, phase]);
+
   const goToPage = useCallback((nextPage: number) => {
     const viewer = runtimeRef.current?.pdfViewer;
     if (!viewer || pageCount === 0) return;
@@ -535,6 +959,513 @@ export function PdfWorkspace({
       setFeedback(`Could not open the system PDF viewer: ${String(openError)}`);
     }
   }, [table.filePath]);
+
+  const getStampEditor = useCallback((editorId: string): PdfStampEditor | null => {
+    const editor = runtimeRef.current?.annotationEditorUIManager?.getEditor(editorId) as PdfStampEditor | undefined;
+    return editor?.div?.classList.contains("stampEditor") ? editor : null;
+  }, []);
+
+  const markImageTransformModified = useCallback((editor: PdfStampEditor) => {
+    const annotationStorage = documentRef.current?.annotationStorage as any;
+    if (!annotationStorage) return;
+    imageTransformRevisionRef.current += 1;
+    annotationStorage.setValue(editor.id, {
+      chikkuTransformRevision: imageTransformRevisionRef.current,
+    });
+  }, []);
+
+  const getImageTransformState = useCallback((editor: PdfStampEditor): ImageTransformState => {
+    let state = imageTransformsRef.current.get(editor);
+    if (!state) {
+      state = {
+        flipHorizontal: false,
+        flipVertical: false,
+        originalSerialize: null,
+      };
+      imageTransformsRef.current.set(editor, state);
+    }
+    if (!state.originalSerialize) {
+      const originalSerialize = editor.serialize.bind(editor);
+      state.originalSerialize = originalSerialize;
+      editor.serialize = (isForCopying = false, context = null) => {
+        const serialized = originalSerialize(isForCopying, context);
+        if (
+          !serialized
+          || isForCopying
+          || (!state?.flipHorizontal && !state?.flipVertical)
+          || !serialized.bitmap
+        ) {
+          return serialized;
+        }
+        const sourceBitmap = serialized.bitmap as ImageBitmap;
+        serialized.bitmap = flipSerializedBitmap(
+          sourceBitmap,
+          !!state.flipHorizontal,
+          !!state.flipVertical
+        );
+        sourceBitmap.close?.();
+        return serialized;
+      };
+    }
+    return state;
+  }, []);
+
+  const applyImageFlip = useCallback((editorId: string, axis: "horizontal" | "vertical") => {
+    const editor = getStampEditor(editorId);
+    if (!editor || editor.annotationElementId) {
+      setFeedback("Flip is available for images inserted in Chikku.");
+      return;
+    }
+    const transformState = getImageTransformState(editor);
+    const before = {
+      flipHorizontal: transformState.flipHorizontal,
+      flipVertical: transformState.flipVertical,
+    };
+    const after = {
+      flipHorizontal: axis === "horizontal" ? !before.flipHorizontal : before.flipHorizontal,
+      flipVertical: axis === "vertical" ? !before.flipVertical : before.flipVertical,
+    };
+    const apply = (next: typeof before) => {
+      transformState.flipHorizontal = next.flipHorizontal;
+      transformState.flipVertical = next.flipVertical;
+      const canvas = editor.div.querySelector(":scope > canvas") as HTMLCanvasElement | null;
+      if (canvas) {
+        canvas.style.transformOrigin = "center";
+        canvas.style.transform = `scale(${next.flipHorizontal ? -1 : 1}, ${next.flipVertical ? -1 : 1})`;
+      }
+      markImageTransformModified(editor);
+    };
+    editor.addCommands({
+      cmd: () => apply(after),
+      undo: () => apply(before),
+      mustExec: true,
+    });
+    setFeedback(`Image flipped ${axis}ly. Use Save As to keep the change.`);
+  }, [getImageTransformState, getStampEditor, markImageTransformModified]);
+
+  const rotateImageClockwise = useCallback((editorId: string) => {
+    const editor = getStampEditor(editorId);
+    if (!editor || editor.annotationElementId) {
+      setFeedback("Rotation is available for images inserted in Chikku.");
+      return;
+    }
+    const before = { rotation: editor.rotation, x: editor.x, y: editor.y };
+    const nextRotation = (editor.rotation + 270) % 360;
+    const nextPosition = getRotatedImagePosition(editor, nextRotation);
+    const after = { rotation: nextRotation, ...nextPosition };
+    const apply = (next: typeof before) => {
+      editor.rotation = next.rotation;
+      editor.x = next.x;
+      editor.y = next.y;
+      editor.div.setAttribute("data-editor-rotation", String((360 - next.rotation) % 360));
+      editor.fixAndSetPosition(next.rotation);
+      markImageTransformModified(editor);
+    };
+    editor.addCommands({
+      cmd: () => apply(after),
+      undo: () => apply(before),
+      mustExec: true,
+    });
+    setFeedback("Image rotated 90° clockwise. Use Save As to keep the change.");
+  }, [getStampEditor, markImageTransformModified]);
+
+  const moveImageLayer = useCallback((editorId: string, direction: "forward" | "backward") => {
+    const editor = getStampEditor(editorId);
+    const annotationStorage = documentRef.current?.annotationStorage as unknown as PdfAnnotationStorage | undefined;
+    if (!editor || editor.annotationElementId || !annotationStorage) {
+      setFeedback("Layer ordering is available for images inserted in Chikku.");
+      return;
+    }
+
+    const before = getInsertedLayerEntries(annotationStorage, editor.pageIndex);
+    const currentIndex = before.findIndex(([, candidate]) => candidate === editor);
+    const targetIndex = direction === "forward" ? currentIndex + 1 : currentIndex - 1;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= before.length) {
+      setFeedback(direction === "forward" ? "Image is already at the front." : "Image is already at the back.");
+      return;
+    }
+
+    const after = [...before];
+    [after[currentIndex], after[targetIndex]] = [after[targetIndex], after[currentIndex]];
+    const apply = (orderedEntries: [string, PdfLayerEditor][]) => {
+      for (const [key] of getInsertedLayerEntries(annotationStorage, editor.pageIndex)) {
+        annotationStorage.remove(key);
+      }
+      for (const [key, value] of orderedEntries) {
+        annotationStorage.setValue(key, value);
+      }
+      syncInsertedLayerOrder(annotationStorage, editor.pageIndex);
+    };
+    editor.addCommands({
+      cmd: () => apply(after),
+      undo: () => apply(before),
+      mustExec: true,
+    });
+    runtimeRef.current?.annotationEditorUIManager?.unselectAll();
+    setFeedback(
+      direction === "forward"
+        ? "Image brought forward. Use Save As to keep the change."
+        : "Image sent backward. Use Save As to keep the change."
+    );
+  }, [getStampEditor]);
+
+  useEffect(() => {
+    if (phase !== "ready" || !viewerRef.current) return;
+    const viewer = viewerRef.current;
+    const decorateStampEditors = () => {
+      const manager = runtimeRef.current?.annotationEditorUIManager;
+      if (!manager) return;
+      const pageIndexes = new Set<number>();
+      for (const stamp of viewer.querySelectorAll<HTMLElement>(".stampEditor")) {
+        const editor = manager.getEditor(stamp.id) as PdfStampEditor | undefined;
+        if (!editor || editor.annotationElementId) continue;
+        pageIndexes.add(editor.pageIndex);
+        const buttons = stamp.querySelector<HTMLElement>(":scope > .editToolbar .buttons");
+        if (!buttons || buttons.querySelector(".chikku-image-rotate-button")) continue;
+        const rotateButton = window.document.createElement("button");
+        rotateButton.type = "button";
+        rotateButton.className = "basic chikku-image-rotate-button";
+        rotateButton.textContent = "↻";
+        rotateButton.title = "Rotate image 90° clockwise";
+        rotateButton.setAttribute("aria-label", "Rotate image 90° clockwise");
+        rotateButton.addEventListener("pointerdown", (event) => event.stopPropagation());
+        buttons.insertBefore(rotateButton, buttons.querySelector(".deleteButton"));
+      }
+      const annotationStorage = documentRef.current?.annotationStorage as unknown as PdfAnnotationStorage | undefined;
+      if (annotationStorage) {
+        for (const pageIndex of pageIndexes) syncInsertedLayerOrder(annotationStorage, pageIndex);
+      }
+    };
+    const observer = new MutationObserver(decorateStampEditors);
+    observer.observe(viewer, { childList: true, subtree: true });
+    decorateStampEditors();
+    return () => observer.disconnect();
+  }, [phase, table.filePath]);
+
+  const insertImage = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    if (!canModify) {
+      setFeedback("This PDF does not allow content changes.");
+      return;
+    }
+    if (!isSupportedPdfImage(file)) {
+      setFeedback("Choose a supported image: APNG, AVIF, BMP, GIF, ICO, JPEG, PNG, SVG, or WebP.");
+      return;
+    }
+
+    const runtime = runtimeRef.current;
+    const pdfjsLib = pdfjsModuleRef.current;
+    if (!runtime || !pdfjsLib || phase !== "ready") return;
+
+    setInsertingImage(true);
+    setFeedback(null);
+    try {
+      await waitForAnnotationEditor(runtime);
+      await switchPdfEditorMode(runtime, pdfjsLib.AnnotationEditorType.STAMP);
+      await runtime.annotationEditorUIManager.waitForEditorsRendered(pageNumber);
+      const editorLayer = runtime.annotationEditorUIManager.currentLayer?.div as HTMLElement | undefined;
+      if (!editorLayer) throw new Error("The current PDF page is not ready for image editing");
+      const previousImageCount = editorLayer.querySelectorAll(".stampEditor canvas").length;
+      runtime.eventBus.dispatch("switchannotationeditorparams", {
+        source: window,
+        type: pdfjsLib.AnnotationEditorParamsType.CREATE,
+        value: { bitmapFile: file },
+      });
+      await waitForInsertedImage(editorLayer, previousImageCount);
+      setFeedback(`Image added to page ${pageNumber}. Drag or resize it, use ↻ to rotate, right-click to flip, or press Enter to finish selecting it.`);
+    } catch (insertError) {
+      console.error("Failed to insert image into PDF", insertError);
+      setFeedback(`Could not add the image: ${insertError instanceof Error ? insertError.message : String(insertError)}`);
+    } finally {
+      setInsertingImage(false);
+    }
+  }, [canModify, pageNumber, phase]);
+
+  const finishImageEditing = useCallback(async () => {
+    const runtime = runtimeRef.current;
+    const pdfjsLib = pdfjsModuleRef.current;
+    if (!runtime || !pdfjsLib) return;
+    try {
+      await switchPdfEditorMode(runtime, pdfjsLib.AnnotationEditorType.NONE);
+      if (hasUnsavedChanges) setFeedback("Image placement is ready. Use Save As to create the edited PDF.");
+    } catch (modeError) {
+      setFeedback(`Could not finish image editing: ${modeError instanceof Error ? modeError.message : String(modeError)}`);
+    }
+  }, [hasUnsavedChanges]);
+
+  const savePdfAs = useCallback(async () => {
+    const pdfDocument = documentRef.current;
+    if (!pdfDocument || !hasUnsavedChanges || insertingImage || saving) return;
+
+    setSaving(true);
+    setFeedback(null);
+    try {
+      const path = await window.api.saveFileDialog("pdf");
+      if (!path) return;
+      const pdfPath = ensurePdfExtension(path);
+      if (pdfPath === table.filePath) {
+        setFeedback("Choose a different filename so the original PDF remains unchanged.");
+        return;
+      }
+
+      runtimeRef.current?.annotationEditorUIManager?.endCurrentEditing();
+      const contents = await pdfDocument.saveDocument();
+      await window.api.writeBinaryFile(pdfPath, contents);
+      setHasUnsavedChanges(false);
+      const runtime = runtimeRef.current;
+      const pdfjsLib = pdfjsModuleRef.current;
+      if (runtime && pdfjsLib) {
+        await switchPdfEditorMode(runtime, pdfjsLib.AnnotationEditorType.NONE).catch((modeError) => {
+          console.warn("The edited PDF was saved, but image editing could not be closed", modeError);
+        });
+      }
+      setFeedback(`Saved the edited PDF as ${getFileName(pdfPath)}.`);
+    } catch (saveError) {
+      setHasUnsavedChanges(true);
+      console.error("Failed to save edited PDF", saveError);
+      setFeedback(`Save failed: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
+    } finally {
+      setSaving(false);
+    }
+  }, [hasUnsavedChanges, insertingImage, saving, table.filePath]);
+
+  const openImageExport = useCallback(() => {
+    if (phase !== "ready" || !documentRef.current || !canPrint) return;
+    setImageExportPreviewPage(pageNumber);
+    setImageExportProgress(0);
+    setImageExportStatus(null);
+    setImageExportOpen(true);
+  }, [canPrint, pageNumber, phase]);
+
+  useEffect(() => {
+    if (!imageExportOpen || phase !== "ready" || !document || !pdfjsModuleRef.current) return;
+    if (!imageExportCustomSizeValid) {
+      setImageExportPreviewing(false);
+      setImageExportDimensions(null);
+      setImageExportStatus(null);
+      return;
+    }
+    let disposed = false;
+    setImageExportPreviewing(true);
+    setImageExportStatus(null);
+
+    void renderPdfPageImage(
+      document,
+      pdfjsModuleRef.current,
+      imageExportPreviewPage,
+      {
+        paperSize: imageExportPaperSize,
+        resolution: imageExportResolution,
+        orientation: imageExportOrientation,
+        customSize: imageExportPaperSize === "custom" ? imageExportCustomSize ?? undefined : undefined,
+      },
+      true
+    ).then((rendered) => {
+      if (disposed) {
+        rendered.canvas.width = 1;
+        rendered.canvas.height = 1;
+        return;
+      }
+      const previewCanvas = imageExportPreviewCanvasRef.current;
+      const previewContext = previewCanvas?.getContext("2d", { alpha: false });
+      if (!previewCanvas || !previewContext) throw new Error("The image preview is unavailable");
+      previewCanvas.width = rendered.canvas.width;
+      previewCanvas.height = rendered.canvas.height;
+      previewContext.drawImage(rendered.canvas, 0, 0);
+      rendered.canvas.width = 1;
+      rendered.canvas.height = 1;
+      setImageExportDimensions(rendered.dimensions);
+      setImageExportPreviewing(false);
+    }).catch((previewError) => {
+      if (disposed) return;
+      setImageExportPreviewing(false);
+      setImageExportStatus(`Preview failed: ${previewError instanceof Error ? previewError.message : String(previewError)}`);
+    });
+
+    return () => {
+      disposed = true;
+    };
+  }, [
+    document,
+    imageExportOpen,
+    imageExportOrientation,
+    imageExportPaperSize,
+    imageExportPreviewPage,
+    imageExportResolution,
+    imageExportCustomSize,
+    imageExportCustomSizeValid,
+    phase,
+  ]);
+
+  const exportPdfImages = useCallback(async () => {
+    const pdfDocument = documentRef.current;
+    const pdfjsLib = pdfjsModuleRef.current;
+    if (!pdfDocument || !pdfjsLib || imageExporting || phase !== "ready" || !imageExportCustomSizeValid) return;
+
+    setImageExporting(true);
+    setImageExportProgress(0);
+    setImageExportStatus(null);
+    let completedPages = 0;
+    try {
+      const selectedPath = await window.api.saveFileDialog(imageExportFormat);
+      if (!selectedPath) return;
+
+      const pageNumbers = imageExportPageSelection === "all"
+        ? Array.from({ length: pdfDocument.numPages }, (_, index) => index + 1)
+        : [imageExportPreviewPage];
+      const outputPaths = pageNumbers.map((outputPage) => imageExportPageSelection === "all"
+        ? getPdfImagePagePath(selectedPath, imageExportFormat, outputPage, pdfDocument.numPages)
+        : ensurePdfImageExtension(selectedPath, imageExportFormat));
+
+      if (imageExportPageSelection === "all") {
+        const existingPaths = (await Promise.all(outputPaths.map(async (outputPath) => (
+          await window.api.fileExists(outputPath) ? outputPath : null
+        )))).filter((outputPath): outputPath is string => outputPath !== null);
+        if (existingPaths.length > 0) {
+          throw new Error(
+            `${existingPaths.length} numbered output file${existingPaths.length === 1 ? " already exists" : "s already exist"}. Choose a different base filename.`
+          );
+        }
+      }
+
+      runtimeRef.current?.annotationEditorUIManager?.endCurrentEditing();
+      const printAnnotationStorage = pdfDocument.annotationStorage.print;
+      for (let index = 0; index < pageNumbers.length; index++) {
+        const rendered = await renderPdfPageImage(
+          pdfDocument,
+          pdfjsLib,
+          pageNumbers[index],
+          {
+            paperSize: imageExportPaperSize,
+            resolution: imageExportResolution,
+            orientation: imageExportOrientation,
+            customSize: imageExportPaperSize === "custom" ? imageExportCustomSize ?? undefined : undefined,
+          },
+          false,
+          printAnnotationStorage
+        );
+        const contents = await canvasToImageBytes(rendered.canvas, imageExportFormat, imageExportQuality);
+        rendered.canvas.width = 1;
+        rendered.canvas.height = 1;
+        await window.api.writeBinaryFile(outputPaths[index], contents);
+        completedPages++;
+        setImageExportProgress(completedPages / pageNumbers.length);
+      }
+
+      const formatLabel = PDF_IMAGE_FORMAT_OPTIONS.find((option) => option.value === imageExportFormat)?.label ?? imageExportFormat.toUpperCase();
+      const successMessage = imageExportPageSelection === "all"
+        ? `Exported ${completedPages} pages as numbered ${formatLabel} images.`
+        : `Exported page ${imageExportPreviewPage} as ${getFileName(outputPaths[0])}.`;
+      setFeedback(successMessage);
+      setImageExportOpen(false);
+    } catch (exportError) {
+      const detail = exportError instanceof Error ? exportError.message : String(exportError);
+      setImageExportStatus(completedPages > 0
+        ? `Export stopped after ${completedPages} page${completedPages === 1 ? "" : "s"}: ${detail}`
+        : `Export failed: ${detail}`);
+    } finally {
+      setImageExporting(false);
+    }
+  }, [
+    imageExportFormat,
+    imageExportCustomSize,
+    imageExportCustomSizeValid,
+    imageExportOrientation,
+    imageExportPageSelection,
+    imageExportPaperSize,
+    imageExportPreviewPage,
+    imageExportQuality,
+    imageExportResolution,
+    imageExporting,
+    phase,
+  ]);
+
+  useEffect(() => () => {
+    onFileActionsChange?.(null);
+  }, [onFileActionsChange]);
+
+  useEffect(() => {
+    const documentReady = phase === "ready";
+    onFileActionsChange?.({
+      workspaceKind: "pdf",
+      isDirty: hasUnsavedChanges,
+      isValid: documentReady,
+      saving,
+      exportingImages: imageExporting,
+      canExportImages: documentReady && canPrint && !imageExporting,
+      onOpenFiles,
+      onSave: savePdfAs,
+      saveLabel: "Save PDF",
+      saveTitle: "Save image changes to a new PDF",
+      onExportImages: openImageExport,
+      exportImagesLabel: "Export Images",
+      exportImagesTitle: "Export PDF pages as images",
+      exportImagesDisabledReason: !documentReady
+        ? "The PDF is still loading."
+        : !canPrint
+          ? "Image export is restricted by this PDF."
+          : null,
+    });
+  }, [
+    canPrint,
+    hasUnsavedChanges,
+    imageExporting,
+    onFileActionsChange,
+    onOpenFiles,
+    openImageExport,
+    phase,
+    savePdfAs,
+    saving,
+  ]);
+
+  useEffect(() => {
+    const handleSaveShortcut = (event: KeyboardEvent) => {
+      const modifier = navigator.platform.toLowerCase().includes("mac") ? event.metaKey : event.ctrlKey;
+      if (!modifier || event.altKey || event.key.toLowerCase() !== "s" || !hasUnsavedChanges) return;
+      event.preventDefault();
+      void savePdfAs();
+    };
+    window.addEventListener("keydown", handleSaveShortcut);
+    return () => window.removeEventListener("keydown", handleSaveShortcut);
+  }, [hasUnsavedChanges, savePdfAs]);
+
+  useEffect(() => {
+    const handleFinishSelection = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as Element | null;
+      if (!target?.closest(".stampEditor.selectedEditor") || target.closest("button, input, textarea")) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      runtimeRef.current?.annotationEditorUIManager?.unselectAll();
+      setImageContextMenu(null);
+      setFeedback("Image placement finished. Click the image to select it again.");
+    };
+    window.addEventListener("keydown", handleFinishSelection, true);
+    return () => window.removeEventListener("keydown", handleFinishSelection, true);
+  }, []);
+
+  useEffect(() => {
+    if (!imageContextMenu) return;
+    const closeMenu = (event: Event) => {
+      const target = event.target as Element | null;
+      if (!target?.closest(".pdf-image-context-menu")) setImageContextMenu(null);
+    };
+    const closeMenuOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setImageContextMenu(null);
+    };
+    window.addEventListener("pointerdown", closeMenu, true);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("keydown", closeMenuOnEscape);
+    containerRef.current?.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("pointerdown", closeMenu, true);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("keydown", closeMenuOnEscape);
+      containerRef.current?.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [imageContextMenu]);
 
   const printPdf = useCallback(async () => {
     const pdfDocument = documentRef.current;
@@ -603,7 +1534,17 @@ export function PdfWorkspace({
   }, [canPrint, highQualityPrint, printing, table.filePath]);
 
   const handleViewerClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    const anchor = (event.target as Element).closest("a");
+    const target = event.target as Element;
+    const rotateButton = target.closest(".chikku-image-rotate-button");
+    if (rotateButton) {
+      const stamp = rotateButton.closest<HTMLElement>(".stampEditor");
+      event.preventDefault();
+      event.stopPropagation();
+      if (stamp) rotateImageClockwise(stamp.id);
+      return;
+    }
+    setImageContextMenu(null);
+    const anchor = target.closest("a");
     if (!anchor) return;
     const href = anchor.getAttribute("href") || "";
     if (!href || href.startsWith("#")) return;
@@ -611,9 +1552,32 @@ export function PdfWorkspace({
     event.stopPropagation();
     if (isHttpsUrl(href)) void window.api.openExternal(href);
     else setFeedback("Only secure HTTPS links can be opened from a PDF.");
-  }, []);
+  }, [rotateImageClockwise]);
+
+  const handleViewerContextMenuCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const stamp = (event.target as Element).closest<HTMLElement>(".stampEditor");
+    if (!stamp) {
+      setImageContextMenu(null);
+      return;
+    }
+    const editor = getStampEditor(stamp.id);
+    if (!editor || editor.annotationElementId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    runtimeRef.current?.annotationEditorUIManager?.setSelected(editor);
+    setImageContextMenu({
+      editorId: editor.id,
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - 212)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 184)),
+    });
+  }, [getStampEditor]);
 
   const progressPercent = progress === null ? null : Math.round(progress * 100);
+  const imageExportSizeTooLarge = !!imageExportDimensions && (
+    imageExportDimensions.width * imageExportDimensions.height > PDF_IMAGE_EXPORT_MAX_PIXELS
+    || imageExportDimensions.width > PDF_IMAGE_EXPORT_MAX_DIMENSION
+    || imageExportDimensions.height > PDF_IMAGE_EXPORT_MAX_DIMENSION
+  );
 
   return (
     <div className="pdf-workspace">
@@ -622,6 +1586,7 @@ export function PdfWorkspace({
           <Icon icon="document" size={14} />
           <span>{fileName}</span>
           {pageCount > 0 && <Tag minimal>{pageCount} pages</Tag>}
+          {hasUnsavedChanges && <Tag minimal intent={Intent.WARNING}>Unsaved</Tag>}
         </div>
 
         <div className="pdf-toolbar-group">
@@ -698,6 +1663,37 @@ export function PdfWorkspace({
         </div>
 
         <div className="pdf-toolbar-group pdf-toolbar-actions">
+          <input
+            ref={imageInputRef}
+            className="pdf-image-input"
+            type="file"
+            accept={PDF_IMAGE_ACCEPT}
+            onChange={(event) => void insertImage(event)}
+          />
+          <Button
+            icon="media"
+            text="Image"
+            minimal
+            small
+            active={imageEditing}
+            loading={insertingImage}
+            disabled={!canModify || phase !== "ready"}
+            onClick={() => imageInputRef.current?.click()}
+            title={canModify ? "Insert an image on the current PDF page" : "Content changes are restricted by this PDF"}
+          />
+          {imageEditing && (
+            <Button icon="tick" text="Done" minimal small onClick={() => void finishImageEditing()} title="Finish positioning images" />
+          )}
+          <Button
+            icon="floppy-disk"
+            text="Save As"
+            minimal
+            small
+            loading={saving}
+            disabled={!hasUnsavedChanges || insertingImage || phase !== "ready"}
+            onClick={() => void savePdfAs()}
+            title="Save image changes to a new PDF"
+          />
           <Button icon="folder-open" minimal small onClick={onOpenFiles} title="Open files" />
           <Button
             icon="print"
@@ -715,7 +1711,7 @@ export function PdfWorkspace({
       {signatureCount > 0 && (
         <div className="pdf-signature-warning">
           <Icon icon="warning-sign" size={12} />
-          This document contains {signatureCount} digital signature{signatureCount === 1 ? "" : "s"}. Chikku displays signatures but does not verify them.
+          This document contains {signatureCount} digital signature{signatureCount === 1 ? "" : "s"}. Chikku does not verify them, and adding an image will invalidate them in the saved copy.
         </div>
       )}
       {feedback && (
@@ -751,9 +1747,52 @@ export function PdfWorkspace({
             ref={containerRef}
             className="pdf-viewer-container"
             onClickCapture={handleViewerClickCapture}
+            onContextMenuCapture={handleViewerContextMenuCapture}
           >
             <div ref={viewerRef} className="pdfViewer" />
           </div>
+
+          {imageContextMenu && (
+            <div
+              className="pdf-image-context-menu"
+              role="menu"
+              aria-label="Image transform options"
+              style={{ left: imageContextMenu.x, top: imageContextMenu.y }}
+              onContextMenu={(event) => event.preventDefault()}
+            >
+              <button type="button" role="menuitem" onClick={() => {
+                moveImageLayer(imageContextMenu.editorId, "forward");
+                setImageContextMenu(null);
+              }}>
+                <Icon icon="arrow-up" size={14} /> Bring forward
+              </button>
+              <button type="button" role="menuitem" onClick={() => {
+                moveImageLayer(imageContextMenu.editorId, "backward");
+                setImageContextMenu(null);
+              }}>
+                <Icon icon="arrow-down" size={14} /> Send backward
+              </button>
+              <div className="pdf-image-context-menu-separator" role="separator" />
+              <button type="button" role="menuitem" onClick={() => {
+                rotateImageClockwise(imageContextMenu.editorId);
+                setImageContextMenu(null);
+              }}>
+                <Icon icon="image-rotate-right" size={14} /> Rotate clockwise
+              </button>
+              <button type="button" role="menuitem" onClick={() => {
+                applyImageFlip(imageContextMenu.editorId, "horizontal");
+                setImageContextMenu(null);
+              }}>
+                <Icon icon="swap-horizontal" size={14} /> Flip horizontally
+              </button>
+              <button type="button" role="menuitem" onClick={() => {
+                applyImageFlip(imageContextMenu.editorId, "vertical");
+                setImageContextMenu(null);
+              }}>
+                <Icon icon="swap-vertical" size={14} /> Flip vertically
+              </button>
+            </div>
+          )}
 
           {phase === "loading" && (
             <div className="pdf-state-overlay">
@@ -801,6 +1840,238 @@ export function PdfWorkspace({
           <div className={Classes.DIALOG_FOOTER_ACTIONS}>
             <Button text="Cancel" onClick={() => passwordRequest?.cancel()} />
             <Button intent={Intent.PRIMARY} text="Open PDF" disabled={!password} onClick={() => passwordRequest?.submit(password)} />
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        isOpen={imageExportOpen}
+        className="pdf-image-export-dialog"
+        title="Export PDF as images"
+        icon="media"
+        canEscapeKeyClose={!imageExporting}
+        canOutsideClickClose={!imageExporting}
+        onClose={() => {
+          if (!imageExporting) setImageExportOpen(false);
+        }}
+      >
+        <div className={`${Classes.DIALOG_BODY} pdf-image-export-body`}>
+          <section className="pdf-image-export-preview-section" aria-label="Image preview">
+            <div className="pdf-image-export-section-heading">
+              <div>
+                <strong>Preview</strong>
+                <span>Page {imageExportPreviewPage} of {pageCount}</span>
+              </div>
+              <div className="pdf-image-export-preview-nav">
+                <Button
+                  icon="chevron-left"
+                  minimal
+                  small
+                  disabled={imageExportPreviewPage <= 1 || imageExporting}
+                  onClick={() => setImageExportPreviewPage((current) => Math.max(1, current - 1))}
+                  aria-label="Preview previous page"
+                />
+                <Button
+                  icon="chevron-right"
+                  minimal
+                  small
+                  disabled={imageExportPreviewPage >= pageCount || imageExporting}
+                  onClick={() => setImageExportPreviewPage((current) => Math.min(pageCount, current + 1))}
+                  aria-label="Preview next page"
+                />
+              </div>
+            </div>
+            <div className="pdf-image-export-preview-frame">
+              <canvas ref={imageExportPreviewCanvasRef} aria-label={`Preview of PDF page ${imageExportPreviewPage}`} />
+              {!imageExportCustomSizeValid ? (
+                <div className="pdf-image-export-preview-loading is-warning">
+                  <Icon icon="warning-sign" size={22} />
+                  <span>Enter a width and height greater than zero</span>
+                </div>
+              ) : imageExportPreviewing && (
+                <div className="pdf-image-export-preview-loading">
+                  <Spinner size={24} />
+                  <span>Updating preview…</span>
+                </div>
+              )}
+            </div>
+            <div className={`pdf-image-export-dimensions${imageExportSizeTooLarge || !imageExportCustomSizeValid ? " is-warning" : ""}`} aria-live="polite">
+              <Icon icon={imageExportSizeTooLarge || !imageExportCustomSizeValid ? "warning-sign" : "fullscreen"} size={12} />
+              {!imageExportCustomSizeValid
+                ? "Custom width and height are required"
+                : imageExportDimensions
+                ? imageExportSizeTooLarge
+                  ? `${imageExportDimensions.width.toLocaleString()} × ${imageExportDimensions.height.toLocaleString()} px is too large; choose a lower DPI`
+                  : `${imageExportDimensions.width.toLocaleString()} × ${imageExportDimensions.height.toLocaleString()} px for this page`
+                : "Calculating image size…"}
+            </div>
+          </section>
+
+          <section className="pdf-image-export-settings" aria-label="Image export settings">
+            <label className="pdf-image-export-field">
+              <span>Image format</span>
+              <select
+                value={imageExportFormat}
+                disabled={imageExporting}
+                onChange={(event) => setImageExportFormat(event.target.value as PdfImageFormat)}
+              >
+                {PDF_IMAGE_FORMAT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label} — {option.detail}</option>
+                ))}
+              </select>
+            </label>
+
+            {imageExportFormat !== "png" && (
+              <label className="pdf-image-export-field pdf-image-export-quality">
+                <span>Image quality <strong>{imageExportQuality}%</strong></span>
+                <input
+                  type="range"
+                  min="60"
+                  max="100"
+                  step="5"
+                  value={imageExportQuality}
+                  disabled={imageExporting}
+                  onChange={(event) => setImageExportQuality(Number(event.target.value))}
+                />
+              </label>
+            )}
+
+            <label className="pdf-image-export-field">
+              <span>Pages</span>
+              <select
+                value={imageExportPageSelection}
+                disabled={imageExporting}
+                onChange={(event) => setImageExportPageSelection(event.target.value as PdfImagePageSelection)}
+              >
+                <option value="current">Current preview page ({imageExportPreviewPage})</option>
+                <option value="all">All pages ({pageCount})</option>
+              </select>
+            </label>
+
+            <label className="pdf-image-export-field">
+              <span>Paper size</span>
+              <select
+                value={imageExportPaperSize}
+                disabled={imageExporting}
+                onChange={(event) => setImageExportPaperSize(event.target.value as PdfImagePaperSize)}
+              >
+                {PDF_IMAGE_PAPER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label} — {option.detail}</option>
+                ))}
+              </select>
+            </label>
+
+            {imageExportPaperSize === "custom" && (
+              <div className="pdf-image-export-field pdf-image-export-custom-size">
+                <span>Custom dimensions</span>
+                <div className="pdf-image-export-custom-controls">
+                  <input
+                    type="number"
+                    min="0.01"
+                    step={imageExportCustomUnit === "px" ? "1" : "0.1"}
+                    value={imageExportCustomWidth}
+                    disabled={imageExporting}
+                    onChange={(event) => setImageExportCustomWidth(event.target.value)}
+                    aria-label="Custom image width"
+                    placeholder="Width"
+                  />
+                  <span aria-hidden="true">×</span>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step={imageExportCustomUnit === "px" ? "1" : "0.1"}
+                    value={imageExportCustomHeight}
+                    disabled={imageExporting}
+                    onChange={(event) => setImageExportCustomHeight(event.target.value)}
+                    aria-label="Custom image height"
+                    placeholder="Height"
+                  />
+                  <select
+                    value={imageExportCustomUnit}
+                    disabled={imageExporting}
+                    onChange={(event) => setImageExportCustomUnit(event.target.value as PdfImageCustomUnit)}
+                    aria-label="Custom image dimension unit"
+                  >
+                    <option value="px">px</option>
+                    <option value="mm">mm</option>
+                    <option value="in">in</option>
+                  </select>
+                </div>
+                <small className={!imageExportCustomSizeValid ? "is-error" : ""}>
+                  {!imageExportCustomSizeValid
+                    ? "Enter values greater than zero."
+                    : imageExportCustomUnit === "px"
+                      ? "Pixel dimensions are exported exactly as entered."
+                      : `Physical dimensions are converted at ${imageExportResolution} DPI.`}
+                </small>
+              </div>
+            )}
+
+            <label className="pdf-image-export-field">
+              <span>Orientation</span>
+              <select
+                value={imageExportOrientation}
+                disabled={imageExporting || imageExportPaperSize === "original" || imageExportPaperSize === "custom"}
+                onChange={(event) => setImageExportOrientation(event.target.value as PdfImageOrientation)}
+              >
+                <option value="auto">Match each page</option>
+                <option value="portrait">Portrait</option>
+                <option value="landscape">Landscape</option>
+              </select>
+            </label>
+
+            <label className="pdf-image-export-field">
+              <span>Resolution</span>
+              <select
+                value={imageExportResolution}
+                disabled={imageExporting || (imageExportPaperSize === "custom" && imageExportCustomUnit === "px")}
+                onChange={(event) => setImageExportResolution(Number(event.target.value) as PdfImageResolution)}
+              >
+                {PDF_IMAGE_RESOLUTION_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value} disabled={!highQualityPrint && option.value > 96}>
+                    {option.label}{!highQualityPrint && option.value > 96 ? " · Restricted by PDF" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="pdf-image-export-note">
+              <Icon icon={imageExportPageSelection === "all" ? "multi-select" : "document"} size={13} />
+              <span>
+                {imageExportPageSelection === "all"
+                  ? "Choose a base filename. Each page will be saved as a numbered image (page-001, page-002, …)."
+                  : `Page ${imageExportPreviewPage} will be saved as one image.`}
+              </span>
+            </div>
+          </section>
+        </div>
+
+        {(imageExporting || imageExportStatus) && (
+          <div className={`pdf-image-export-status${imageExportStatus ? " is-error" : ""}`} aria-live="polite">
+            {imageExporting ? (
+              <>
+                <ProgressBar value={imageExportProgress} intent={Intent.PRIMARY} animate stripes />
+                <span>
+                  Exporting {Math.max(1, Math.ceil(imageExportProgress * (imageExportPageSelection === "all" ? pageCount : 1)))} of {imageExportPageSelection === "all" ? pageCount : 1}…
+                </span>
+              </>
+            ) : (
+              <><Icon icon="warning-sign" size={13} /> <span>{imageExportStatus}</span></>
+            )}
+          </div>
+        )}
+
+        <div className={Classes.DIALOG_FOOTER}>
+          <div className={Classes.DIALOG_FOOTER_ACTIONS}>
+            <Button text="Cancel" disabled={imageExporting} onClick={() => setImageExportOpen(false)} />
+            <Button
+              intent={Intent.PRIMARY}
+              icon="export"
+              text={imageExportPageSelection === "all" ? `Export ${pageCount} images` : "Export image"}
+              loading={imageExporting}
+              disabled={imageExportPreviewing || imageExporting || !imageExportDimensions || imageExportSizeTooLarge || !imageExportCustomSizeValid}
+              onClick={() => void exportPdfImages()}
+            />
           </div>
         </div>
       </Dialog>

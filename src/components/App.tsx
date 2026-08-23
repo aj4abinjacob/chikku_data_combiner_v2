@@ -3250,6 +3250,7 @@ export function App(): React.ReactElement {
                   table={activeLoadedTable}
                   onOpenFiles={handleChooseFiles}
                   onPageCountChange={handleActivePdfPageCountChange}
+                  onFileActionsChange={setDocumentFileActions}
                 />
               ) : comparisonActive && comparisonConfig && activeTable ? (
                 <ComparisonView

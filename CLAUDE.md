@@ -101,8 +101,11 @@ Includes substring, custom SQL, create/delete/combine/rename columns, sampling, 
 ### JsonWorkspace.tsx — JSON/JSONL/NDJSON Editor
 Shown instead of the data grid when the active file is json/jsonl/ndjson. Layout: toolbar (filename + dirty dot, Open/Save/Save As/Revert, Undo/Redo, Format/Minify, History toggle, validity tag) + resizable JSON tree panel + raw textarea editor (synced line numbers) + optional History panel + collapsible Flatten Preview. Full snapshot undo/redo via `useReducer` (`jsonHistoryReducer`, 100-entry cap, debounced typing pushes, immediate Format/Minify/Revert pushes); history list supports jump-to-any-point. Save writes in place via `writeTextFile`; Save As writes a copy (stays on current file). Cmd/Ctrl+S save, Cmd+Z/Cmd+Shift+Z undo/redo.
 
+### PdfWorkspace.tsx — PDF Viewer, Image Placement, and Image Export
+PDF.js viewer with thumbnails, outline navigation, search, zoom, rotation, password prompts, signature notices, and permission-aware printing. When PDF content permissions allow changes, the Image action inserts PNG/JPEG/WebP stamp annotations on the current page using PDF.js's native drag, resize, delete, and undo behavior. Save As serializes annotations with `PDFDocumentProxy.saveDocument()` and writes a new PDF through `writeBinaryFile`, preserving the source file. The left-sidebar Export Images action opens a compact preview dialog that exports the current page or all pages as PNG/JPEG/WebP at original, A4, A3, Letter, Legal, or custom pixel/millimetre/inch sizes and 96/150/300 DPI; multi-page exports use numbered filenames.
+
 ### Other Components
-- **HelpCenter.tsx**: Searchable in-app documentation covering first-run guidance, tabular workflows, multi-file tools, QC/history, JSON, Markdown, export, and shortcuts; available from the sidebar, welcome screen, collapsed sidebar, or F1
+- **HelpCenter.tsx**: Searchable in-app documentation covering first-run guidance, tabular workflows, multi-file tools, QC/history, JSON, Markdown, PDF, export, and shortcuts; available from the sidebar, welcome screen, collapsed sidebar, or F1
 - **ExportDialog.tsx**: Format selection (CSV/TSV/JSON/Excel/Parquet), table selection, view options, Excel row/col limit warnings
 - **CombineDialog.tsx**: Column mapping modal for UNION ALL with auto VARCHAR cast
 - **AggregateDialog.tsx**: Aggregate stats, optional Group By, materializes as `aggregate_N`

@@ -186,7 +186,7 @@ export interface LoadedTable {
   reloadVersion?: number;
 }
 
-export type DocumentWorkspaceKind = "json" | "markdown";
+export type DocumentWorkspaceKind = "json" | "markdown" | "pdf";
 
 export interface DocumentWorkspaceFileActions {
   workspaceKind: DocumentWorkspaceKind;
@@ -196,26 +196,34 @@ export interface DocumentWorkspaceFileActions {
   saving: boolean;
   exporting?: boolean;
   exportingPdf?: boolean;
+  exportingImages?: boolean;
   canExportCsv?: boolean;
   canExport?: boolean;
   canExportPdf?: boolean;
+  canExportImages?: boolean;
   canCompare?: boolean;
-  historyOpen: boolean;
+  historyOpen?: boolean;
   onOpenFiles: () => void;
-  onSave: () => void | Promise<void>;
+  onSave?: () => void | Promise<void>;
   onSaveAs?: () => void | Promise<void>;
-  onRevert: () => void;
-  onToggleHistory: () => void;
+  onRevert?: () => void;
+  onToggleHistory?: () => void;
   onExportCsv?: () => void | Promise<void>;
   onExport?: () => void | Promise<void>;
   onExportPdf?: () => void | Promise<void>;
+  onExportImages?: () => void | Promise<void>;
   onCompare?: () => void;
+  saveLabel?: string;
+  saveTitle?: string;
   exportLabel?: string;
   exportTitle?: string;
   exportDisabledReason?: string | null;
   exportPdfLabel?: string;
   exportPdfTitle?: string;
   exportPdfDisabledReason?: string | null;
+  exportImagesLabel?: string;
+  exportImagesTitle?: string;
+  exportImagesDisabledReason?: string | null;
   compareTitle?: string;
   onToggleEdit?: () => void;
   editActive?: boolean;

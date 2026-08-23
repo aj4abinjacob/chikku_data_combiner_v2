@@ -243,17 +243,25 @@ const HELP_TOPICS: HelpTopic[] = [
     id: "pdf",
     title: "PDF viewer",
     category: "Document workspaces",
-    summary: "Read, search, navigate, rotate, zoom, and print PDFs without changing them.",
+    summary: "Read, search, navigate, and add positioned images to a saved PDF copy.",
     icon: "document",
-    keywords: ["pdf", "viewer", "pages", "thumbnail", "outline", "password", "signature", "print", "zoom", "rotate"],
+    keywords: ["pdf", "viewer", "pages", "thumbnail", "outline", "password", "signature", "print", "zoom", "rotate", "image", "insert", "save as", "export", "png", "jpeg", "webp", "a4", "dpi"],
     sections: [
       {
         title: "Read and navigate",
-        body: "PDF files open in a read-only viewer. Use thumbnails or the document outline to navigate, enter a page number, search with Cmd/Ctrl+F, and use the zoom and rotate controls without modifying the source file.",
+        body: "Use thumbnails or the document outline to navigate, enter a page number, search with Cmd/Ctrl+F, and use the zoom and rotate controls without modifying the source file.",
+      },
+      {
+        title: "Insert and position images",
+        body: "Choose Image to add a PNG, JPEG, or WebP image to the current page. Drag it anywhere on the page, resize it with the handles, or select it and press Delete. Choose Done when positioning is complete, then Save As to create a new PDF while preserving the original.",
+      },
+      {
+        title: "Export pages as images",
+        body: "In the left sidebar, choose Export Images under File Options. Preview any page, then choose PNG, JPEG, or WebP; the current page or every page; original, A4, A3, Letter, Legal, or a custom size; orientation; and 96, 150, or 300 DPI. Custom width and height can use pixels, millimetres, or inches. Multi-page exports use numbered filenames such as page-001 and page-002.",
       },
       {
         title: "Protected and signed documents",
-        body: "Password-protected PDFs prompt for a password. Forms and annotations are displayed as static content and are not saved. Chikku can report that digital signatures are present, but it does not verify signer identity or signature validity.",
+        body: "Password-protected PDFs prompt for a password, and content permissions can prevent image insertion. Existing forms and annotations are displayed as static content. Chikku can report that digital signatures are present, but it does not verify them; editing a signed PDF invalidates its signatures in the saved copy.",
       },
       {
         title: "Print or use the system viewer",

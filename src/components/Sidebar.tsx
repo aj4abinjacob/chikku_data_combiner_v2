@@ -545,18 +545,20 @@ export function Sidebar({
   const noneVisible = visibleColumns.length === 0;
   const visibleColumnCount = visibleColumns.length;
   const compareDisabled = comparableTables.length < 2;
-  const activeWorkspaceKind = markdownWorkspaceActive ? "markdown" : jsonWorkspaceActive ? "json" : null;
+  const activeWorkspaceKind = pdfWorkspaceActive ? "pdf" : markdownWorkspaceActive ? "markdown" : jsonWorkspaceActive ? "json" : null;
   const activeDocumentFileActions = documentFileActions?.workspaceKind === activeWorkspaceKind
     ? documentFileActions
     : null;
   const documentExportAction = activeDocumentFileActions?.onExport ?? activeDocumentFileActions?.onExportCsv ?? null;
   const documentPdfAction = activeDocumentFileActions?.onExportPdf ?? null;
+  const documentImagesAction = activeDocumentFileActions?.onExportImages ?? null;
   const documentCanExport = activeDocumentFileActions
     ? activeDocumentFileActions.canExport ?? activeDocumentFileActions.canExportCsv ?? false
     : false;
   const documentCanExportPdf = activeDocumentFileActions
     ? activeDocumentFileActions.canExportPdf ?? activeDocumentFileActions.isValid
     : false;
+  const documentCanExportImages = activeDocumentFileActions?.canExportImages ?? false;
   const exportDisabledReason = activeDocumentFileActions
     ? getDocumentExportDisabledReason(activeDocumentFileActions)
     : null;
@@ -564,6 +566,11 @@ export function Sidebar({
     ? activeDocumentFileActions.exportPdfDisabledReason
       ?? (activeDocumentFileActions.exportingPdf ? "Preparing PDF..." : null)
       ?? (!documentCanExportPdf ? "PDF export is unavailable." : null)
+    : null;
+  const exportImagesDisabledReason = activeDocumentFileActions
+    ? activeDocumentFileActions.exportImagesDisabledReason
+      ?? (activeDocumentFileActions.exportingImages ? "Exporting images..." : null)
+      ?? (!documentCanExportImages ? "Image export is unavailable." : null)
     : null;
   const combineSelectionDisabledReason = documentWorkspaceActive
     ? `Combine selection is unavailable in ${workspaceLabel} view.`
@@ -835,15 +842,18 @@ export function Sidebar({
               onClick={activeDocumentFileActions.onOpenFiles}
               small
             />
-            <Button
-              icon="floppy-disk"
-              text="Save"
-              intent={Intent.PRIMARY}
-              onClick={activeDocumentFileActions.onSave}
-              disabled={!activeDocumentFileActions.isDirty || !activeDocumentFileActions.isValid || activeDocumentFileActions.saving}
-              loading={activeDocumentFileActions.saving}
-              small
-            />
+            {activeDocumentFileActions.onSave && (
+              <Button
+                icon="floppy-disk"
+                text={activeDocumentFileActions.saveLabel ?? "Save"}
+                title={activeDocumentFileActions.saveTitle}
+                intent={Intent.PRIMARY}
+                onClick={activeDocumentFileActions.onSave}
+                disabled={!activeDocumentFileActions.isDirty || !activeDocumentFileActions.isValid || activeDocumentFileActions.saving}
+                loading={activeDocumentFileActions.saving}
+                small
+              />
+            )}
             {activeDocumentFileActions.onSaveAs && (
               <Button
                 icon="download"
@@ -853,13 +863,15 @@ export function Sidebar({
                 small
               />
             )}
-            <Button
-              icon="history"
-              text="History"
-              active={activeDocumentFileActions.historyOpen}
-              onClick={activeDocumentFileActions.onToggleHistory}
-              small
-            />
+            {activeDocumentFileActions.onToggleHistory && (
+              <Button
+                icon="history"
+                text="History"
+                active={activeDocumentFileActions.historyOpen}
+                onClick={activeDocumentFileActions.onToggleHistory}
+                small
+              />
+            )}
             {documentExportAction && (
               <Tooltip2
                 content={exportDisabledReason ?? activeDocumentFileActions.exportTitle ?? "Export"}
@@ -894,6 +906,26 @@ export function Sidebar({
                     onClick={documentPdfAction}
                     disabled={!documentCanExportPdf}
                     loading={!!activeDocumentFileActions.exportingPdf}
+                    small
+                    fill
+                  />
+                </span>
+              </Tooltip2>
+            )}
+            {documentImagesAction && (
+              <Tooltip2
+                content={exportImagesDisabledReason ?? activeDocumentFileActions.exportImagesTitle ?? "Export images"}
+                disabled={!exportImagesDisabledReason}
+                placement="top"
+                minimal
+              >
+                <span className="sidebar-file-action-tooltip">
+                  <Button
+                    icon="media"
+                    text={activeDocumentFileActions.exportImagesLabel ?? "Images"}
+                    onClick={documentImagesAction}
+                    disabled={!documentCanExportImages}
+                    loading={!!activeDocumentFileActions.exportingImages}
                     small
                     fill
                   />
