@@ -832,7 +832,7 @@ export function Sidebar({
       )}
 
       {documentWorkspaceActive && activeDocumentFileActions && (
-        <div className="sidebar-section sidebar-file-actions">
+        <div className={`sidebar-section sidebar-file-actions sidebar-file-actions-${activeDocumentFileActions.workspaceKind}`}>
           <div className="sidebar-section-header">
             <div className="sidebar-heading-block">
               <h4>File Options</h4>
@@ -847,7 +847,8 @@ export function Sidebar({
           <div className="sidebar-file-action-grid">
             <Button
               icon="folder-open"
-              text="Open"
+              text={activeDocumentFileActions.workspaceKind === "pdf" ? "Open file" : "Open"}
+              title={activeDocumentFileActions.workspaceKind === "pdf" ? "Open another file" : undefined}
               onClick={activeDocumentFileActions.onOpenFiles}
               small
             />

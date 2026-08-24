@@ -31,6 +31,13 @@ const {
   getRotatedBoundingSize,
   normalizeRotationDegrees,
 } = require("../.test-dist/utils/pdfImageTransform.js");
+const {
+  DEFAULT_PDF_PAGE_APPEARANCE,
+  PDF_HIGH_CONTRAST_PAGE_COLORS,
+  getPdfPageAppearanceClassName,
+  getPdfPageColors,
+  isDarkPdfPageAppearance,
+} = require("../.test-dist/utils/pdfPageAppearance.js");
 
 test("fine image rotation normalizes angles and expands the saved bounds", () => {
   assert.equal(normalizeRotationDegrees(-15), 345);
@@ -40,6 +47,23 @@ test("fine image rotation normalizes angles and expands the saved bounds", () =>
   const diagonal = getRotatedBoundingSize(100, 100, 45);
   assert.ok(Math.abs(diagonal.width - Math.SQRT2 * 100) < 1e-10);
   assert.ok(Math.abs(diagonal.height - Math.SQRT2 * 100) < 1e-10);
+});
+
+test("PDF page appearances map to display-only rendering modes", () => {
+  assert.equal(DEFAULT_PDF_PAGE_APPEARANCE, "original");
+  assert.equal(isDarkPdfPageAppearance("original"), false);
+  assert.equal(isDarkPdfPageAppearance("dark-color"), true);
+  assert.equal(isDarkPdfPageAppearance("dark-contrast"), true);
+  assert.equal(getPdfPageColors("original"), null);
+  assert.equal(getPdfPageColors("dark-color"), null);
+  assert.deepEqual(getPdfPageColors("dark-contrast"), {
+    background: "#171c22",
+    foreground: "#edf2f7",
+  });
+  assert.deepEqual(getPdfPageColors("dark-contrast"), PDF_HIGH_CONTRAST_PAGE_COLORS);
+  assert.equal(getPdfPageAppearanceClassName("original"), "pdf-page-appearance-original");
+  assert.equal(getPdfPageAppearanceClassName("dark-color"), "pdf-page-appearance-dark-color");
+  assert.equal(getPdfPageAppearanceClassName("dark-contrast"), "pdf-page-appearance-dark-contrast");
 });
 
 test("timestamp IN values retain precision and offsets as typed literals", () => {

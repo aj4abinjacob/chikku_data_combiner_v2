@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import ReactDOM from "react-dom";
 import { Button, Classes, Dialog, Icon, InputGroup, Intent, ProgressBar, Spinner, Tag } from "@blueprintjs/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
 import { DocumentWorkspaceFileActions, LoadedTable } from "../types";
@@ -19,11 +20,19 @@ import {
   PdfImageResolution,
 } from "../utils/pdfImageExport";
 import { getRotatedBoundingSize, normalizeRotationDegrees } from "../utils/pdfImageTransform";
+import {
+  getPdfPageAppearanceClassName,
+  getPdfPageColors,
+  isDarkPdfPageAppearance,
+  PdfPageAppearance,
+} from "../utils/pdfPageAppearance";
 
 type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 
 interface PdfWorkspaceProps {
   table: LoadedTable;
+  pageAppearance: PdfPageAppearance;
+  onPageAppearanceChange: (appearance: PdfPageAppearance) => void;
   onOpenFiles: () => void;
   onPageCountChange: (pageCount: number) => void;
   onFileActionsChange?: (actions: DocumentWorkspaceFileActions | null) => void;
@@ -37,6 +46,7 @@ interface ViewerRuntime {
   pdfViewer: any;
   annotationEditorUIManager: any | null;
   findState: Record<string, number>;
+  pageAppearance: PdfPageAppearance;
 }
 
 interface PasswordRequest {
@@ -133,6 +143,7 @@ const PDF_IMAGE_EXPORT_MAX_PIXELS = 40_000_000;
 const PDF_IMAGE_EXPORT_MAX_DIMENSION = 16384;
 const PDF_IMAGE_PREVIEW_MAX_WIDTH = 470;
 const PDF_IMAGE_PREVIEW_MAX_HEIGHT = 390;
+const PDF_RENDERING_STATE_INITIAL = 0;
 const PDF_IMAGE_MIME_TYPES = [
   "image/apng",
   "image/avif",
@@ -323,15 +334,43 @@ function isHttpsUrl(value: string): boolean {
   }
 }
 
+function syncPdfViewerPageAppearance(runtime: ViewerRuntime, appearance: PdfPageAppearance): void {
+  if (runtime.pageAppearance === appearance) return;
+
+  const wasHighContrast = runtime.pageAppearance === "dark-contrast";
+  const isHighContrast = appearance === "dark-contrast";
+  const pageColors = getPdfPageColors(appearance);
+  runtime.pageAppearance = appearance;
+  runtime.pdfViewer.pageColors = pageColors;
+
+  if (wasHighContrast === isHighContrast) return;
+
+  for (let index = 0; index < runtime.pdfViewer.pagesCount; index++) {
+    const pageView = runtime.pdfViewer.getPageView(index);
+    if (!pageView) continue;
+    pageView.pageColors = pageColors;
+    if (pageView.renderingState === PDF_RENDERING_STATE_INITIAL) continue;
+    pageView.reset({
+      keepAnnotationLayer: true,
+      keepAnnotationEditorLayer: true,
+      keepXfaLayer: true,
+      keepTextLayer: true,
+    });
+  }
+  runtime.pdfViewer.update();
+}
+
 function PdfThumbnail({
   document,
   pageNumber,
   active,
+  pageAppearance,
   onSelect,
 }: {
   document: PDFDocumentProxy;
   pageNumber: number;
   active: boolean;
+  pageAppearance: PdfPageAppearance;
   onSelect: () => void;
 }): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -343,15 +382,21 @@ function PdfThumbnail({
     void document.getPage(pageNumber).then((page) => {
       if (cancelled || !canvasRef.current) return;
       const baseViewport = page.getViewport({ scale: 1 });
-      const cssWidth = 132;
+      const cssScale = Math.min(144 / baseViewport.width, 172 / baseViewport.height);
+      const cssWidth = Math.ceil(baseViewport.width * cssScale);
+      const cssHeight = Math.ceil(baseViewport.height * cssScale);
       const outputScale = Math.min(window.devicePixelRatio || 1, 1.5);
-      const viewport = page.getViewport({ scale: (cssWidth / baseViewport.width) * outputScale });
+      const viewport = page.getViewport({ scale: cssScale * outputScale });
       const canvas = canvasRef.current;
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
       canvas.style.width = `${cssWidth}px`;
-      canvas.style.height = `${Math.ceil(viewport.height / outputScale)}px`;
-      renderTask = page.render({ canvas, viewport });
+      canvas.style.height = `${cssHeight}px`;
+      renderTask = page.render({
+        canvas,
+        viewport,
+        pageColors: getPdfPageColors(pageAppearance) ?? undefined,
+      });
       return renderTask.promise;
     }).catch((error) => {
       if (!cancelled && error?.name !== "RenderingCancelledException") {
@@ -368,17 +413,17 @@ function PdfThumbnail({
         canvas.height = 0;
       }
     };
-  }, [document, pageNumber]);
+  }, [document, pageAppearance, pageNumber]);
 
   return (
     <button
       type="button"
-      className={`pdf-thumbnail${active ? " active" : ""}`}
+      className={`pdf-thumbnail ${getPdfPageAppearanceClassName(pageAppearance)}${active ? " active" : ""}`}
       onClick={onSelect}
       aria-label={`Go to page ${pageNumber}`}
     >
       <canvas ref={canvasRef} />
-      <span>{pageNumber}</span>
+      <span className="pdf-thumbnail-page-number">Page {pageNumber}</span>
     </button>
   );
 }
@@ -386,17 +431,19 @@ function PdfThumbnail({
 function PdfThumbnailList({
   document,
   currentPage,
+  pageAppearance,
   onSelect,
 }: {
   document: PDFDocumentProxy;
   currentPage: number;
+  pageAppearance: PdfPageAppearance;
   onSelect: (page: number) => void;
 }): React.ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: document.numPages,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 194,
+    estimateSize: () => 224,
     overscan: 3,
   });
 
@@ -417,6 +464,7 @@ function PdfThumbnailList({
               document={document}
               pageNumber={item.index + 1}
               active={currentPage === item.index + 1}
+              pageAppearance={pageAppearance}
               onSelect={() => onSelect(item.index + 1)}
             />
           </div>
@@ -635,6 +683,8 @@ async function waitForInsertedImage(viewer: HTMLElement, previousImageCount: num
 
 export function PdfWorkspace({
   table,
+  pageAppearance,
+  onPageAppearanceChange,
   onOpenFiles,
   onPageCountChange,
   onFileActionsChange,
@@ -647,11 +697,15 @@ export function PdfWorkspace({
   const documentRef = useRef<PDFDocumentProxy | null>(null);
   const pdfjsModuleRef = useRef<PdfJsModule | null>(null);
   const runtimeRef = useRef<ViewerRuntime | null>(null);
+  const pageAppearanceRef = useRef(pageAppearance);
   const pruneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const imageTransformsRef = useRef<WeakMap<PdfStampEditor, ImageTransformState>>(new WeakMap());
   const imageTransformRevisionRef = useRef(0);
   const imageRotationDragRef = useRef<ImageRotationDragState | null>(null);
   const suppressRotateClickRef = useRef(false);
+  const pdfFullscreenRef = useRef(false);
+  const enteredWindowFullscreenRef = useRef(false);
+  pageAppearanceRef.current = pageAppearance;
 
   const [phase, setPhase] = useState<PdfPhase>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -678,6 +732,7 @@ export function PdfWorkspace({
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [saving, setSaving] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [imageContextMenu, setImageContextMenu] = useState<ImageContextMenuState | null>(null);
   const [imageExportOpen, setImageExportOpen] = useState(false);
@@ -707,6 +762,100 @@ export function PdfWorkspace({
   }, [imageExportCustomHeight, imageExportCustomUnit, imageExportCustomWidth]);
   const imageExportCustomSizeValid = imageExportPaperSize !== "custom" || imageExportCustomSize !== null;
 
+  const leaveFullscreen = useCallback(async () => {
+    pdfFullscreenRef.current = false;
+    setIsFullscreen(false);
+    if (!enteredWindowFullscreenRef.current) return;
+    enteredWindowFullscreenRef.current = false;
+    try {
+      await getCurrentWindow().setFullscreen(false);
+    } catch (fullscreenError) {
+      console.error("Failed to exit PDF full screen", fullscreenError);
+      setFeedback("Full screen mode could not be closed.");
+    }
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    if (pdfFullscreenRef.current) {
+      await leaveFullscreen();
+      return;
+    }
+    try {
+      const appWindow = getCurrentWindow();
+      const windowWasFullscreen = await appWindow.isFullscreen();
+      if (!windowWasFullscreen) await appWindow.setFullscreen(true);
+      enteredWindowFullscreenRef.current = !windowWasFullscreen;
+      pdfFullscreenRef.current = true;
+      setIsFullscreen(true);
+      window.requestAnimationFrame(() => containerRef.current?.focus({ preventScroll: true }));
+    } catch (fullscreenError) {
+      console.error("Failed to enter PDF full screen", fullscreenError);
+      setFeedback("Full screen mode could not be opened.");
+    }
+  }, [leaveFullscreen]);
+
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    void appWindow.onResized(async () => {
+      if (!pdfFullscreenRef.current) return;
+      const windowIsFullscreen = await appWindow.isFullscreen().catch(() => true);
+      if (!disposed && !windowIsFullscreen) {
+        enteredWindowFullscreenRef.current = false;
+        pdfFullscreenRef.current = false;
+        setIsFullscreen(false);
+      }
+    }).then((cleanup) => {
+      if (disposed) cleanup();
+      else unlisten = cleanup;
+    });
+
+    const handleFullscreenKeyDown = (event: KeyboardEvent) => {
+      if (!pdfFullscreenRef.current) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        void leaveFullscreen();
+        return;
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      const target = event.target as Element | null;
+      if (
+        target?.closest("input, textarea, select, button, [contenteditable='true']")
+        || viewerRef.current?.querySelector(".selectedEditor")
+      ) return;
+
+      const viewerContainer = containerRef.current;
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        if (!viewerContainer) return;
+        event.preventDefault();
+        const direction = event.key === "ArrowUp" ? -1 : 1;
+        viewerContainer.scrollBy({
+          top: direction * Math.max(120, viewerContainer.clientHeight * 0.18),
+          behavior: "smooth",
+        });
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        runtimeRef.current?.pdfViewer?.previousPage();
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        runtimeRef.current?.pdfViewer?.nextPage();
+      }
+    };
+    window.addEventListener("keydown", handleFullscreenKeyDown);
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+      window.removeEventListener("keydown", handleFullscreenKeyDown);
+      if (enteredWindowFullscreenRef.current) {
+        enteredWindowFullscreenRef.current = false;
+        void appWindow.setFullscreen(false);
+      }
+    };
+  }, [leaveFullscreen]);
+
   const pruneDistantPages = useCallback((current: number) => {
     if (pruneTimerRef.current) clearTimeout(pruneTimerRef.current);
     pruneTimerRef.current = setTimeout(() => {
@@ -724,6 +873,7 @@ export function PdfWorkspace({
     let disposed = false;
     let runtime: ViewerRuntime | null = null;
     let loadingTask: PDFDocumentLoadingTask | null = null;
+    const viewerAbortController = new AbortController();
 
     setPhase("loading");
     setError(null);
@@ -786,6 +936,7 @@ export function PdfWorkspace({
         capCanvasAreaFactor: 100,
         enableDetailCanvas: true,
         imagesRightClickMinSize: -1,
+        ...({ abortSignal: viewerAbortController.signal } as any),
       });
       linkService.setViewer(pdfViewer);
 
@@ -796,10 +947,12 @@ export function PdfWorkspace({
         pdfViewer,
         annotationEditorUIManager: null,
         findState: viewerModule.FindState,
+        pageAppearance: "original",
       };
       runtimeRef.current = runtime;
 
       eventBus.on("pagesinit", () => {
+        if (runtime) syncPdfViewerPageAppearance(runtime, pageAppearanceRef.current);
         pdfViewer.currentScaleValue = "page-width";
         setZoomValue("page-width");
       });
@@ -919,6 +1072,7 @@ export function PdfWorkspace({
 
     return () => {
       disposed = true;
+      viewerAbortController.abort();
       if (pruneTimerRef.current) {
         clearTimeout(pruneTimerRef.current);
         pruneTimerRef.current = null;
@@ -938,6 +1092,12 @@ export function PdfWorkspace({
       if (viewerRef.current) viewerRef.current.textContent = "";
     };
   }, [table.filePath, table.reloadVersion, retryVersion, onPageCountChange, pruneDistantPages]);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime || phase !== "ready") return;
+    syncPdfViewerPageAppearance(runtime, pageAppearance);
+  }, [pageAppearance, phase]);
 
   useEffect(() => {
     if (phase !== "ready") return;
@@ -1814,9 +1974,13 @@ export function PdfWorkspace({
     || imageExportDimensions.width > PDF_IMAGE_EXPORT_MAX_DIMENSION
     || imageExportDimensions.height > PDF_IMAGE_EXPORT_MAX_DIMENSION
   );
+  const pageAppearanceClassName = getPdfPageAppearanceClassName(pageAppearance);
+  const pageAppearanceTitle = isDarkPdfPageAppearance(pageAppearance)
+    ? "Dark page appearance affects viewing only; printing, Save As, and image export keep original colors"
+    : "Choose how PDF pages are displayed";
 
   return (
-    <div className="pdf-workspace">
+    <div className={`pdf-workspace ${pageAppearanceClassName}${isFullscreen ? " pdf-workspace-fullscreen" : ""}`}>
       <div className="pdf-toolbar">
         <div className="pdf-toolbar-group pdf-file-identity" title={table.filePath}>
           <Icon icon="document" size={14} />
@@ -1870,6 +2034,21 @@ export function PdfWorkspace({
             }}
             title="Rotate clockwise"
           />
+          <label className="pdf-page-appearance-control" title={pageAppearanceTitle}>
+            <Icon icon="moon" size={12} aria-hidden />
+            <span>PDF theme</span>
+            <select
+              className="pdf-page-appearance-select"
+              value={pageAppearance}
+              disabled={phase !== "ready"}
+              aria-label="PDF theme"
+              onChange={(event) => onPageAppearanceChange(event.target.value as PdfPageAppearance)}
+            >
+              <option value="original">Light · Original</option>
+              <option value="dark-color">Dark · Keep colors</option>
+              <option value="dark-contrast">Dark · High contrast</option>
+            </select>
+          </label>
         </div>
 
         <div className="pdf-toolbar-group pdf-search-controls">
@@ -1926,6 +2105,16 @@ export function PdfWorkspace({
             title={canPrint ? "Print PDF" : "Printing is restricted by this PDF"}
           />
           <Button icon="share" minimal small onClick={() => void openExternally()} title="Open in system PDF viewer" />
+          <Button
+            icon={isFullscreen ? "minimize" : "fullscreen"}
+            minimal
+            small
+            disabled={phase !== "ready"}
+            onClick={() => void toggleFullscreen()}
+            title={isFullscreen ? "Exit full screen (Esc)" : "View PDF full screen"}
+            aria-label={isFullscreen ? "Exit PDF full screen" : "View PDF full screen"}
+            aria-pressed={isFullscreen}
+          />
         </div>
       </div>
 
@@ -1943,7 +2132,7 @@ export function PdfWorkspace({
       )}
 
       {navigationHost && document && ReactDOM.createPortal(
-        <aside className="pdf-side-panel">
+        <aside className={`pdf-side-panel ${pageAppearanceClassName}`}>
           <div className="pdf-side-tabs" role="tablist" aria-label="PDF navigation">
             <button type="button" role="tab" aria-selected={sidePanel === "thumbnails"} onClick={() => setSidePanel("thumbnails")}>
               <Icon icon="grid-view" size={12} /> Pages
@@ -1953,7 +2142,12 @@ export function PdfWorkspace({
             </button>
           </div>
           {sidePanel === "thumbnails" ? (
-            <PdfThumbnailList document={document} currentPage={pageNumber} onSelect={goToPage} />
+            <PdfThumbnailList
+              document={document}
+              currentPage={pageNumber}
+              pageAppearance={pageAppearance}
+              onSelect={goToPage}
+            />
           ) : outline.length > 0 ? (
             <div className="pdf-outline-scroll"><PdfOutline items={outline} onActivate={activateOutline} /></div>
           ) : (
@@ -1968,6 +2162,8 @@ export function PdfWorkspace({
           <div
             ref={containerRef}
             className="pdf-viewer-container"
+            tabIndex={-1}
+            aria-label="PDF document viewer"
             onPointerDownCapture={handleViewerPointerDownCapture}
             onPointerMoveCapture={handleViewerPointerMoveCapture}
             onPointerUpCapture={(event) => finishImageRotationDrag(event, false)}

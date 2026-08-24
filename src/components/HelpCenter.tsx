@@ -245,11 +245,15 @@ const HELP_TOPICS: HelpTopic[] = [
     category: "Document workspaces",
     summary: "Read, search, navigate, and add positioned images to a saved PDF copy.",
     icon: "document",
-    keywords: ["pdf", "viewer", "pages", "thumbnail", "outline", "password", "signature", "print", "zoom", "rotate", "image", "insert", "save as", "export", "png", "jpeg", "webp", "a4", "dpi"],
+    keywords: ["pdf", "viewer", "pages", "thumbnail", "outline", "password", "signature", "print", "zoom", "rotate", "dark", "night", "contrast", "image", "insert", "save as", "export", "png", "jpeg", "webp", "a4", "dpi"],
     sections: [
       {
         title: "Read and navigate",
         body: "Use thumbnails or the document outline to navigate, enter a page number, search with Cmd/Ctrl+F, and use the zoom and rotate controls without modifying the source file.",
+      },
+      {
+        title: "Choose a page appearance",
+        body: "Use the clearly labeled PDF theme menu in the toolbar. Light · Original keeps accurate colors, Dark · Keep colors makes pages darker while preserving recognizable charts and illustrations, and Dark · High contrast turns pages and scans into a simplified light-on-dark palette for reading. Chikku remembers the choice for each loaded PDF during the current session. These modes affect only the viewer and thumbnails; printing, Save As, and image export keep the original colors. Return to Light · Original for photo-heavy, already-dark, or color-critical documents.",
       },
       {
         title: "Insert and position images",

@@ -8,9 +8,16 @@ module.exports = function (_env, argv) {
   return {
     // Source maps are useful while developing, but putting them in frontendDist
     // makes Tauri ship them inside every production installer.
-    devtool: mode === "development" ? "source-map" : false,
+    devtool: mode === "development" ? "eval-cheap-module-source-map" : false,
     mode,
     target: "web",
+    cache: mode === "development" ? {
+      type: "filesystem",
+      cacheDirectory: path.resolve(__dirname, "node_modules/.cache/webpack"),
+      buildDependencies: {
+        config: [__filename],
+      },
+    } : false,
     entry: {
       renderer: "./src/renderer.tsx",
     },
@@ -26,6 +33,9 @@ module.exports = function (_env, argv) {
         {
           test: /\.tsx?$/,
           loader: "ts-loader",
+          options: {
+            transpileOnly: mode === "development",
+          },
           exclude: /node_modules/,
         },
         {
@@ -72,6 +82,14 @@ module.exports = function (_env, argv) {
       port: 5181,
       hot: false,
       liveReload: true,
+      client: {
+        overlay: {
+          runtimeErrors: (error) => ![
+            "ResizeObserver loop completed with undelivered notifications.",
+            "ResizeObserver loop limit exceeded",
+          ].includes(error.message),
+        },
+      },
     },
   };
 };

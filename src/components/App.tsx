@@ -21,6 +21,7 @@ import { HelpCenter } from "./HelpCenter";
 import { buildColumnStatsSummaryQuery, buildColumnTopValuesQuery, buildColumnUniqueValuesQuery, buildCombineQuery, buildDatasetOverviewQuery } from "../utils/sqlBuilder";
 import { buildColOpUpdateSQL, buildStepDescription } from "../utils/colOpsSQL";
 import { buildRowOpSQL, buildRowOpStepDescription } from "../utils/rowOpsSQL";
+import { DEFAULT_PDF_PAGE_APPEARANCE, PdfPageAppearance } from "../utils/pdfPageAppearance";
 import { useChunkCache } from "../hooks/useChunkCache";
 import { usePivotCache } from "../hooks/usePivotCache";
 import { isTauri } from "../tauri-api";
@@ -523,6 +524,7 @@ export function App(): React.ReactElement {
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [helpCenterOpen, setHelpCenterOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("theme") === "dark");
+  const [pdfPageAppearances, setPdfPageAppearances] = useState<Record<string, PdfPageAppearance>>({});
   const [linkPreviewsEnabled, setLinkPreviewsEnabled] = useState(
     () => localStorage.getItem(LINK_PREVIEWS_STORAGE_KEY) !== "false"
   );
@@ -1314,6 +1316,12 @@ export function App(): React.ReactElement {
         ? { ...table, rowCount: pageCount }
         : table
     ));
+  }, []);
+
+  const handlePdfPageAppearanceChange = useCallback((filePath: string, appearance: PdfPageAppearance) => {
+    setPdfPageAppearances((prev) => prev[filePath] === appearance
+      ? prev
+      : { ...prev, [filePath]: appearance });
   }, []);
 
   // Register IPC listeners once on mount
@@ -3250,6 +3258,8 @@ export function App(): React.ReactElement {
               ) : pdfWorkspaceActive && activeLoadedTable ? (
                 <PdfWorkspace
                   table={activeLoadedTable}
+                  pageAppearance={pdfPageAppearances[activeLoadedTable.filePath] ?? DEFAULT_PDF_PAGE_APPEARANCE}
+                  onPageAppearanceChange={(appearance) => handlePdfPageAppearanceChange(activeLoadedTable.filePath, appearance)}
                   onOpenFiles={handleChooseFiles}
                   onPageCountChange={handleActivePdfPageCountChange}
                   onFileActionsChange={setDocumentFileActions}
