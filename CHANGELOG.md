@@ -1,5 +1,14 @@
 # Changelog
 
+## Chikku Parser v0.3.46
+
+### PDF Viewer
+
+- Fixed PDFs failing to open on WebViews that do not yet support `Map.prototype.getOrInsertComputed` by using PDF.js compatibility builds for both the viewer and worker.
+- Fixed error-state action button text using muted colors, restoring readable labels in light and dark themes.
+
+**Full changelog:** https://github.com/aj4abinjacob/chikku_parser/compare/v0.3.45...v0.3.46
+
 ## Chikku Parser v0.3.45
 
 ### PDF Workspace
