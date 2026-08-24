@@ -34,7 +34,7 @@ await rm(pdfOutput, { recursive: true, force: true });
 await mkdir(resolve(pdfOutput, "licenses"), { recursive: true });
 
 await cp(
-  resolve(pdfjs, "build/pdf.worker.min.mjs"),
+  resolve(pdfjs, "legacy/build/pdf.worker.min.mjs"),
   resolve(pdfOutput, "pdf.worker.min.mjs")
 );
 

@@ -20,7 +20,7 @@ import {
 } from "../utils/pdfImageExport";
 import { getRotatedBoundingSize, normalizeRotationDegrees } from "../utils/pdfImageTransform";
 
-type PdfJsModule = typeof import("pdfjs-dist");
+type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 
 interface PdfWorkspaceProps {
   table: LoadedTable;
@@ -756,12 +756,12 @@ export function PdfWorkspace({
 
       const canonicalPath = await window.api.allowPdfAsset(table.filePath);
       const assetBase = getPdfAssetBase();
-      const pdfjsLib = await import("pdfjs-dist");
+      const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
       pdfjsLib.GlobalWorkerOptions.workerSrc = `${assetBase}pdf.worker.min.mjs`;
       pdfjsModuleRef.current = pdfjsLib;
       (globalThis as typeof globalThis & { pdfjsLib?: PdfJsModule }).pdfjsLib = pdfjsLib;
 
-      const viewerModule = await import("pdfjs-dist/web/pdf_viewer.mjs");
+      const viewerModule = await import("pdfjs-dist/legacy/web/pdf_viewer.mjs");
       if (disposed || !containerRef.current || !viewerRef.current) return;
 
       const eventBus = new viewerModule.EventBus();
