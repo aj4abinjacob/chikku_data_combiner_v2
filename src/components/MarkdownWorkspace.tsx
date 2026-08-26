@@ -11,6 +11,12 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { DocumentWorkspaceFileActions, LoadedTable } from "../types";
+import {
+  getScrollProgress,
+  loadMarkdownReadingPosition,
+  READING_POSITION_SAVE_DELAY_MS,
+  saveMarkdownReadingPosition,
+} from "../utils/readingPosition";
 import { SearchInput } from "./SearchInput";
 
 interface MarkdownWorkspaceProps {
@@ -653,10 +659,8 @@ function scrollTextareaToMatch(textarea: HTMLTextAreaElement, text: string, star
   textarea.scrollTop = Math.max(0, targetTop);
 }
 
-function getScrollProgress(element: HTMLElement): number {
-  const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
-  if (maxScrollTop === 0) return 0;
-  return Math.min(1, Math.max(0, element.scrollTop / maxScrollTop));
+function getElementScrollProgress(element: HTMLElement): number {
+  return getScrollProgress(element.scrollTop, element.scrollHeight, element.clientHeight);
 }
 
 function applyScrollProgress(element: HTMLElement, progress: number): boolean {
@@ -1010,6 +1014,10 @@ export function MarkdownWorkspace({
   const scrollSyncIgnoredSourceRef = useRef<MarkdownScrollSyncSource | null>(null);
   const scrollSyncReleaseTimeoutRef = useRef<number | null>(null);
   const wasEditingRef = useRef(false);
+  const readingPositionSaveTimerRef = useRef<number | null>(null);
+  const latestReadingProgressRef = useRef(0);
+  const pendingReadingProgressRef = useRef<number | null>(null);
+  const readingPositionReadyRef = useRef(false);
 
   const extension = getFileExtension(table.filePath);
   const isDirty = rawText !== savedText;
@@ -1069,6 +1077,34 @@ export function MarkdownWorkspace({
   const canUndoHistory = history.index > 0;
   const canRedoHistory = history.index < history.entries.length - 1;
 
+  useEffect(() => {
+    const savedProgress = loadMarkdownReadingPosition(table.filePath);
+    pendingReadingProgressRef.current = savedProgress;
+    latestReadingProgressRef.current = savedProgress ?? 0;
+    readingPositionReadyRef.current = false;
+    if (readingPositionSaveTimerRef.current !== null) {
+      window.clearTimeout(readingPositionSaveTimerRef.current);
+      readingPositionSaveTimerRef.current = null;
+    }
+
+    const flushReadingPosition = () => {
+      if (readingPositionSaveTimerRef.current !== null) {
+        window.clearTimeout(readingPositionSaveTimerRef.current);
+        readingPositionSaveTimerRef.current = null;
+      }
+      if (readingPositionReadyRef.current) {
+        saveMarkdownReadingPosition(table.filePath, latestReadingProgressRef.current);
+      }
+    };
+    window.addEventListener("pagehide", flushReadingPosition);
+
+    return () => {
+      window.removeEventListener("pagehide", flushReadingPosition);
+      flushReadingPosition();
+      readingPositionReadyRef.current = false;
+    };
+  }, [table.filePath, table.reloadVersion]);
+
   const updateLineNumbersScroll = useCallback((scrollTop: number) => {
     lineNumberScrollTopRef.current = scrollTop;
     if (lineNumberScrollFrameRef.current !== null) return;
@@ -1108,6 +1144,20 @@ export function MarkdownWorkspace({
     }, MARKDOWN_SCROLL_SYNC_RELEASE_MS);
   }, []);
 
+  const captureMarkdownReadingPosition = useCallback((element: HTMLElement) => {
+    const nextProgress = getElementScrollProgress(element);
+    latestReadingProgressRef.current = nextProgress;
+    if (!readingPositionReadyRef.current) return;
+
+    if (readingPositionSaveTimerRef.current !== null) {
+      window.clearTimeout(readingPositionSaveTimerRef.current);
+    }
+    readingPositionSaveTimerRef.current = window.setTimeout(() => {
+      readingPositionSaveTimerRef.current = null;
+      saveMarkdownReadingPosition(table.filePath, latestReadingProgressRef.current);
+    }, READING_POSITION_SAVE_DELAY_MS);
+  }, [table.filePath]);
+
   const syncMarkdownScroll = useCallback((source: MarkdownScrollSyncSource) => {
     if (!isEditing) return;
 
@@ -1132,7 +1182,7 @@ export function MarkdownWorkspace({
     const syncedSource: MarkdownScrollSyncSource = source === "source" ? "preview" : "source";
 
     scrollSyncSourceRef.current = source;
-    if (applyScrollProgress(to, getScrollProgress(from))) {
+    if (applyScrollProgress(to, getElementScrollProgress(from))) {
       scrollSyncIgnoredSourceRef.current = syncedSource;
     }
     if (source === "preview") {
@@ -1144,12 +1194,18 @@ export function MarkdownWorkspace({
 
   const handleSourceScroll = useCallback((event: React.UIEvent<HTMLTextAreaElement>) => {
     updateLineNumbersScroll(event.currentTarget.scrollTop);
+    if (!scrollSyncSourceRef.current || scrollSyncSourceRef.current === "source") {
+      captureMarkdownReadingPosition(event.currentTarget);
+    }
     syncMarkdownScroll("source");
-  }, [syncMarkdownScroll, updateLineNumbersScroll]);
+  }, [captureMarkdownReadingPosition, syncMarkdownScroll, updateLineNumbersScroll]);
 
-  const handlePreviewScroll = useCallback(() => {
+  const handlePreviewScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    if (!scrollSyncSourceRef.current || scrollSyncSourceRef.current === "preview") {
+      captureMarkdownReadingPosition(event.currentTarget);
+    }
     syncMarkdownScroll("preview");
-  }, [syncMarkdownScroll]);
+  }, [captureMarkdownReadingPosition, syncMarkdownScroll]);
 
   useEffect(() => {
     if (!isEditing) {
@@ -1556,6 +1612,32 @@ export function MarkdownWorkspace({
       disposed = true;
     };
   }, [table.filePath, table.reloadVersion]);
+
+  useEffect(() => {
+    if (loading || loadError || readingPositionReadyRef.current) return;
+
+    let firstFrame: number | null = null;
+    let secondRestoreFrame: number | null = null;
+    firstFrame = window.requestAnimationFrame(() => {
+      firstFrame = null;
+      secondRestoreFrame = window.requestAnimationFrame(() => {
+        secondRestoreFrame = null;
+        const preview = previewScrollRef.current;
+        if (!preview) return;
+
+        const savedProgress = pendingReadingProgressRef.current ?? 0;
+        const maxScrollTop = Math.max(0, preview.scrollHeight - preview.clientHeight);
+        preview.scrollTop = maxScrollTop * savedProgress;
+        latestReadingProgressRef.current = getElementScrollProgress(preview);
+        readingPositionReadyRef.current = true;
+      });
+    });
+
+    return () => {
+      if (firstFrame !== null) window.cancelAnimationFrame(firstFrame);
+      if (secondRestoreFrame !== null) window.cancelAnimationFrame(secondRestoreFrame);
+    };
+  }, [loadError, loading, previewText, table.filePath, table.reloadVersion]);
 
   useEffect(() => {
     if (!statusMessage) return;

@@ -26,6 +26,13 @@ import {
   isDarkPdfPageAppearance,
   PdfPageAppearance,
 } from "../utils/pdfPageAppearance";
+import {
+  getScrollProgress,
+  loadPdfReadingPosition,
+  PdfReadingPosition,
+  READING_POSITION_SAVE_DELAY_MS,
+  savePdfReadingPosition,
+} from "../utils/readingPosition";
 import { SoftSelect } from "./SoftSelect";
 
 type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -715,6 +722,7 @@ export function PdfWorkspace({
   const [pageNumber, setPageNumber] = useState(1);
   const [pageInput, setPageInput] = useState("1");
   const [pageCount, setPageCount] = useState(0);
+  const [readingProgressPercent, setReadingProgressPercent] = useState(0);
   const [zoomValue, setZoomValue] = useState("page-width");
   const [rotation, setRotation] = useState(0);
   const [sidePanel, setSidePanel] = useState<SidePanel>("thumbnails");
@@ -874,7 +882,31 @@ export function PdfWorkspace({
     let disposed = false;
     let runtime: ViewerRuntime | null = null;
     let loadingTask: PDFDocumentLoadingTask | null = null;
+    let latestReadingPosition: PdfReadingPosition | null = loadPdfReadingPosition(table.filePath);
+    let readingPositionReady = false;
+    let readingPositionSaveTimer: number | null = null;
+    let firstRestoreFrame: number | null = null;
+    let secondRestoreFrame: number | null = null;
     const viewerAbortController = new AbortController();
+
+    const flushReadingPosition = () => {
+      if (readingPositionSaveTimer !== null) {
+        window.clearTimeout(readingPositionSaveTimer);
+        readingPositionSaveTimer = null;
+      }
+      if (readingPositionReady && latestReadingPosition) {
+        savePdfReadingPosition(table.filePath, latestReadingPosition);
+      }
+    };
+
+    const scheduleReadingPositionSave = () => {
+      if (readingPositionSaveTimer !== null) window.clearTimeout(readingPositionSaveTimer);
+      readingPositionSaveTimer = window.setTimeout(() => {
+        readingPositionSaveTimer = null;
+        if (latestReadingPosition) savePdfReadingPosition(table.filePath, latestReadingPosition);
+      }, READING_POSITION_SAVE_DELAY_MS);
+    };
+    window.addEventListener("pagehide", flushReadingPosition);
 
     setPhase("loading");
     setError(null);
@@ -883,6 +915,7 @@ export function PdfWorkspace({
     setPageNumber(1);
     setPageInput("1");
     setPageCount(0);
+    setReadingProgressPercent(0);
     setOutline([]);
     setMatches({ current: 0, total: 0 });
     setFindNotFound(false);
@@ -956,6 +989,27 @@ export function PdfWorkspace({
         if (runtime) syncPdfViewerPageAppearance(runtime, pageAppearanceRef.current);
         pdfViewer.currentScaleValue = "page-width";
         setZoomValue("page-width");
+
+        const storedPosition = latestReadingPosition;
+        firstRestoreFrame = window.requestAnimationFrame(() => {
+          firstRestoreFrame = null;
+          if (disposed) return;
+          if (storedPosition) {
+            const restoredPageNumber = Math.max(1, Math.min(pdfViewer.pagesCount, storedPosition.pageNumber));
+            latestReadingPosition = { ...storedPosition, pageNumber: restoredPageNumber };
+            pdfViewer.scrollPageIntoView({
+              pageNumber: restoredPageNumber,
+              destArray: [null, { name: "XYZ" }, null, storedPosition.top, null],
+              ignoreDestinationZoom: true,
+            });
+          }
+          secondRestoreFrame = window.requestAnimationFrame(() => {
+            secondRestoreFrame = null;
+            if (disposed) return;
+            readingPositionReady = true;
+            pdfViewer.update();
+          });
+        });
       });
       eventBus.on("pagechanging", (event: { pageNumber: number }) => {
         setPageNumber(event.pageNumber);
@@ -967,6 +1021,33 @@ export function PdfWorkspace({
       });
       eventBus.on("rotationchanging", (event: { pagesRotation: number }) => {
         setRotation(event.pagesRotation);
+      });
+      eventBus.on("updateviewarea", (event: {
+        location?: { pageNumber?: number; top?: number };
+      }) => {
+        const viewerContainer = containerRef.current;
+        if (viewerContainer) {
+          const nextPercent = Math.round(getScrollProgress(
+            viewerContainer.scrollTop,
+            viewerContainer.scrollHeight,
+            viewerContainer.clientHeight
+          ) * 100);
+          setReadingProgressPercent(nextPercent);
+        }
+
+        const nextPageNumber = event.location?.pageNumber;
+        const nextTop = event.location?.top;
+        if (
+          !readingPositionReady
+          || !Number.isSafeInteger(nextPageNumber)
+          || (nextPageNumber as number) < 1
+          || !Number.isSafeInteger(nextTop)
+        ) return;
+        latestReadingPosition = {
+          pageNumber: nextPageNumber as number,
+          top: nextTop as number,
+        };
+        scheduleReadingPositionSave();
       });
       eventBus.on("annotationeditoruimanager", (event: { uiManager: any }) => {
         if (runtime) runtime.annotationEditorUIManager = event.uiManager;
@@ -1073,6 +1154,10 @@ export function PdfWorkspace({
 
     return () => {
       disposed = true;
+      window.removeEventListener("pagehide", flushReadingPosition);
+      if (firstRestoreFrame !== null) window.cancelAnimationFrame(firstRestoreFrame);
+      if (secondRestoreFrame !== null) window.cancelAnimationFrame(secondRestoreFrame);
+      flushReadingPosition();
       viewerAbortController.abort();
       if (pruneTimerRef.current) {
         clearTimeout(pruneTimerRef.current);
@@ -2008,6 +2093,13 @@ export function PdfWorkspace({
           />
           <span className="pdf-page-count">/ {pageCount || "–"}</span>
           <Button icon="chevron-right" minimal small disabled={pageNumber >= pageCount} onClick={() => goToPage(pageNumber + 1)} />
+          <span
+            className="pdf-reading-progress"
+            aria-label={`${readingProgressPercent}% of PDF read`}
+            title={`${readingProgressPercent}% read`}
+          >
+            {readingProgressPercent}%
+          </span>
         </div>
 
         <div className="pdf-toolbar-group">

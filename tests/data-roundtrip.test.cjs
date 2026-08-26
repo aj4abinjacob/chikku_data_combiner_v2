@@ -38,6 +38,58 @@ const {
   getPdfPageColors,
   isDarkPdfPageAppearance,
 } = require("../.test-dist/utils/pdfPageAppearance.js");
+const {
+  getReadingPositionStorageKey,
+  getScrollProgress,
+  hashReadingFilePath,
+  parseMarkdownReadingPosition,
+  parsePdfReadingPosition,
+  serializeMarkdownReadingPosition,
+  serializePdfReadingPosition,
+} = require("../.test-dist/utils/readingPosition.js");
+
+test("reading position keys are compact, stable, and path-specific", () => {
+  const firstPath = "/Users/reader/Books/guide.pdf";
+  const secondPath = "/Users/reader/Archive/guide.pdf";
+
+  assert.equal(hashReadingFilePath(firstPath), "9cbb50c67450bad6");
+  assert.notEqual(hashReadingFilePath(firstPath), hashReadingFilePath(secondPath));
+  assert.equal(
+    hashReadingFilePath("C:\\Books\\guide.pdf"),
+    hashReadingFilePath("C:/Books/guide.pdf")
+  );
+
+  const storageKey = getReadingPositionStorageKey(firstPath, "pdf");
+  assert.match(storageKey, /^chikku:rpos:v1:p:[0-9a-f]{16}$/);
+  assert.equal(storageKey.includes(firstPath), false);
+  assert.notEqual(storageKey, getReadingPositionStorageKey(firstPath, "markdown"));
+});
+
+test("PDF reading positions serialize compactly and clamp to the current page count", () => {
+  assert.equal(serializePdfReadingPosition({ pageNumber: 12, top: 456.4 }), "12,456");
+  assert.deepEqual(parsePdfReadingPosition("12,456", 5), { pageNumber: 5, top: 456 });
+  assert.deepEqual(parsePdfReadingPosition("12,-8"), { pageNumber: 12, top: -8 });
+  assert.equal(parsePdfReadingPosition("not-a-position"), null);
+  assert.equal(parsePdfReadingPosition("0,200"), null);
+  assert.equal(serializePdfReadingPosition({ pageNumber: 1, top: Number.NaN }), null);
+});
+
+test("Markdown reading positions retain fixed precision and reject corrupt values", () => {
+  assert.equal(serializeMarkdownReadingPosition(0.425), "425000");
+  assert.equal(parseMarkdownReadingPosition("425000"), 0.425);
+  assert.equal(serializeMarkdownReadingPosition(-1), "0");
+  assert.equal(serializeMarkdownReadingPosition(2), "1000000");
+  assert.equal(parseMarkdownReadingPosition("1000001"), null);
+  assert.equal(parseMarkdownReadingPosition("0.5"), null);
+});
+
+test("scroll progress is normalized and clamped", () => {
+  assert.equal(getScrollProgress(0, 1000, 200), 0);
+  assert.equal(getScrollProgress(400, 1000, 200), 0.5);
+  assert.equal(getScrollProgress(800, 1000, 200), 1);
+  assert.equal(getScrollProgress(900, 1000, 200), 1);
+  assert.equal(getScrollProgress(0, 100, 200), 0);
+});
 
 test("fine image rotation normalizes angles and expands the saved bounds", () => {
   assert.equal(normalizeRotationDegrees(-15), 345);
