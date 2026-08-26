@@ -23,6 +23,8 @@ export interface SoftSelectProps {
   popoverClassName?: string;
   title?: string;
   style?: React.CSSProperties;
+  onClick?: React.MouseEventHandler<HTMLButtonElement>;
+  onMouseDown?: React.MouseEventHandler<HTMLButtonElement>;
   "aria-label"?: string;
 }
 
@@ -79,6 +81,8 @@ export function SoftSelect({
   popoverClassName,
   title,
   style,
+  onClick,
+  onMouseDown,
   "aria-label": ariaLabel,
 }: SoftSelectProps): React.ReactElement {
   const [isOpen, setIsOpen] = React.useState(false);
@@ -138,15 +142,34 @@ export function SoftSelect({
   const handleTriggerKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>) => {
       if (disabled) return;
-      if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
+      if (event.key === "ArrowDown") {
         event.preventDefault();
-        setIsOpen(true);
-        setHighlightIndex(Math.max(0, selectedIndex));
+        if (isOpen) moveHighlight(1);
+        else {
+          setIsOpen(true);
+          setHighlightIndex(Math.max(0, selectedIndex));
+        }
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        if (isOpen) moveHighlight(-1);
+        else {
+          setIsOpen(true);
+          setHighlightIndex(Math.max(0, selectedIndex));
+        }
+      } else if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        if (isOpen) {
+          const option = enabledOptions[highlightIndex];
+          if (option) selectValue(option.value);
+        } else {
+          setIsOpen(true);
+          setHighlightIndex(Math.max(0, selectedIndex));
+        }
       } else if (event.key === "Escape") {
         setIsOpen(false);
       }
     },
-    [disabled, selectedIndex]
+    [disabled, enabledOptions, highlightIndex, isOpen, moveHighlight, selectedIndex, selectValue]
   );
 
   const handleListKeyDown = React.useCallback(
@@ -243,7 +266,11 @@ export function SoftSelect({
         style={style}
         title={title}
         disabled={disabled}
-        onClick={() => setIsOpen((open) => !open)}
+        onClick={(event) => {
+          onClick?.(event);
+          if (!event.defaultPrevented) setIsOpen((open) => !open);
+        }}
+        onMouseDown={onMouseDown}
         onKeyDown={handleTriggerKeyDown}
         aria-label={ariaLabel}
         aria-haspopup="listbox"

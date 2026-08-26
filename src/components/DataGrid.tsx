@@ -1180,14 +1180,13 @@ export function DataGrid({
     }
 
     return (
-      <select
+      <SoftSelect
         className="dg-qc-select"
         aria-label={`QC ${qcSession.columnName}`}
         value={currentValue ?? ""}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
         onChange={(e) => {
-          stopControlMouse(e);
           setValue(e.target.value === "" ? null : e.target.value);
         }}
       >
@@ -1197,7 +1196,7 @@ export function DataGrid({
             {option}
           </option>
         ))}
-      </select>
+      </SoftSelect>
     );
   };
 

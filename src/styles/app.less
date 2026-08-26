@@ -810,10 +810,10 @@
     gap: 8px;
   }
 
-  select {
+  .soft-select {
     width: 100%;
     height: 32px;
-    padding: 0 28px 0 9px;
+    padding: 0 9px;
     border: 1px solid var(--control-border);
     border-radius: var(--control-radius);
     background: var(--control-bg);
@@ -874,8 +874,8 @@
     }
   }
 
-  select {
-    padding-right: 20px;
+  .soft-select {
+    padding-right: 8px;
   }
 }
 
@@ -1107,7 +1107,7 @@
     }
   }
 
-  .pdf-image-export-field select {
+  .pdf-image-export-field .soft-select {
     border-color: @dark-border-1;
     background: @dark-bg-3;
     color: @dark-text-1;
@@ -1148,6 +1148,105 @@
     border-color: @dark-error-border;
     background: @dark-error-bg;
     color: @dark-error;
+  }
+}
+
+// Keep compact document-toolbar selects visually separate from the roomier
+// form controls that use the same shared component.
+.pdf-zoom-select.soft-select {
+  width: 92px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.pdf-toolbar-select-popover {
+  .soft-select-popover {
+    min-width: 112px;
+    max-height: none;
+    padding: 3px;
+    border-color: #cfd9e2;
+    border-radius: 6px;
+    box-shadow: 0 7px 20px rgba(25, 39, 52, 0.16), 0 1px 3px rgba(25, 39, 52, 0.08);
+  }
+
+  .soft-select-option {
+    min-height: 24px;
+    gap: 4px;
+    padding: 0 6px 0 4px;
+    border-left: 0;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+
+    &.highlighted:not(.selected) {
+      background: #f0f4f7;
+      color: var(--control-text);
+    }
+
+    &.selected {
+      background: #e8f2fc;
+      color: #106ba3;
+    }
+  }
+
+  .soft-select-option-check {
+    width: 12px;
+  }
+}
+
+.pdf-page-appearance-select.soft-select,
+.pdf-page-appearance-select.soft-select:hover:not(:disabled),
+.pdf-page-appearance-select.soft-select:focus,
+.pdf-page-appearance-select.soft-select:disabled {
+  width: 145px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 4px 0 6px;
+  border: 0;
+  border-left: 1px solid #d8e1e8;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.dg-qc-select.soft-select {
+  width: 100%;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 6px;
+  font-size: inherit;
+}
+
+.dark-theme {
+  .pdf-toolbar-select-popover {
+    .soft-select-popover {
+      border-color: @dark-border-1;
+      background: @dark-bg-2;
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38), 0 1px 3px rgba(0, 0, 0, 0.24);
+    }
+
+    .soft-select-option.highlighted:not(.selected) {
+      background: @dark-bg-4;
+      color: @dark-text-1;
+    }
+
+    .soft-select-option.selected {
+      background: @dark-accent-bg-subtle;
+      color: @dark-accent;
+    }
+  }
+
+  .pdf-page-appearance-select.soft-select,
+  .pdf-page-appearance-select.soft-select:hover:not(:disabled),
+  .pdf-page-appearance-select.soft-select:focus,
+  .pdf-page-appearance-select.soft-select:disabled {
+    border-left-color: @dark-border-1;
+    background: transparent;
+    box-shadow: none;
   }
 }
 

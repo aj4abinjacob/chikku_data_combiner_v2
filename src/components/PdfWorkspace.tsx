@@ -26,6 +26,7 @@ import {
   isDarkPdfPageAppearance,
   PdfPageAppearance,
 } from "../utils/pdfPageAppearance";
+import { SoftSelect } from "./SoftSelect";
 
 type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 
@@ -2011,8 +2012,9 @@ export function PdfWorkspace({
 
         <div className="pdf-toolbar-group">
           <Button icon="zoom-out" minimal small onClick={() => runtimeRef.current?.pdfViewer?.decreaseScale()} title="Zoom out" />
-          <select
+          <SoftSelect
             className="pdf-zoom-select"
+            popoverClassName="pdf-toolbar-select-popover"
             value={ZOOM_OPTIONS.some((option) => option.value === zoomValue) ? zoomValue : "page-width"}
             aria-label="PDF zoom"
             onChange={(event) => {
@@ -2022,7 +2024,7 @@ export function PdfWorkspace({
             }}
           >
             {ZOOM_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
+          </SoftSelect>
           <Button icon="zoom-in" minimal small onClick={() => runtimeRef.current?.pdfViewer?.increaseScale()} title="Zoom in" />
           <Button
             icon="rotate-page"
@@ -2037,8 +2039,9 @@ export function PdfWorkspace({
           <label className="pdf-page-appearance-control" title={pageAppearanceTitle}>
             <Icon icon="moon" size={12} aria-hidden />
             <span>PDF theme</span>
-            <select
+            <SoftSelect
               className="pdf-page-appearance-select"
+              popoverClassName="pdf-toolbar-select-popover"
               value={pageAppearance}
               disabled={phase !== "ready"}
               aria-label="PDF theme"
@@ -2047,7 +2050,7 @@ export function PdfWorkspace({
               <option value="original">Light · Original</option>
               <option value="dark-color">Dark · Keep colors</option>
               <option value="dark-contrast">Dark · High contrast</option>
-            </select>
+            </SoftSelect>
           </label>
         </div>
 
@@ -2339,15 +2342,17 @@ export function PdfWorkspace({
           <section className="pdf-image-export-settings" aria-label="Image export settings">
             <label className="pdf-image-export-field">
               <span>Image format</span>
-              <select
+              <SoftSelect
                 value={imageExportFormat}
                 disabled={imageExporting}
+                fill
+                aria-label="Image format"
                 onChange={(event) => setImageExportFormat(event.target.value as PdfImageFormat)}
               >
                 {PDF_IMAGE_FORMAT_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label} — {option.detail}</option>
                 ))}
-              </select>
+              </SoftSelect>
             </label>
 
             {imageExportFormat !== "png" && (
@@ -2367,27 +2372,31 @@ export function PdfWorkspace({
 
             <label className="pdf-image-export-field">
               <span>Pages</span>
-              <select
+              <SoftSelect
                 value={imageExportPageSelection}
                 disabled={imageExporting}
+                fill
+                aria-label="Pages"
                 onChange={(event) => setImageExportPageSelection(event.target.value as PdfImagePageSelection)}
               >
                 <option value="current">Current preview page ({imageExportPreviewPage})</option>
                 <option value="all">All pages ({pageCount})</option>
-              </select>
+              </SoftSelect>
             </label>
 
             <label className="pdf-image-export-field">
               <span>Paper size</span>
-              <select
+              <SoftSelect
                 value={imageExportPaperSize}
                 disabled={imageExporting}
+                fill
+                aria-label="Paper size"
                 onChange={(event) => setImageExportPaperSize(event.target.value as PdfImagePaperSize)}
               >
                 {PDF_IMAGE_PAPER_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label} — {option.detail}</option>
                 ))}
-              </select>
+              </SoftSelect>
             </label>
 
             {imageExportPaperSize === "custom" && (
@@ -2415,16 +2424,17 @@ export function PdfWorkspace({
                     aria-label="Custom image height"
                     placeholder="Height"
                   />
-                  <select
+                  <SoftSelect
                     value={imageExportCustomUnit}
                     disabled={imageExporting}
+                    fill
                     onChange={(event) => setImageExportCustomUnit(event.target.value as PdfImageCustomUnit)}
                     aria-label="Custom image dimension unit"
                   >
                     <option value="px">px</option>
                     <option value="mm">mm</option>
                     <option value="in">in</option>
-                  </select>
+                  </SoftSelect>
                 </div>
                 <small className={!imageExportCustomSizeValid ? "is-error" : ""}>
                   {!imageExportCustomSizeValid
@@ -2438,22 +2448,26 @@ export function PdfWorkspace({
 
             <label className="pdf-image-export-field">
               <span>Orientation</span>
-              <select
+              <SoftSelect
                 value={imageExportOrientation}
                 disabled={imageExporting || imageExportPaperSize === "original" || imageExportPaperSize === "custom"}
+                fill
+                aria-label="Orientation"
                 onChange={(event) => setImageExportOrientation(event.target.value as PdfImageOrientation)}
               >
                 <option value="auto">Match each page</option>
                 <option value="portrait">Portrait</option>
                 <option value="landscape">Landscape</option>
-              </select>
+              </SoftSelect>
             </label>
 
             <label className="pdf-image-export-field">
               <span>Resolution</span>
-              <select
-                value={imageExportResolution}
+              <SoftSelect
+                value={String(imageExportResolution)}
                 disabled={imageExporting || (imageExportPaperSize === "custom" && imageExportCustomUnit === "px")}
+                fill
+                aria-label="Resolution"
                 onChange={(event) => setImageExportResolution(Number(event.target.value) as PdfImageResolution)}
               >
                 {PDF_IMAGE_RESOLUTION_OPTIONS.map((option) => (
@@ -2461,7 +2475,7 @@ export function PdfWorkspace({
                     {option.label}{!highQualityPrint && option.value > 96 ? " · Restricted by PDF" : ""}
                   </option>
                 ))}
-              </select>
+              </SoftSelect>
             </label>
 
             <div className="pdf-image-export-note">
